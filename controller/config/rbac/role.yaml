@@ -1,0 +1,47 @@
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: maxcloud-controller
+rules:
+- apiGroups:
+  - ""
+  resources:
+  - namespaces
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - ""
+  resources:
+  - secrets
+  verbs:
+  - create
+  - delete
+  - get
+  - update
+- apiGroups:
+  - maxcloud.gronblom.dev
+  resources:
+  - buckets
+  verbs:
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - maxcloud.gronblom.dev
+  resources:
+  - buckets/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - maxcloud.gronblom.dev
+  resources:
+  - buckets/status
+  verbs:
+  - get
+  - patch
+  - update

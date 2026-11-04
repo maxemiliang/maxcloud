@@ -1,0 +1,45 @@
+# maxcloud-controller releases: a controller/v* tag builds the image and
+# pushes it to ghcr.io/maxemiliang/maxcloud-controller:<version>.
+#
+# Bump newTag in controller/config/kustomization.yaml first; clusters apply
+# that directory at the tag, so it must name the image the tag builds.
+#
+#   git tag controller/v0.2.0 && git push origin controller/v0.2.0
+name: release-controller
+
+on:
+  push:
+    tags: ["controller/v*"]
+
+permissions: {}
+
+jobs:
+  image:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write # push to GHCR
+    defaults:
+      run:
+        working-directory: controller
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Version from the tag, matching config/kustomization.yaml
+        run: |
+          version="${GITHUB_REF_NAME#controller/v}"
+          grep -qE "^\s+newTag: ${version}\$" config/kustomization.yaml || {
+            echo "::error::config/kustomization.yaml doesn't set newTag: ${version}"
+            exit 1
+          }
+          echo "VERSION=${version}" >>"$GITHUB_ENV"
+      - name: Build and push
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          image=ghcr.io/maxemiliang/maxcloud-controller:${VERSION}
+          echo "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          docker build --build-arg VERSION="${VERSION}" \
+            --label org.opencontainers.image.source=https://github.com/maxemiliang/maxcloud \
+            --label org.opencontainers.image.version="${VERSION}" \
+            -t "$image" .
+          docker push "$image"

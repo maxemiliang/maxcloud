@@ -1,0 +1,58 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: maxcloud-controller
+  labels:
+    app.kubernetes.io/name: maxcloud-controller
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: maxcloud-controller
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: maxcloud-controller
+    spec:
+      serviceAccountName: maxcloud-controller
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: controller
+          image: ghcr.io/maxemiliang/maxcloud-controller
+          args: [--leader-elect]
+          envFrom:
+            - secretRef:
+                name: maxcloud-controller
+            - configMapRef:
+                name: maxcloud-controller
+          ports:
+            - name: metrics
+              containerPort: 8080
+            - name: health
+              containerPort: 8081
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: health
+            periodSeconds: 20
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: health
+            periodSeconds: 10
+          # Idle almost all the time; it acts when a Bucket changes and
+          # every few minutes per Bucket.
+          resources:
+            requests:
+              cpu: 10m
+              memory: 64Mi
+            limits:
+              memory: 256Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]

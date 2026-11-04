@@ -9,6 +9,7 @@ git:
   ignore_tags:
     - "functions/*"
     - "functions-js/*"
+    - "controller/*"
 
 builds:
   - main: ./cmd/mcloud

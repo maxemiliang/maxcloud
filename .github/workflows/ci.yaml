@@ -41,6 +41,21 @@ jobs:
           test -z "$(gofmt -l .)" || { gofmt -l .; exit 1; }
           go vet ./...
           go test -race ./...
+      # The controller is its own module too (controller/): Kubernetes and
+      # AWS libraries stay out of mcloud and the SDK.
+      - name: Controller
+        working-directory: controller
+        run: |
+          test -z "$(gofmt -l .)" || { gofmt -l .; exit 1; }
+          go vet ./...
+          go test -race ./...
+          go build ./cmd/maxcloud-controller
+      - name: Controller's generated files are up to date
+        working-directory: controller
+        run: |
+          go tool controller-gen object paths=./api/...
+          go tool controller-gen crd rbac:roleName=maxcloud-controller paths=./... output:crd:dir=config/crd output:rbac:dir=config/rbac
+          git diff --exit-code -- . || { echo "::error::run the controller-gen commands in controller/README.md and commit"; exit 1; }
 
   node:
     runs-on: ubuntu-latest
