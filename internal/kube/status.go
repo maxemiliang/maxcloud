@@ -143,8 +143,14 @@ func (c *Client) AppStatus(ctx context.Context, name string) (*Status, error) {
 	}
 	running := map[string]int{} // Knative service -> running pods
 	podNames := map[string]bool{}
+	readyPods := map[string]bool{}
 	for _, p := range pods.Items {
 		podNames[p.Name] = true
+		for _, c := range p.Status.Conditions {
+			if c.Type == corev1.PodReady && c.Status == corev1.ConditionTrue {
+				readyPods[p.Name] = true
+			}
+		}
 		if svc := p.Labels["serving.knative.dev/service"]; svc != "" && p.Status.Phase == corev1.PodRunning && p.DeletionTimestamp == nil {
 			running[svc]++
 		}
@@ -244,12 +250,16 @@ func (c *Client) AppStatus(ctx context.Context, name string) (*Status, error) {
 	events, err := c.Core.CoreV1().Events(ns).List(ctx, metav1.ListOptions{FieldSelector: "type=Warning"})
 	if err == nil {
 		// Warnings about pods that are gone are history, e.g. a Knative pod's
-		// readiness failing while it drains on scale-down.
+		// readiness failing while it drains on scale-down; failed probes of a
+		// pod that's ready now were it starting up.
 		var current []corev1.Event
 		for _, e := range events.Items {
-			if e.InvolvedObject.Kind != "Pod" || podNames[e.InvolvedObject.Name] {
-				current = append(current, e)
+			if e.InvolvedObject.Kind == "Pod" {
+				if !podNames[e.InvolvedObject.Name] || e.Reason == "Unhealthy" && readyPods[e.InvolvedObject.Name] {
+					continue
+				}
 			}
+			current = append(current, e)
 		}
 		st.Problems = append(st.Problems, recentWarnings(current, 15*time.Minute, 5)...)
 	}
