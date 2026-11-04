@@ -59,6 +59,9 @@ func source(e *registry.Entry, registryRepo string) string {
 	if e == nil {
 		return "?"
 	}
+	if e.Direct() {
+		return "direct (mcloud deploy)"
+	}
 	repo, p := e.Repo, e.Path
 	if repo == "" {
 		repo = registryRepo
@@ -80,6 +83,7 @@ func entryFlags(f *pflag.FlagSet, e *registry.Entry) {
 	f.StringVar(&e.CPU, "cpu", "", "quota: CPU the app's pods may request in total (default 200m)")
 	f.StringVar(&e.Memory, "memory", "", "quota: memory the app's pods may request in total (default 1Gi)")
 	f.StringVar(&e.Pods, "pods", "", "quota: number of pods (default 20)")
+	f.StringVar(&e.Deploy, "deploy", "", "gitops (default: Flux applies the app's manifests from git) or direct (mcloud deploy applies them)")
 }
 
 type commitFlags struct {
@@ -137,7 +141,7 @@ func (g *globals) createApp(ctx context.Context, e registry.Entry, cf commitFlag
 	if err := g.checkNamespace(ctx, e.Name); err != nil {
 		return err
 	}
-	if e.Repo != "" {
+	if e.Repo != "" && !e.Direct() {
 		g.checkRepo(ctx, gh, &e)
 	}
 
@@ -174,7 +178,7 @@ func (g *globals) createApp(ctx context.Context, e registry.Entry, cf commitFlag
 		return err
 	}
 	fmt.Fprintf(g.out, "Committed https://github.com/%s/commit/%s\n", g.registry, sha)
-	if e.Repo != "" {
+	if e.Repo != "" && !e.Direct() {
 		fmt.Fprintf(g.out, `
 For Flux to read %[1]s, the homelab's Flux GitHub App needs access to it:
 GitHub, Settings, Applications, the Flux app, Configure, Repository access.
@@ -201,7 +205,7 @@ empty value (--cpu "") to go back to the default.`,
 			name := args[0]
 			ctx := cmd.Context()
 			changed := map[string]*string{}
-			for flag, v := range map[string]*string{"repo": &flags.Repo, "path": &flags.Path, "branch": &flags.Branch, "cpu": &flags.CPU, "memory": &flags.Memory, "pods": &flags.Pods} {
+			for flag, v := range map[string]*string{"repo": &flags.Repo, "path": &flags.Path, "branch": &flags.Branch, "cpu": &flags.CPU, "memory": &flags.Memory, "pods": &flags.Pods, "deploy": &flags.Deploy} {
 				if cmd.Flags().Changed(flag) {
 					changed[flag] = v
 				}
@@ -210,7 +214,7 @@ empty value (--cpu "") to go back to the default.`,
 				return errors.New("nothing to change: pass --cpu, --memory, --pods, --repo, --path or --branch")
 			}
 			apply := func(e *registry.Entry) {
-				fields := map[string]*string{"repo": &e.Repo, "path": &e.Path, "branch": &e.Branch, "cpu": &e.CPU, "memory": &e.Memory, "pods": &e.Pods}
+				fields := map[string]*string{"repo": &e.Repo, "path": &e.Path, "branch": &e.Branch, "cpu": &e.CPU, "memory": &e.Memory, "pods": &e.Pods, "deploy": &e.Deploy}
 				for flag, v := range changed {
 					*fields[flag] = *v
 				}
@@ -241,6 +245,14 @@ empty value (--cpu "") to go back to the default.`,
 			fmt.Fprintf(g.out, "Changes %s in %s:\n", name, g.registry)
 			for _, d := range diffEntries(old, &e) {
 				fmt.Fprintf(g.out, "  %s\n", d)
+			}
+			if old.Direct() != e.Direct() {
+				fmt.Fprintf(g.out, "\nSwitching how %s deploys replaces its workloads: ", name)
+				if e.Direct() {
+					fmt.Fprintln(g.out, "Flux removes everything it applied (databases included, if they came from git), and the app is down until `mcloud deploy` applies it again.")
+				} else {
+					fmt.Fprintln(g.out, "Flux applies the app from git and takes over objects of the same name; delete any that mcloud applied and git doesn't have.")
+				}
 			}
 			fmt.Fprintln(g.out)
 			if cf.dryRun {
@@ -299,6 +311,7 @@ func diffEntries(a, b *registry.Entry) []string {
 		{"cpu", a.CPU, b.CPU, registry.DefaultCPU},
 		{"memory", a.Memory, b.Memory, registry.DefaultMemory},
 		{"pods", a.Pods, b.Pods, registry.DefaultPods},
+		{"deploy", a.Deploy, b.Deploy, "gitops"},
 	} {
 		if f.a != f.b {
 			out = append(out, fmt.Sprintf("%s %s -> %s", f.name, show(f.a, f.def), show(f.b, f.def)))

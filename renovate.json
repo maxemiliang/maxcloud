@@ -12,6 +12,12 @@
       "customType": "regex",
       "managerFilePatterns": ["/^\\.github/workflows/.+\\.ya?ml$/"],
       "matchStrings": ["# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)\\s+\\w+: (?<currentValue>\\S+)"]
+    },
+    {
+      "description": "The same in Go code (the Paketo builder for direct deploys, kept equal to run-deploy.yaml's).",
+      "customType": "regex",
+      "managerFilePatterns": ["/^internal/.+\\.go$/"],
+      "matchStrings": ["// renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)\\s+const \\w+ = \"(?<currentValue>[^\"]+)\""]
     }
   ],
   "packageRules": [

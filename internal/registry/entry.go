@@ -28,7 +28,16 @@ type Entry struct {
 	CPU    string `json:"cpu,omitempty"`
 	Memory string `json:"memory,omitempty"`
 	Pods   string `json:"pods,omitempty"`
+	// Deploy is "direct" for an app mcloud deploy applies itself; empty
+	// (gitops) for one Flux applies from git.
+	Deploy string `json:"deploy,omitempty"`
 }
+
+// DeployDirect marks an app that mcloud deploy applies itself.
+const DeployDirect = "direct"
+
+// Direct reports whether the app is deployed directly, not from git.
+func (e *Entry) Direct() bool { return e.Deploy == DeployDirect }
 
 // Defaults the ResourceSet applies to empty fields (keep in sync with
 // resourceset.yaml in the homelab repo).
@@ -81,7 +90,14 @@ func (e *Entry) Validate() error {
 		}
 		e.Path = p
 	}
-	if e.Repo == "" && e.Path == "" {
+	switch e.Deploy {
+	case "", DeployDirect:
+	case "gitops":
+		e.Deploy = ""
+	default:
+		return fmt.Errorf("deploy %q: gitops (the default) or direct", e.Deploy)
+	}
+	if e.Repo == "" && e.Path == "" && !e.Direct() {
 		return fmt.Errorf("an app kept in the homelab repo needs --path (e.g. apps/%s)", e.Name)
 	}
 	if e.Branch != "" && (!branchRe.MatchString(e.Branch) || strings.Contains(e.Branch, "..")) {
@@ -136,7 +152,7 @@ func (e *Entry) fields() []field {
 	var fs []field
 	for _, f := range []field{
 		{"name", e.Name}, {"repo", e.Repo}, {"path", e.Path}, {"branch", e.Branch},
-		{"cpu", e.CPU}, {"memory", e.Memory}, {"pods", e.Pods},
+		{"cpu", e.CPU}, {"memory", e.Memory}, {"pods", e.Pods}, {"deploy", e.Deploy},
 	} {
 		if f.value != "" {
 			fs = append(fs, f)
@@ -168,7 +184,7 @@ func Parse(data []byte) (*Entry, error) {
 	}
 	e := &Entry{
 		Name: s("name"), Repo: s("repo"), Path: s("path"), Branch: s("branch"),
-		CPU: s("cpu"), Memory: s("memory"), Pods: s("pods"),
+		CPU: s("cpu"), Memory: s("memory"), Pods: s("pods"), Deploy: s("deploy"),
 	}
 	if e.Name == "" {
 		return nil, fmt.Errorf("entry has no name")

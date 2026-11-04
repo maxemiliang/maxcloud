@@ -98,8 +98,44 @@ func (g *globals) github() (*github.Client, error) {
 	return github.New(t), nil
 }
 
-// appName is the first argument, else the app named in maxcloud.yaml in the
-// current directory or a parent.
+// project is an app repo's maxcloud.yaml.
+type project struct {
+	App    string `json:"app"`
+	Deploy string `json:"deploy"` // "direct" for direct deploys
+	Image  string `json:"image"`  // image repository for direct deploys
+	Dir    string `json:"-"`      // where the file is: the repo's root
+}
+
+// loadProject finds maxcloud.yaml in the current directory or a parent.
+func loadProject() (*project, error) {
+	dir, err := os.Getwd()
+	if err != nil {
+		return nil, err
+	}
+	for {
+		file := filepath.Join(dir, ProjectFile)
+		data, err := os.ReadFile(file)
+		if err == nil {
+			var p project
+			if err := yaml.Unmarshal(data, &p); err != nil {
+				return nil, fmt.Errorf("%s: %w", file, err)
+			}
+			if p.App == "" {
+				return nil, fmt.Errorf("%s has no app: field", file)
+			}
+			p.Dir = dir
+			return &p, nil
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return nil, errors.New("which app? Pass its name, or run this in a repo with a maxcloud.yaml")
+		}
+		dir = parent
+	}
+}
+
+// appName is the first argument, else $MCLOUD_APP, else the app named in
+// maxcloud.yaml in the current directory or a parent.
 func appName(args []string) (string, error) {
 	if len(args) > 0 && args[0] != "" {
 		return args[0], nil
@@ -107,30 +143,11 @@ func appName(args []string) (string, error) {
 	if v := os.Getenv("MCLOUD_APP"); v != "" {
 		return v, nil
 	}
-	dir, err := os.Getwd()
+	p, err := loadProject()
 	if err != nil {
 		return "", err
 	}
-	for {
-		data, err := os.ReadFile(filepath.Join(dir, ProjectFile))
-		if err == nil {
-			var p struct {
-				App string `json:"app"`
-			}
-			if err := yaml.Unmarshal(data, &p); err != nil {
-				return "", fmt.Errorf("%s: %w", filepath.Join(dir, ProjectFile), err)
-			}
-			if p.App == "" {
-				return "", fmt.Errorf("%s has no app: field", filepath.Join(dir, ProjectFile))
-			}
-			return p.App, nil
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			return "", errors.New("which app? Pass its name, or run this in a repo with a maxcloud.yaml")
-		}
-		dir = parent
-	}
+	return p.App, nil
 }
 
 // confirm asks a yes/no question on the terminal.

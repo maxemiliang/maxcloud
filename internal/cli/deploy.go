@@ -15,7 +15,7 @@ import (
 )
 
 func deployCmd(g *globals) *cobra.Command {
-	var rebuild, noPush bool
+	var rebuild, noPush, direct bool
 	var timeout time.Duration
 	c := &cobra.Command{
 		Use:   "deploy",
@@ -27,13 +27,29 @@ commit, and the app's services becoming ready.
 A deploy is a push: committing and pushing yourself deploys just the same,
 and mcloud deploy only follows along. Uncommitted changes aren't deployed.
 With nothing new to push, --rebuild runs the workflow again (e.g. after a
-change in the homelab platform).`,
+change in the homelab platform).
+
+A direct app (registered with --deploy direct, or deploy: direct in
+maxcloud.yaml) is deployed without git: mcloud builds the working tree,
+uncommitted changes included, pushes the image, and applies the functions'
+manifests with your kubeconfig. Pushing to GHCR needs docker login ghcr.io
+(a token with write:packages); building without a Dockerfile needs pack.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			ctx := cmd.Context()
-			name, err := appName(nil)
+			p, err := loadProject()
 			if err != nil {
 				return err
+			}
+			name := p.App
+			if direct || p.Deploy == "direct" {
+				k, err := g.kube()
+				if err != nil {
+					return err
+				}
+				ctx, cancel := context.WithTimeout(ctx, timeout)
+				defer cancel()
+				return g.deployDirect(ctx, k, p)
 			}
 			repo := originRepo()
 			if repo == "" {
@@ -96,6 +112,7 @@ change in the homelab platform).`,
 	f := c.Flags()
 	f.BoolVar(&rebuild, "rebuild", false, "run the deploy workflow again even with nothing new to push")
 	f.BoolVar(&noPush, "no-push", false, "don't push; follow the deploy of what's already pushed")
+	f.BoolVar(&direct, "direct", false, "deploy a direct app: build here and apply, without git (default for deploy: direct in maxcloud.yaml)")
 	f.DurationVar(&timeout, "timeout", 15*time.Minute, "give up following after this long")
 	return c
 }

@@ -132,6 +132,8 @@ type Options struct {
 	Image string
 	// Database: give every function DATABASE_URL from the db-app Secret.
 	Database bool
+	// Labels are added to every object (direct deploys mark theirs).
+	Labels map[string]string
 }
 
 const (
@@ -145,8 +147,8 @@ const (
 
 type obj = map[string]any
 
-// Manifests returns functions.yaml.
-func Manifests(d *Description, o Options) ([]byte, error) {
+// Objects returns the functions' objects.
+func Objects(d *Description, o Options) []map[string]any {
 	if o.Image == "" {
 		o.Image = "app"
 	}
@@ -161,6 +163,34 @@ func Manifests(d *Description, o Options) ([]byte, error) {
 			docs = append(docs, worker(f, o), scaledObject(f))
 		}
 	}
+	for _, doc := range docs {
+		if len(o.Labels) == 0 {
+			break
+		}
+		l := doc["metadata"].(obj)["labels"].(obj)
+		for k, v := range o.Labels {
+			l[k] = v
+		}
+	}
+	return docs
+}
+
+// DatabaseObjects returns DatabaseManifest's objects.
+func DatabaseObjects() ([]map[string]any, error) {
+	var out []map[string]any
+	for _, part := range strings.Split(DatabaseManifest, "\n---\n") {
+		var m map[string]any
+		if err := yaml.Unmarshal([]byte(part), &m); err != nil {
+			return nil, err
+		}
+		out = append(out, m)
+	}
+	return out, nil
+}
+
+// Manifests returns functions.yaml.
+func Manifests(d *Description, o Options) ([]byte, error) {
+	docs := Objects(d, o)
 	var b strings.Builder
 	b.WriteString(header)
 	if len(docs) == 0 {

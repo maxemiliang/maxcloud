@@ -9,6 +9,7 @@ import (
 	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -34,6 +35,11 @@ var (
 type Client struct {
 	Core kubernetes.Interface
 	Dyn  dynamic.Interface
+
+	// DryRun makes Apply a server-side dry run (nothing is persisted).
+	DryRun bool
+
+	restMapper meta.RESTMapper
 }
 
 // New connects using kubeconfig if set, else $MCLOUD_KUBECONFIG, else the

@@ -151,7 +151,7 @@ images:
 
 func initCmd(g *globals) *cobra.Command {
 	var register bool
-	var lang string
+	var lang, deploy string
 	var cf commitFlags
 	c := &cobra.Command{
 		Use:   "init [NAME]",
@@ -210,6 +210,16 @@ with this repo's GitHub remote as its source.`,
 					files[p] = content
 				}
 			}
+			switch deploy {
+			case "", "gitops":
+			case "direct":
+				// Nothing deploys from git: no workflow, no manifests directory.
+				delete(files, ".github/workflows/deploy.yaml")
+				delete(files, "deploy/k8s/kustomization.yaml")
+				files["maxcloud.yaml"] += "# Deployed with `mcloud deploy` straight from this directory, not from git.\ndeploy: direct\n"
+			default:
+				return fmt.Errorf("--deploy %q: gitops or direct", deploy)
+			}
 			module := name
 			if repo != "" {
 				module = "github.com/" + repo
@@ -236,24 +246,37 @@ with this repo's GitHub remote as its source.`,
 			} else {
 				fmt.Fprintf(g.out, "  npm install          # creates package-lock.json, which the build needs\n")
 			}
-			fmt.Fprintf(g.out, "  git add -A && git commit -m \"maxcloud app\"\n")
+			if deploy != "direct" {
+				fmt.Fprintf(g.out, "  git add -A && git commit -m \"maxcloud app\"\n")
+			}
 			if register {
-				if repo == "" {
+				if repo == "" && deploy != "direct" {
 					return errors.New("--register: this repo has no GitHub remote (origin) yet")
 				}
 				fmt.Fprintln(g.out)
-				return g.createApp(cmd.Context(), registry.Entry{Name: name, Repo: repo}, cf)
+				e := registry.Entry{Name: name, Repo: repo}
+				if deploy == "direct" {
+					e = registry.Entry{Name: name, Deploy: registry.DeployDirect}
+				}
+				return g.createApp(cmd.Context(), e, cf)
 			}
-			if repo != "" {
+			if deploy == "direct" {
+				fmt.Fprintf(g.out, "  mcloud apps create %s --deploy direct   # once, registers the app\n", name)
+			} else if repo != "" {
 				fmt.Fprintf(g.out, "  mcloud apps create %s --repo %s   # once, registers the app\n", name, repo)
 			} else {
 				fmt.Fprintf(g.out, "  push it to GitHub, then: mcloud apps create %s --repo <owner>/<repo>\n", name)
 			}
-			fmt.Fprintf(g.out, "  mcloud deploy        # pushes, then follows the build and the rollout\n")
+			if deploy == "direct" {
+				fmt.Fprintf(g.out, "  mcloud deploy        # builds here, pushes the image, applies, waits until it's ready\n")
+			} else {
+				fmt.Fprintf(g.out, "  mcloud deploy        # pushes, then follows the build and the rollout\n")
+			}
 			return nil
 		},
 	}
 	c.Flags().StringVar(&lang, "lang", "node", "language of a new app: node (TypeScript) or go; an existing go.mod or package.json decides by itself")
+	c.Flags().StringVar(&deploy, "deploy", "gitops", "gitops (push to deploy) or direct (mcloud deploy builds and applies from here, no git)")
 	c.Flags().BoolVar(&register, "register", false, "also register the app on maxcloud (a commit to the registry)")
 	cf.bind(c.Flags(), false)
 	return c

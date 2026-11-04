@@ -47,6 +47,32 @@ The homelab README's "Run an app" covers the platform side, and its
 `templates/run-app` is the starting point for apps that aren't functions;
 they use the same workflow without `functions: true`.
 
+## Direct deploys
+
+For quick functions and experiments there's no need for git at all:
+
+```fish
+mcloud init --deploy direct                 # a starter with deploy: direct in maxcloud.yaml
+mcloud apps create quick --deploy direct    # namespace and quota, nothing from git
+mcloud deploy                               # build here, push, apply, wait until ready
+```
+
+`mcloud deploy` builds the working tree, uncommitted changes included: with
+the Dockerfile, or with `pack` (buildpacks) if there's none. It pushes the
+image to GHCR (`docker login ghcr.io` with a token that has
+`write:packages`), asks it for its functions, and applies their manifests
+with your kubeconfig. Functions you removed are deleted; the database never
+is.
+
+What you give up: nothing is in git, so a cluster rebuild doesn't bring a
+direct app back (run `mcloud deploy` again), and there's no history to
+revert to. Use GitOps (the default) for anything that matters. `mcloud apps
+set <app> --deploy gitops` switches an app over.
+
+A new GHCR package pushed from your machine starts out private, and the
+cluster pulls without credentials: make it public on GitHub (the package's
+settings) after the first push.
+
 ## Install
 
 ```fish

@@ -97,3 +97,47 @@ func TestPodProblem(t *testing.T) {
 		t.Errorf("healthy: %q", got)
 	}
 }
+
+func fn(kind, apiVersion, name string, direct bool) *unstructured.Unstructured {
+	o := &unstructured.Unstructured{}
+	o.SetAPIVersion(apiVersion)
+	o.SetKind(kind)
+	o.SetName(name)
+	o.SetNamespace("app")
+	l := map[string]string{"app.kubernetes.io/part-of": "maxcloud-functions"}
+	if direct {
+		l[DirectLabel] = FieldManager
+	}
+	o.SetLabels(l)
+	return o
+}
+
+func TestPruneOnlyRemovedDirectFunctions(t *testing.T) {
+	keep := fn("Service", "serving.knative.dev/v1", "api", true)
+	gone := fn("Service", "serving.knative.dev/v1", "old", true)
+	goneJob := fn("CronJob", "batch/v1", "nightly", true)
+	fromGit := fn("Service", "serving.knative.dev/v1", "flux-owned", false)
+	db := fn("Cluster", "postgresql.cnpg.io/v1", "db", true)
+	dyn := dynfake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), map[schema.GroupVersionResource]string{
+		gvrKService: "ServiceList", gvrScaledObject: "ScaledObjectList", gvrCNPGCluster: "ClusterList",
+		{Group: "batch", Version: "v1", Resource: "cronjobs"}:   "CronJobList",
+		{Group: "apps", Version: "v1", Resource: "deployments"}: "DeploymentList",
+	}, keep, gone, goneJob, fromGit, db)
+	c := &Client{Core: fake.NewClientset(), Dyn: dyn}
+	deleted, err := c.Prune(context.Background(), "app", []map[string]any{keep.Object})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sort.Strings(deleted)
+	if strings.Join(deleted, " ") != "CronJob/nightly Service/old" {
+		t.Errorf("deleted %v", deleted)
+	}
+	for _, name := range []string{"api", "flux-owned"} {
+		if ok, _ := c.Exists(context.Background(), gvrKService, "app", name); !ok {
+			t.Errorf("%s was deleted", name)
+		}
+	}
+	if ok, _ := c.Exists(context.Background(), gvrCNPGCluster, "app", "db"); !ok {
+		t.Error("the database was deleted")
+	}
+}
