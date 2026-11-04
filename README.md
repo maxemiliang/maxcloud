@@ -4,26 +4,45 @@ Deploy apps and functions to my homelab, the way you would to Cloud Run or
 Firebase. maxcloud is Knative on the homelab cluster, deployed through Flux
 from [maxemiliang/homelab](https://github.com/maxemiliang/homelab).
 
-This repo will hold:
+This repo holds:
 
 - `mcloud`, the command line (Go, `cmd/mcloud`). Available now.
 - `@max-cloud/functions`, the Node.js/TypeScript SDK for writing HTTP,
   scheduled and queue functions (`packages/functions`, see its README).
-  Built; not on npm yet.
 - A Go SDK. Planned.
 
 ## How an app gets deployed
 
-1. **Register the app.** `mcloud apps create` commits one entry to the
-   homelab repo's app registry (`apps/maxcloud/apps/<name>.yaml`).
-2. **Flux sets it up.** From that entry, Flux creates the app's namespace,
-   with a quota and guardrails, and a reconciler that applies the app's
-   `deploy/k8s` from its own repo.
-3. **Pushes deploy.** Every push to the app's repo builds an image (with its
-   Dockerfile or buildpacks), pins it in `deploy/k8s`, and Flux deploys it.
+1. **Set up the repo.** `mcloud init` writes a starter functions app (or
+   adds what an existing Node.js app needs), its deploy workflow and a
+   `maxcloud.yaml`.
+2. **Register the app.** `mcloud apps create` (or `init --register`)
+   commits one entry to the homelab repo's app registry
+   (`apps/maxcloud/apps/<name>.yaml`). From that entry, Flux creates the
+   app's namespace, with a quota and guardrails, and a reconciler for the
+   app's `deploy/k8s`.
+3. **Push to deploy.** Every push to `main` runs the deploy workflow:
+   - it builds the image (buildpacks, or the repo's Dockerfile);
+   - it asks the image which functions it has, and `mcloud generate`
+     writes their manifests to `deploy/k8s`;
+   - it pins the image digest and commits.
+
+   Flux then deploys that commit. `mcloud deploy` pushes and follows all
+   of it until the services are ready.
+
+Each kind of function becomes:
+
+| Function | Runs as |
+| --- | --- |
+| `onRequest` | a Knative service: scales to zero, private unless `public: true` |
+| `onSchedule` | a CronJob |
+| `onQueue` | a Deployment that KEDA scales from 0 on the queue's backlog |
+
+Apps with a queue also get a Postgres database (`database.yaml`, written
+once and then yours to change).
 
 The homelab README's "Run an app" covers the platform side, and its
-`templates/run-app` is the starting point for an app's repo.
+`templates/run-app` is the starting point for apps that aren't functions.
 
 ## Install
 
@@ -42,14 +61,18 @@ set -Ux MCLOUD_KUBECONFIG ~/.kube/homelab.yaml
 ## Commands
 
 ```fish
+mcloud init                                         # in a new repo: a functions app, ready to deploy
+mcloud apps create shop --repo maxemiliang/shop     # register it (once)
+mcloud deploy                                       # push, follow build, Flux and rollout
+
 mcloud apps list                                    # registered apps, did the last deploy apply
-mcloud apps create shop --repo maxemiliang/shop     # register an app
 mcloud apps set shop --cpu 500m --memory 2Gi        # change its quota
 mcloud apps delete shop                             # remove it, namespace and data included
 
 mcloud status shop        # deploy, services and URLs, workloads, databases, problems
 mcloud logs shop          # logs of every pod
 mcloud logs shop web -f   # follow one service, including pods that start later
+mcloud generate           # what deploy/k8s would become (asks the built app)
 ```
 
 Run inside an app's repo, `status` and `logs` take the app name from a

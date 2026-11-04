@@ -4,9 +4,10 @@
 //   maxcloud-functions                 run $FUNCTION_TARGET
 //   maxcloud-functions --target hello  run that function
 //   maxcloud-functions --describe      print the app's functions as JSON
+//   MAXCLOUD_DESCRIBE=1 maxcloud-functions   the same, as one tagged line
 
 import { parseArgs } from "node:util";
-import { describe, load, run, sourcePath } from "./runtime.ts";
+import { DESCRIBE_TAG, describe, load, run, sourcePath } from "./runtime.ts";
 
 const usage = `usage: maxcloud-functions [--target NAME] [--source FILE] [--port N]
        maxcloud-functions --describe [--source FILE]
@@ -29,11 +30,19 @@ async function main(): Promise<number> {
     console.log(usage);
     return 0;
   }
+  // MAXCLOUD_DESCRIBE=1 in the environment does the same as --describe,
+  // as one tagged line: that's how the deploy workflow asks a built image,
+  // whatever its start command, and other output around it doesn't matter.
+  const fromEnv = !values.describe && process.env.MAXCLOUD_DESCRIBE === "1";
   if (values.describe) process.env.MAXCLOUD_DESCRIBE = "1";
   const found = await load(sourcePath(values.source));
 
   if (values.describe) {
     process.stdout.write(JSON.stringify(describe(found), null, 2) + "\n");
+    return 0;
+  }
+  if (fromEnv) {
+    process.stdout.write(DESCRIBE_TAG + JSON.stringify(describe(found)) + "\n");
     return 0;
   }
 

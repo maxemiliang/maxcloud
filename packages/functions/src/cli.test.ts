@@ -22,6 +22,14 @@ test("--describe lists the functions", async () => {
   assert.deepEqual(d.functions.map((f: { name: string; kind: string }) => `${f.name}:${f.kind}`), ["hello:http", "nightly-report:schedule", "resize:queue"]);
 });
 
+test("MAXCLOUD_DESCRIBE=1 prints one tagged line", async () => {
+  const p = start([], { MAXCLOUD_DESCRIBE: "1", FUNCTION_TARGET: "hello" });
+  assert.equal(await p.exited, 0);
+  const line = p.output().split("\n").find((l) => l.startsWith("maxcloud:describe:"));
+  assert.ok(line, p.output());
+  assert.equal(JSON.parse(line.slice("maxcloud:describe:".length)).functions.length, 3);
+});
+
 test("an HTTP function finishes its request on SIGTERM and exits 0", async () => {
   const p = start(["--target", "hello", "--port", "0"]);
   const deadline = Date.now() + 5000;

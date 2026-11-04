@@ -42,6 +42,9 @@ export function findFunctions(mod: Record<string, unknown>): Found[] {
   return out.sort((a, b) => a.name.localeCompare(b.name));
 }
 
+/** Prefixes the describe line printed when MAXCLOUD_DESCRIBE=1 is set. */
+export const DESCRIBE_TAG = "maxcloud:describe:";
+
 /** What `--describe` prints, with every default filled in. */
 export function describe(found: Found[]) {
   return {

@@ -14,6 +14,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/maxemiliang/maxcloud/internal/github"
+	"github.com/maxemiliang/maxcloud/internal/kustomize"
 	"github.com/maxemiliang/maxcloud/internal/registry"
 )
 
@@ -115,70 +116,75 @@ https://<service>-<name>.gronblom.dev.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			e.Name = args[0]
-			if err := e.Validate(); err != nil {
-				return err
-			}
-			ctx := cmd.Context()
-			gh, err := g.github()
-			if err != nil {
-				return err
-			}
-			if err := g.checkNamespace(ctx, e.Name); err != nil {
-				return err
-			}
-			if e.Repo != "" {
-				g.checkRepo(ctx, gh, &e)
-			}
-
-			content := e.Render()
-			fmt.Fprintf(g.out, "Adds %s to %s (%s):\n\n%s\n", g.entryPath(e.Name), g.registry, g.branch, indent(string(content)))
-			fmt.Fprintf(g.out, "and lists it in %s.\n\n", g.kustPath())
-			if cf.dryRun {
-				return nil
-			}
-			if !cf.yes {
-				ok, err := g.confirm(fmt.Sprintf("Commit to %s, which deploys it?", g.registry))
-				if err != nil || !ok {
-					return orAborted(err)
-				}
-			}
-			sha, err := gh.Commit(ctx, github.Repo(g.registry), g.branch, fmt.Sprintf("feat(maxcloud): add app %s\n\nRegistered with mcloud: %s.", e.Name, source(&e, g.registry)),
-				func(read github.Reader) ([]github.Change, error) {
-					if _, err := read(g.entryPath(e.Name)); err == nil {
-						return nil, fmt.Errorf("%s is already registered; change it with `mcloud apps set`", e.Name)
-					} else if !errors.Is(err, github.ErrNotFound) {
-						return nil, err
-					}
-					k, err := read(g.kustPath())
-					if err != nil {
-						return nil, err
-					}
-					nk, _, err := registry.AddResource(string(k), registry.FilePath(e.Name))
-					if err != nil {
-						return nil, err
-					}
-					return []github.Change{{Path: g.entryPath(e.Name), Content: content}, {Path: g.kustPath(), Content: []byte(nk)}}, nil
-				})
-			if err != nil {
-				return err
-			}
-			fmt.Fprintf(g.out, "Committed https://github.com/%s/commit/%s\n", g.registry, sha)
-			if e.Repo != "" {
-				fmt.Fprintf(g.out, `
-For Flux to read %[1]s, the homelab's Flux GitHub App needs access to it:
-GitHub, Settings, Applications, the Flux app, Configure, Repository access.
-`, e.Repo)
-			}
-			if cf.wait {
-				return g.waitDeployed(ctx, e.Name, cf.timeout)
-			}
-			fmt.Fprintf(g.out, "\nFollow it with `mcloud status %s`.\n", e.Name)
-			return nil
+			return g.createApp(cmd.Context(), e, cf)
 		},
 	}
 	entryFlags(c.Flags(), &e)
 	cf.bind(c.Flags(), true)
 	return c
+}
+
+// createApp registers e: one commit to the registry, after showing it and
+// asking (unless cf says otherwise).
+func (g *globals) createApp(ctx context.Context, e registry.Entry, cf commitFlags) error {
+	if err := e.Validate(); err != nil {
+		return err
+	}
+	gh, err := g.github()
+	if err != nil {
+		return err
+	}
+	if err := g.checkNamespace(ctx, e.Name); err != nil {
+		return err
+	}
+	if e.Repo != "" {
+		g.checkRepo(ctx, gh, &e)
+	}
+
+	content := e.Render()
+	fmt.Fprintf(g.out, "Adds %s to %s (%s):\n\n%s\n", g.entryPath(e.Name), g.registry, g.branch, indent(string(content)))
+	fmt.Fprintf(g.out, "and lists it in %s.\n\n", g.kustPath())
+	if cf.dryRun {
+		return nil
+	}
+	if !cf.yes {
+		ok, err := g.confirm(fmt.Sprintf("Commit to %s, which deploys it?", g.registry))
+		if err != nil || !ok {
+			return orAborted(err)
+		}
+	}
+	sha, err := gh.Commit(ctx, github.Repo(g.registry), g.branch, fmt.Sprintf("feat(maxcloud): add app %s\n\nRegistered with mcloud: %s.", e.Name, source(&e, g.registry)),
+		func(read github.Reader) ([]github.Change, error) {
+			if _, err := read(g.entryPath(e.Name)); err == nil {
+				return nil, fmt.Errorf("%s is already registered; change it with `mcloud apps set`", e.Name)
+			} else if !errors.Is(err, github.ErrNotFound) {
+				return nil, err
+			}
+			k, err := read(g.kustPath())
+			if err != nil {
+				return nil, err
+			}
+			nk, _, err := kustomize.AddResource(string(k), registry.FilePath(e.Name))
+			if err != nil {
+				return nil, err
+			}
+			return []github.Change{{Path: g.entryPath(e.Name), Content: content}, {Path: g.kustPath(), Content: []byte(nk)}}, nil
+		})
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(g.out, "Committed https://github.com/%s/commit/%s\n", g.registry, sha)
+	if e.Repo != "" {
+		fmt.Fprintf(g.out, `
+For Flux to read %[1]s, the homelab's Flux GitHub App needs access to it:
+GitHub, Settings, Applications, the Flux app, Configure, Repository access.
+`, e.Repo)
+	}
+	if cf.wait {
+		return g.waitDeployed(ctx, e.Name, cf.timeout)
+	}
+	fmt.Fprintf(g.out, "\nFollow it with `mcloud status %s`.\n", e.Name)
+	return nil
 }
 
 func appsSetCmd(g *globals) *cobra.Command {
@@ -349,7 +355,7 @@ one.`,
 					if err != nil {
 						return nil, err
 					}
-					nk, listed, err := registry.RemoveResource(string(k), registry.FilePath(name))
+					nk, listed, err := kustomize.RemoveResource(string(k), registry.FilePath(name))
 					if err != nil {
 						return nil, err
 					}

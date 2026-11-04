@@ -74,7 +74,7 @@ GitHub access uses $GH_TOKEN, else the GitHub CLI's login.`,
 	_ = f.MarkHidden("registry-branch")
 	_ = f.MarkHidden("registry-dir")
 
-	root.AddCommand(appsCmd(g), statusCmd(g), logsCmd(g))
+	root.AddCommand(initCmd(g), deployCmd(g), appsCmd(g), statusCmd(g), logsCmd(g), generateCmd(g))
 	return root
 }
 

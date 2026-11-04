@@ -1,4 +1,6 @@
-package registry
+// Package kustomize edits kustomization.yaml files as text, so their
+// comments survive.
+package kustomize
 
 import (
 	"fmt"

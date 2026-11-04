@@ -236,3 +236,45 @@ func (c *Client) commitOnce(ctx context.Context, repo Repo, branch, message stri
 	}
 	return newCommit.SHA, nil
 }
+
+// Run is a GitHub Actions workflow run.
+type Run struct {
+	ID         int64  `json:"id"`
+	Name       string `json:"name"`
+	Status     string `json:"status"`     // queued, in_progress, completed, ...
+	Conclusion string `json:"conclusion"` // success, failure, cancelled, ...
+	HTMLURL    string `json:"html_url"`
+	Event      string `json:"event"`
+}
+
+// RunsFor lists the workflow runs for a commit, newest first.
+func (c *Client) RunsFor(ctx context.Context, repo Repo, sha string) ([]Run, error) {
+	var out struct {
+		WorkflowRuns []Run `json:"workflow_runs"`
+	}
+	err := c.do(ctx, http.MethodGet, repo.path("/actions/runs?head_sha=%s&per_page=20", url.QueryEscape(sha)), nil, &out)
+	return out.WorkflowRuns, err
+}
+
+// Run reads one workflow run.
+func (c *Client) Run(ctx context.Context, repo Repo, id int64) (*Run, error) {
+	var r Run
+	err := c.do(ctx, http.MethodGet, repo.path("/actions/runs/%d", id), nil, &r)
+	return &r, err
+}
+
+// Dispatch starts a workflow that has a workflow_dispatch trigger.
+func (c *Client) Dispatch(ctx context.Context, repo Repo, workflow, ref string) error {
+	return c.do(ctx, http.MethodPost, repo.path("/actions/workflows/%s/dispatches", url.PathEscape(workflow)), map[string]any{"ref": ref}, nil)
+}
+
+// Head is the commit a branch points at.
+func (c *Client) Head(ctx context.Context, repo Repo, branch string) (string, error) {
+	var ref struct {
+		Object struct {
+			SHA string `json:"sha"`
+		} `json:"object"`
+	}
+	err := c.do(ctx, http.MethodGet, repo.path("/git/ref/heads/%s", branch), nil, &ref)
+	return ref.Object.SHA, err
+}

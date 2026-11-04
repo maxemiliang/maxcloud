@@ -12,6 +12,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
@@ -110,4 +111,12 @@ func str(o *unstructured.Unstructured, fields ...string) string {
 		return ""
 	}
 	return fmt.Sprint(v)
+}
+
+// RequestReconcile asks Flux to fetch a GitRepository now instead of at its
+// next interval, as `flux reconcile source git` does.
+func (c *Client) RequestReconcile(ctx context.Context, name string) error {
+	patch := fmt.Sprintf(`{"metadata":{"annotations":{"reconcile.fluxcd.io/requestedAt":%q}}}`, time.Now().Format(time.RFC3339Nano))
+	_, err := c.Dyn.Resource(gvrGitRepository).Namespace(FluxNamespace).Patch(ctx, name, types.MergePatchType, []byte(patch), metav1.PatchOptions{})
+	return err
 }
