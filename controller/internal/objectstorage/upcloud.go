@@ -56,7 +56,7 @@ func (u *UpCloud) EnsureBucket(ctx context.Context, name string) error {
 	_, err := u.svc.CreateManagedObjectStorageBucket(ctx, &request.CreateManagedObjectStorageBucketRequest{
 		ServiceUUID: u.serviceUUID, Name: name,
 	})
-	if err != nil && !isConflict(err) {
+	if err != nil && !alreadyExists(err) {
 		return fmt.Errorf("create bucket %s: %w", name, err)
 	}
 	return nil
@@ -85,7 +85,7 @@ func (u *UpCloud) EnsureUser(ctx context.Context, username string) error {
 	_, err = u.svc.CreateManagedObjectStorageUser(ctx, &request.CreateManagedObjectStorageUserRequest{
 		ServiceUUID: u.serviceUUID, Username: username,
 	})
-	if err != nil && !isConflict(err) {
+	if err != nil && !alreadyExists(err) {
 		return fmt.Errorf("create user %s: %w", username, err)
 	}
 	return nil
@@ -131,7 +131,7 @@ func (u *UpCloud) EnsurePolicy(ctx context.Context, name, description, document 
 		_, err = u.svc.CreateManagedObjectStoragePolicy(ctx, &request.CreateManagedObjectStoragePolicyRequest{
 			ServiceUUID: u.serviceUUID, Name: name, Description: description, Document: document,
 		})
-		if err != nil && !isConflict(err) {
+		if err != nil && !alreadyExists(err) {
 			return fmt.Errorf("create policy %s: %w", name, err)
 		}
 		return nil
@@ -204,7 +204,7 @@ func (u *UpCloud) EnsureUserPolicy(ctx context.Context, username, policy string)
 	err = u.svc.AttachManagedObjectStorageUserPolicy(ctx, &request.AttachManagedObjectStorageUserPolicyRequest{
 		ServiceUUID: u.serviceUUID, Username: username, Name: policy,
 	})
-	if err != nil && !isConflict(err) {
+	if err != nil && !alreadyExists(err) {
 		return fmt.Errorf("attach policy %s to %s: %w", policy, username, err)
 	}
 	return nil

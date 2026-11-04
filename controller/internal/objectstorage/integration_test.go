@@ -6,10 +6,12 @@
 // everything again.
 //
 //	UPCLOUD_TOKEN=... MAXCLOUD_OBJECT_STORAGE_ID=... MAXCLOUD_S3_ENDPOINT=https://... \
-//	AWS_ACCESS_KEY_ID=... AWS_SECRET_ACCESS_KEY=... \
+//	MAXCLOUD_TEST_ACCESS_KEY_ID=... MAXCLOUD_TEST_SECRET_ACCESS_KEY=... \
 //	go test -tags integration -run TestUpCloud -v ./internal/objectstorage/
 //
-// The AWS_* keys are the controller's own S3 user. Nothing secret is logged.
+// The MAXCLOUD_TEST_* keys are the controller's own S3 user. Not AWS_*: in
+// the homelab checkout mise sets those to the tofu state keys (.env), and
+// re-sets them on every cd. Nothing secret is logged.
 package objectstorage
 
 import (
@@ -95,7 +97,7 @@ func TestUpCloud(t *testing.T) {
 	if region == "" {
 		region = "europe-1"
 	}
-	ctrlS3 := NewS3(endpoint, region, env(t, "AWS_ACCESS_KEY_ID"), env(t, "AWS_SECRET_ACCESS_KEY"))
+	ctrlS3 := NewS3(endpoint, region, env(t, "MAXCLOUD_TEST_ACCESS_KEY_ID"), env(t, "MAXCLOUD_TEST_SECRET_ACCESS_KEY"))
 	st := NewUpCloud(token, service)
 	ctx := context.Background()
 

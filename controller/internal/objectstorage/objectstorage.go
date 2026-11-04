@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"strings"
 
 	"github.com/UpCloudLtd/upcloud-go-api/v8/upcloud"
 )
@@ -99,4 +100,23 @@ func canonicalJSON(doc string) (string, error) {
 }
 
 func isNotFound(err error) bool { return httpStatus(err) == http.StatusNotFound }
-func isConflict(err error) bool { return httpStatus(err) == http.StatusConflict }
+
+// alreadyExists reports whether a create failed because the thing is
+// already there. UpCloud's API answers that with 400 and an invalid
+// parameter like `(root): "Bucket already exists"` (seen 2026-11-05), not
+// with 409; S3 uses 409.
+func alreadyExists(err error) bool {
+	if httpStatus(err) == http.StatusConflict {
+		return true
+	}
+	var p *upcloud.Problem
+	if errors.As(err, &p) && p.Status == http.StatusBadRequest {
+		for _, ip := range p.InvalidParams {
+			if strings.Contains(strings.ToLower(ip.Reason), "already exists") {
+				return true
+			}
+		}
+		return strings.Contains(strings.ToLower(p.Title), "already exists")
+	}
+	return false
+}

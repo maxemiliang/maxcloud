@@ -39,11 +39,28 @@ func (e awsLikeError) HTTPStatusCode() int { return e.code }
 
 func TestHTTPStatus(t *testing.T) {
 	notFound := fmt.Errorf("get user: %w", &upcloud.Problem{Status: http.StatusNotFound})
-	if !isNotFound(notFound) || isConflict(notFound) {
+	if !isNotFound(notFound) || alreadyExists(notFound) {
 		t.Error("a wrapped UpCloud 404 should be not found")
 	}
-	if !isConflict(fmt.Errorf("x: %w", awsLikeError{http.StatusConflict})) {
-		t.Error("a wrapped S3 409 should be a conflict")
+	if !alreadyExists(fmt.Errorf("x: %w", awsLikeError{http.StatusConflict})) {
+		t.Error("a wrapped S3 409 means it exists")
+	}
+	// What UpCloud's API really answers for an existing bucket.
+	exists := &upcloud.Problem{
+		Status:        http.StatusBadRequest,
+		Title:         "Validation error.",
+		InvalidParams: []upcloud.ProblemInvalidParam{{Name: "(root)", Reason: `"Bucket already exists".`}},
+	}
+	if !alreadyExists(fmt.Errorf("create bucket: %w", exists)) {
+		t.Error("UpCloud's 400 \"Bucket already exists\" means it exists")
+	}
+	invalid := &upcloud.Problem{
+		Status:        http.StatusBadRequest,
+		Title:         "Validation error.",
+		InvalidParams: []upcloud.ProblemInvalidParam{{Name: "name", Reason: "invalid bucket name"}},
+	}
+	if alreadyExists(invalid) {
+		t.Error("another 400 doesn't mean it exists")
 	}
 	if httpStatus(fmt.Errorf("plain")) != 0 {
 		t.Error("a plain error has no status")
