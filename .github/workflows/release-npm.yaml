@@ -1,0 +1,45 @@
+# @max-cloud/functions releases: a functions-js/v* tag, matching the version
+# in packages/functions/package.json, publishes it to npm.
+#
+#   git tag functions-js/v0.2.0 && git push origin functions-js/v0.2.0
+#
+# No npm token: npm trusts this workflow (trusted publishing, OIDC), set up
+# on npmjs.com under the package's Settings, Trusted publisher: GitHub
+# Actions, maxemiliang/maxcloud, workflow release-npm.yaml. Packages
+# published this way carry provenance (which commit and workflow built them).
+name: release-npm
+
+on:
+  push:
+    tags: ["functions-js/v*"]
+
+permissions: {}
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # npm trusted publishing
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+      - name: Tag matches package.json
+        working-directory: packages/functions
+        run: |
+          want="${GITHUB_REF_NAME#functions-js/v}"
+          have=$(node -p 'require("./package.json").version')
+          if [ "$want" != "$have" ]; then
+            echo "::error::tag says $want, package.json says $have"
+            exit 1
+          fi
+      - run: npm ci
+      - run: npm run typecheck --workspace packages/functions
+      - run: npm test --workspace packages/functions
+      - run: npm run build --workspace packages/functions
+      - name: Publish
+        working-directory: packages/functions
+        run: npm publish --access public

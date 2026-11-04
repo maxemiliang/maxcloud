@@ -1,0 +1,41 @@
+# mcloud releases: `git tag v0.2.0 && git push origin v0.2.0`, and
+# .github/workflows/release.yaml runs GoReleaser. Tags of the SDKs
+# (functions/v*, functions-js/v*) aren't mcloud's.
+version: 2
+
+project_name: mcloud
+
+git:
+  ignore_tags:
+    - "functions/*"
+    - "functions-js/*"
+
+builds:
+  - main: ./cmd/mcloud
+    binary: mcloud
+    env:
+      - CGO_ENABLED=0
+    goos: [linux, darwin]
+    goarch: [amd64, arm64]
+    flags: [-trimpath]
+    ldflags:
+      - -s -w -X github.com/maxemiliang/maxcloud/internal/cli.Version={{ .Version }}
+
+archives:
+  - formats: [tar.gz]
+    # mcloud_0.2.0_linux_amd64.tar.gz: what mise's github backend and
+    # run-deploy.yaml look for.
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files: [README.md, LICENSE]
+
+checksum:
+  name_template: checksums.txt
+
+changelog:
+  use: github
+  filters:
+    exclude:
+      - "^chore"
+      - "^ci"
+      - "^docs"
+      - "^test"

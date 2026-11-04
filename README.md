@@ -76,6 +76,8 @@ settings) after the first push.
 ## Install
 
 ```fish
+mise use -g github:maxemiliang/maxcloud   # a release binary
+# or
 go install github.com/maxemiliang/maxcloud/cmd/mcloud@latest
 ```
 
@@ -114,6 +116,19 @@ app: shop
 `create`, `set` and `delete` show the change and ask before committing, since
 a commit to the homelab repo is a deploy. Pass `--dry-run` to only see it, or
 `--yes` to skip the question. `delete` asks you to type the app's name.
+
+## Releasing
+
+Each part has its own tags; pushing one releases it.
+
+| Tag | Releases | How |
+| --- | --- | --- |
+| `v0.2.0` | `mcloud` binaries on GitHub Releases | `release.yaml` (GoReleaser) |
+| `functions-js/v0.2.0` | `@max-cloud/functions` on npm, after bumping `packages/functions/package.json` | `release-npm.yaml` (trusted publishing, no token) |
+| `functions/v0.2.0` | the Go SDK | the tag is the release (Go modules) |
+
+`run-deploy.yaml` pins the `mcloud` it uses (`MCLOUD_VERSION`), and Renovate
+bumps it after each release.
 
 ## Development
 
