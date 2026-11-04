@@ -21,7 +21,8 @@ This repo holds:
    (`apps/maxcloud/apps/<name>.yaml`). From that entry, Flux creates the
    app's namespace, with a quota and guardrails, and a reconciler for the
    app's `deploy/k8s`.
-3. **Push to deploy.** Every push to `main` runs the deploy workflow:
+3. **Push to deploy.** Every push to `main` runs the deploy workflow
+   (`.github/workflows/run-deploy.yaml` in this repo, which app repos call):
    - it builds the image (buildpacks, or the repo's Dockerfile);
    - it asks the image which functions it has, and `mcloud generate`
      writes their manifests to `deploy/k8s`;
@@ -42,7 +43,8 @@ Apps with a queue also get a Postgres database (`database.yaml`, written
 once and then yours to change).
 
 The homelab README's "Run an app" covers the platform side, and its
-`templates/run-app` is the starting point for apps that aren't functions.
+`templates/run-app` is the starting point for apps that aren't functions;
+they use the same workflow without `functions: true`.
 
 ## Install
 

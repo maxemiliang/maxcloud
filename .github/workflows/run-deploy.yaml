@@ -1,0 +1,153 @@
+# Reusable workflow: deploys an app to maxcloud. An app repo calls it on
+# every push to main (mcloud init writes the caller):
+#
+#   1. Builds the repo into an image, with its Dockerfile if it has one,
+#      otherwise with Cloud Native Buildpacks (Paketo: Go, Node.js, Python,
+#      Java, .NET, Ruby, PHP, ...).
+#   2. Pushes it to ghcr.io/<owner>/<repo>, tagged with the commit SHA.
+#   3. For an app written with maxcloud functions (`functions: true`), asks
+#      the image what its functions are and writes their manifests
+#      (mcloud generate: functions.yaml, and database.yaml for queues).
+#   4. Pins that image by digest in the repo's deploy manifests and commits.
+#      Flux applies the commit (the app's entry in the homelab repo's app
+#      registry, apps/maxcloud/apps/).
+#
+# It lives in this public repo so that public and private app repos alike
+# can call it (a public repo can't use a private repo's workflows).
+name: run-deploy
+
+on:
+  workflow_call:
+    inputs:
+      context:
+        description: Directory to build, relative to the repo root.
+        type: string
+        default: .
+      manifests:
+        description: Kustomize directory that Flux applies.
+        type: string
+        default: deploy/k8s
+      image:
+        description: Image name used in the manifests, replaced with the built image.
+        type: string
+        default: app
+      functions:
+        description: >-
+          The app is written with maxcloud functions (@max-cloud/functions):
+          generate its manifests from the image on every deploy.
+        type: boolean
+        default: false
+
+permissions: {}
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # the deploy commit
+      packages: write # pushing to GHCR
+    # One deploy at a time per repo; a newer push waits rather than racing
+    # the deploy commit of an older one.
+    concurrency:
+      group: run-deploy-${{ github.repository }}
+      cancel-in-progress: false
+    env:
+      # Paketo builder for repos without a Dockerfile. Its images run as a
+      # non-root user, which the restricted Pod Security level requires.
+      # renovate: datasource=docker depName=paketobuildpacks/ubuntu-noble-builder
+      PAKETO_BUILDER_VERSION: 0.0.213
+      # mcloud, for `functions: true` apps: a commit of this repo until
+      # maxcloud has releases.
+      MCLOUD_VERSION: 457a5cfd98baea462c761fc3b9805b67ef6888a0
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Image name
+        id: image
+        run: |
+          # GHCR names must be lowercase.
+          repo=$(echo "ghcr.io/${GITHUB_REPOSITORY}" | tr '[:upper:]' '[:lower:]')
+          echo "ref=${repo}:${GITHUB_SHA}" >>"$GITHUB_OUTPUT"
+          echo "repo=${repo}" >>"$GITHUB_OUTPUT"
+          if [ -f "${{ inputs.context }}/Dockerfile" ]; then
+            echo "builder=dockerfile" >>"$GITHUB_OUTPUT"
+          else
+            echo "builder=buildpacks" >>"$GITHUB_OUTPUT"
+          fi
+
+      - uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # With a Dockerfile.
+      - if: steps.image.outputs.builder == 'dockerfile'
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - if: steps.image.outputs.builder == 'dockerfile'
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: ${{ inputs.context }}
+          push: true
+          tags: ${{ steps.image.outputs.ref }}
+          # The cluster's nodes are amd64.
+          platforms: linux/amd64
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # Without one: buildpacks detect the language and build.
+      - if: steps.image.outputs.builder == 'buildpacks'
+        uses: buildpacks/github-actions/setup-pack@91cb4574e7b781941b4e3fa950e541e4b8754b3a # v6.2.2
+      - if: steps.image.outputs.builder == 'buildpacks'
+        run: |
+          pack build "${{ steps.image.outputs.ref }}" \
+            --path "${{ inputs.context }}" \
+            --builder "paketobuildpacks/ubuntu-noble-builder:${PAKETO_BUILDER_VERSION}" \
+            --cache-image "${{ steps.image.outputs.repo }}:build-cache" \
+            --publish
+
+      - name: Sync with the branch
+        run: |
+          # Start from the branch as it is now: an earlier run may have pushed
+          # its deploy commit since this one checked out.
+          git fetch origin "${GITHUB_REF_NAME}"
+          git checkout -B "${GITHUB_REF_NAME}" "origin/${GITHUB_REF_NAME}"
+
+      # Functions apps: the image says what its functions are when run with
+      # MAXCLOUD_DESCRIBE=1 (it prints one tagged line and exits), and mcloud
+      # turns that into manifests. Asking the image, not the source, means
+      # the manifests always match what was built.
+      - if: inputs.functions
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: "1.27"
+          cache: false
+      - name: Generate the functions' manifests
+        if: inputs.functions
+        run: |
+          go install "github.com/maxemiliang/maxcloud/cmd/mcloud@${MCLOUD_VERSION}"
+          timeout 120 docker run --rm -e MAXCLOUD_DESCRIBE=1 "${{ steps.image.outputs.ref }}" >describe.out
+          "$(go env GOPATH)/bin/mcloud" generate --from describe.out --dir "${{ inputs.manifests }}" --image "${{ inputs.image }}"
+          rm describe.out
+
+      # kustomize is preinstalled on GitHub's Ubuntu runners.
+      - name: Pin the image in the manifests
+        id: pin
+        run: |
+          digest=$(docker buildx imagetools inspect "${{ steps.image.outputs.ref }}" --format '{{json .Manifest.Digest}}' | tr -d '"')
+          cd "${{ inputs.manifests }}"
+          kustomize edit set image "${{ inputs.image }}=${{ steps.image.outputs.repo }}@${digest}"
+          echo "digest=${digest}" >>"$GITHUB_OUTPUT"
+
+      # Pushed with GITHUB_TOKEN, so this commit doesn't trigger another run.
+      - name: Commit the deploy
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add "${{ inputs.manifests }}"
+          if git diff --cached --quiet; then
+            echo "Image unchanged, nothing to deploy."
+            exit 0
+          fi
+          git commit -m "deploy: ${GITHUB_SHA::7}" -m "Image ${{ steps.image.outputs.repo }}@${{ steps.pin.outputs.digest }}"
+          git push origin "HEAD:${GITHUB_REF_NAME}"

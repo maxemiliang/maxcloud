@@ -1,0 +1,28 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "description": "Run by the homelab repo's self-hosted Renovate (once its GitHub App is installed on this repo). Nothing is automerged.",
+  "extends": ["config:recommended", ":semanticCommits"],
+  "timezone": "Europe/Helsinki",
+  "schedule": ["* 0-8 * * 1"],
+  "minimumReleaseAge": "3 days",
+  "labels": ["dependencies"],
+  "customManagers": [
+    {
+      "description": "Versions with a `# renovate: datasource=... depName=...` comment on the line above (the Paketo builder in run-deploy.yaml).",
+      "customType": "regex",
+      "managerFilePatterns": ["/^\\.github/workflows/.+\\.ya?ml$/"],
+      "matchStrings": ["# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)\\s+\\w+: (?<currentValue>\\S+)"]
+    }
+  ],
+  "packageRules": [
+    {
+      "matchManagers": ["github-actions"],
+      "groupName": "GitHub Actions"
+    },
+    {
+      "description": "The Paketo builder is released every few days; one PR a month is plenty.",
+      "matchPackageNames": ["paketobuildpacks/ubuntu-noble-builder"],
+      "schedule": ["* 0-8 1-7 * 1"]
+    }
+  ]
+}

@@ -83,7 +83,7 @@ schema-version = "0.2"
 name = "BP_NODE_RUN_SCRIPTS"
 value = "build"
 `,
-	".github/workflows/deploy.yaml": `# Every push to main deploys this app to maxcloud (maxemiliang/homelab,
+	".github/workflows/deploy.yaml": `# Every push to main deploys this app to maxcloud (maxemiliang/maxcloud,
 # .github/workflows/run-deploy.yaml): builds the image, writes the
 # functions' manifests to deploy/k8s, pins the image and commits; Flux
 # applies it.
@@ -103,7 +103,7 @@ jobs:
     permissions:
       contents: write
       packages: write
-    uses: maxemiliang/homelab/.github/workflows/run-deploy.yaml@main
+    uses: maxemiliang/maxcloud/.github/workflows/run-deploy.yaml@main
     with:
       functions: true
 `,
