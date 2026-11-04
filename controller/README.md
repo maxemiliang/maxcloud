@@ -43,7 +43,9 @@ holds the variables every AWS SDK reads, a pod only needs
 `mc-shop--*` (the app's policy) can't match the buckets of an app called
 `shop-x` (`mc-shop-x--*`). With a single hyphen it would.
 
-`kubectl get buckets -A` shows each bucket's name, size and readiness. A
+`kubectl get maxcloud -A` shows each bucket's name, size and readiness
+(not `kubectl get buckets`: in a cluster with Flux, that's Flux's Bucket
+kind; `buckets.maxcloud.gronblom.dev` also works). A
 Bucket that isn't Ready says why in its `Ready` condition.
 
 ## Running it
