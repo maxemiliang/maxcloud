@@ -185,6 +185,9 @@ GitHub, Settings, Applications, the Flux app, Configure, Repository access.
 `, e.Repo)
 	}
 	if cf.wait {
+		if e.Direct() {
+			return g.waitNamespace(ctx, e.Name, cf.timeout)
+		}
 		return g.waitDeployed(ctx, e.Name, cf.timeout)
 	}
 	fmt.Fprintf(g.out, "\nFollow it with `mcloud status %s`.\n", e.Name)
@@ -471,6 +474,29 @@ func (g *globals) waitDeployed(ctx context.Context, name string, timeout time.Du
 		select {
 		case <-ctx.Done():
 			return fmt.Errorf("not deployed after %s; see `mcloud status %s`", timeout, name)
+		case <-time.After(3 * time.Second):
+		}
+	}
+}
+
+// waitNamespace waits for a direct app's namespace, which is all Flux
+// creates for it.
+func (g *globals) waitNamespace(ctx context.Context, name string, timeout time.Duration) error {
+	k, err := g.kube()
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	fmt.Fprintf(g.out, "\nWaiting for Flux to create namespace %s ...\n", name)
+	for {
+		if ok, err := k.NamespaceExists(ctx, name); err == nil && ok {
+			fmt.Fprintf(g.out, "Ready for `mcloud deploy`.\n")
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("no namespace %s after %s; see `mcloud apps list`", name, timeout)
 		case <-time.After(3 * time.Second):
 		}
 	}

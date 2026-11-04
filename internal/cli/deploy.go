@@ -223,7 +223,7 @@ func (g *globals) followServices(ctx context.Context, k *kube.Client, name strin
 				pending = true
 				if s.Ready.Status == "False" {
 					printStatus(g.out, st, g.registry)
-					return fmt.Errorf("service %s isn't ready: %s", s.Name, s.Ready.Message)
+					return fmt.Errorf("service %s isn't ready: %s%s", s.Name, s.Ready.Message, pullHint(st))
 				}
 			}
 		}
@@ -234,9 +234,20 @@ func (g *globals) followServices(ctx context.Context, k *kube.Client, name strin
 		}
 		if err := sleep(ctx, 2*time.Second); err != nil {
 			printStatus(g.out, st, g.registry)
-			return errors.New("services not ready in time")
+			return errors.New("services not ready in time" + pullHint(st))
 		}
 	}
+}
+
+// pullHint explains an image the cluster can't pull: usually a GHCR package
+// that's still private.
+func pullHint(st *kube.Status) string {
+	for _, p := range st.Problems {
+		if strings.Contains(p, "ImagePull") || strings.Contains(p, "ErrImagePull") {
+			return "\n(the cluster can't pull the image: a GHCR package pushed from your machine starts private; make it public in the package's settings on GitHub)"
+		}
+	}
+	return ""
 }
 
 func sleep(ctx context.Context, d time.Duration) error {

@@ -51,7 +51,9 @@ func printStatus(w io.Writer, st *kube.Status, registryRepo string) {
 	if st.Source != nil && !st.Source.Ready() {
 		fmt.Fprintf(tw, "Fetch\t%s %s\n", mark(st.Source.Status, true), st.Source.Message)
 	}
-	if st.Applied {
+	if st.Entry != nil && st.Entry.Direct() {
+		fmt.Fprintf(tw, "Deploy\tdirect: applied by mcloud deploy, nothing from git\n")
+	} else if st.Applied {
 		fmt.Fprintf(tw, "Deploy\t%s %s\n", mark(st.Deploy.Status, true), firstLine(st.Deploy.Message))
 	} else {
 		fmt.Fprintf(tw, "Deploy\t%s\n", "not created yet (Flux picks up a new entry within a minute)")
