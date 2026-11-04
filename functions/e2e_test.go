@@ -8,10 +8,29 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
 )
+
+// syncBuffer is a bytes.Buffer safe to read while os/exec writes to it.
+type syncBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *syncBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *syncBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
 
 // The test app as a real process: what the container runs.
 func buildApp(t *testing.T) string {
@@ -27,8 +46,8 @@ func TestProcessSIGTERM(t *testing.T) {
 	bin := buildApp(t)
 	cmd := exec.Command(bin)
 	cmd.Env = append(os.Environ(), "FUNCTION_TARGET=hello", "PORT=0")
-	var logs bytes.Buffer
-	cmd.Stderr = &logs
+	logs := &syncBuffer{}
+	cmd.Stderr = logs
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
