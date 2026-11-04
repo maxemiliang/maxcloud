@@ -78,6 +78,21 @@ SDK creates (`maxcloud_jobs`).
   exists only if the transaction commits.
 - **Delay a job** with `functions.Delay(d)`.
 
+## Buckets
+
+An app's S3 buckets come from the registry
+(`mcloud apps set shop --buckets uploads,assets:public`); the maxcloud
+controller creates them as `mc-<app>--<bucket>` and gives every function
+the app's credentials as `AWS_*` environment variables, which the AWS SDK
+reads by itself. `functions.BucketName("uploads")` returns the full name:
+
+```go
+cfg, err := config.LoadDefaultConfig(ctx)
+s3c := s3.NewFromConfig(cfg, func(o *s3.Options) { o.UsePathStyle = true })
+bucket, err := functions.BucketName("uploads") // "mc-shop--uploads"
+_, err = s3c.PutObject(ctx, &s3.PutObjectInput{Bucket: &bucket, Key: aws.String("a.txt"), Body: r})
+```
+
 ## Running
 
 `functions.Start()` runs the function named in `$FUNCTION_TARGET` (or

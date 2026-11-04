@@ -84,6 +84,7 @@ func entryFlags(f *pflag.FlagSet, e *registry.Entry) {
 	f.StringVar(&e.Memory, "memory", "", "quota: memory the app's pods may request in total (default 1Gi)")
 	f.StringVar(&e.Pods, "pods", "", "quota: number of pods (default 20)")
 	f.StringVar(&e.Deploy, "deploy", "", "gitops (default: Flux applies the app's manifests from git) or direct (mcloud deploy applies them)")
+	f.StringVar(&e.Buckets, "buckets", "", "S3 buckets, comma-separated; name:public for one anyone can read (uploads,assets:public). Removing one from the list keeps its objects")
 }
 
 type commitFlags struct {
@@ -202,22 +203,23 @@ func appsSetCmd(g *globals) *cobra.Command {
 		Short: "Change an app's quota or source",
 		Long: `Change fields of a registered app. Only the flags you pass change; pass an
 empty value (--cpu "") to go back to the default.`,
-		Example: `  mcloud apps set shop --cpu 500m --memory 2Gi`,
-		Args:    cobra.ExactArgs(1),
+		Example: `  mcloud apps set shop --cpu 500m --memory 2Gi
+  mcloud apps set shop --buckets uploads,assets:public`,
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name := args[0]
 			ctx := cmd.Context()
 			changed := map[string]*string{}
-			for flag, v := range map[string]*string{"repo": &flags.Repo, "path": &flags.Path, "branch": &flags.Branch, "cpu": &flags.CPU, "memory": &flags.Memory, "pods": &flags.Pods, "deploy": &flags.Deploy} {
+			for flag, v := range map[string]*string{"repo": &flags.Repo, "path": &flags.Path, "branch": &flags.Branch, "cpu": &flags.CPU, "memory": &flags.Memory, "pods": &flags.Pods, "deploy": &flags.Deploy, "buckets": &flags.Buckets} {
 				if cmd.Flags().Changed(flag) {
 					changed[flag] = v
 				}
 			}
 			if len(changed) == 0 {
-				return errors.New("nothing to change: pass --cpu, --memory, --pods, --repo, --path or --branch")
+				return errors.New("nothing to change: pass --cpu, --memory, --pods, --repo, --path, --branch, --deploy or --buckets")
 			}
 			apply := func(e *registry.Entry) {
-				fields := map[string]*string{"repo": &e.Repo, "path": &e.Path, "branch": &e.Branch, "cpu": &e.CPU, "memory": &e.Memory, "pods": &e.Pods, "deploy": &e.Deploy}
+				fields := map[string]*string{"repo": &e.Repo, "path": &e.Path, "branch": &e.Branch, "cpu": &e.CPU, "memory": &e.Memory, "pods": &e.Pods, "deploy": &e.Deploy, "buckets": &e.Buckets}
 				for flag, v := range changed {
 					*fields[flag] = *v
 				}
@@ -315,6 +317,7 @@ func diffEntries(a, b *registry.Entry) []string {
 		{"memory", a.Memory, b.Memory, registry.DefaultMemory},
 		{"pods", a.Pods, b.Pods, registry.DefaultPods},
 		{"deploy", a.Deploy, b.Deploy, "gitops"},
+		{"buckets", a.Buckets, b.Buckets, "none"},
 	} {
 		if f.a != f.b {
 			out = append(out, fmt.Sprintf("%s %s -> %s", f.name, show(f.a, f.def), show(f.b, f.def)))

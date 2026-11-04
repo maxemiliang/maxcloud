@@ -64,3 +64,40 @@ func TestValidate(t *testing.T) {
 		t.Errorf("path not normalised: %q, %v", e.Path, err)
 	}
 }
+
+func TestBuckets(t *testing.T) {
+	e := Entry{Name: "shop", Repo: "a/b", Buckets: " uploads , assets:public,"}
+	if err := e.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	if e.Buckets != "uploads,assets:public" {
+		t.Errorf("Buckets normalised to %q", e.Buckets)
+	}
+	bs, err := ParseBuckets(e.Buckets)
+	if err != nil || len(bs) != 2 || bs[0] != (Bucket{Name: "uploads"}) || bs[1] != (Bucket{Name: "assets", Public: true}) {
+		t.Errorf("ParseBuckets = %+v, %v", bs, err)
+	}
+	back, err := Parse(e.Render())
+	if err != nil || back.Buckets != e.Buckets {
+		t.Errorf("round trip: %+v, %v", back, err)
+	}
+
+	for _, bad := range []string{
+		"db",                    // the database's backups
+		"a--b",                  // "--" separates app and bucket
+		"Uploads",               // uppercase
+		"up.loads",              // dots
+		"x:private",             // unknown option
+		"x,x",                   // twice
+		"x-s3alias",             // reserved by S3
+		strings.Repeat("a", 55), // mc-shop--<55> is 64 characters
+	} {
+		e := Entry{Name: "shop", Repo: "a/b", Buckets: bad}
+		if err := e.Validate(); err == nil {
+			t.Errorf("buckets %q: want an error", bad)
+		}
+	}
+	if err := (&Entry{Name: "sh--op", Repo: "a/b"}).Validate(); err == nil {
+		t.Error("app name with -- should be rejected")
+	}
+}

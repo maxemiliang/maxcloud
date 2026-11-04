@@ -11,6 +11,8 @@ This repo holds:
   scheduled and queue functions (`packages/functions`, see its README).
 - `github.com/maxemiliang/maxcloud/functions`, the same for Go (`functions/`,
   see its README).
+- `maxcloud-controller` (`controller/`), which gives apps their S3
+  buckets (and later databases). See its README.
 
 ## How an app gets deployed
 
@@ -73,6 +75,21 @@ A new GHCR package pushed from your machine starts out private, and the
 cluster pulls without credentials: make it public on GitHub (the package's
 settings) after the first push.
 
+## Buckets
+
+An app gets S3 buckets (in the homelab's UpCloud Object Storage, the way a
+Worker gets R2) from its registry entry:
+
+```fish
+mcloud apps set shop --buckets uploads,assets:public
+```
+
+[`controller/`](controller/README.md) turns each into a bucket
+`mc-shop--uploads` and puts the app's credentials in the Secret
+`maxcloud-s3`, which every function gets as environment variables. The
+SDKs' `bucketName("uploads")` gives the full name. Removing a bucket from
+the list keeps it and its objects.
+
 ## Install
 
 ```fish
@@ -98,6 +115,7 @@ mcloud deploy                                       # push, follow build, Flux a
 
 mcloud apps list                                    # registered apps, did the last deploy apply
 mcloud apps set shop --cpu 500m --memory 2Gi        # change its quota
+mcloud apps set shop --buckets uploads,assets:public  # its S3 buckets
 mcloud apps delete shop                             # remove it, namespace and data included
 
 mcloud status shop        # deploy, services and URLs, workloads, databases, problems

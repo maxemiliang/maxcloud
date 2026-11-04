@@ -18,3 +18,4 @@ export {
   type QueueFunction,
 } from "./define.ts";
 export { enqueue, type EnqueueOptions, type Queryable } from "./queue.ts";
+export { bucketName } from "./storage.ts";

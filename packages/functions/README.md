@@ -72,6 +72,32 @@ Postgres database (`DATABASE_URL`), in a table the SDK creates
   `await enqueue("mail", msg, { client: tx })`.
 - **Delay a job** with `{ delaySeconds }`.
 
+## Buckets
+
+An app's S3 buckets come from the registry:
+`mcloud apps set shop --buckets uploads,assets:public`. The maxcloud
+controller creates them in UpCloud Object Storage as `mc-<app>--<bucket>`,
+and every function gets the app's credentials as environment variables
+(the `AWS_*` ones any S3 client reads, and `MAXCLOUD_APP`). So the AWS SDK
+needs no configuration, only the bucket's full name:
+
+```ts
+import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
+import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
+import { bucketName } from "@max-cloud/functions";
+
+const s3 = new S3Client({ forcePathStyle: true });
+const uploads = bucketName("uploads"); // "mc-shop--uploads"
+
+// A URL the browser uploads to directly; then enqueue the work.
+const url = await getSignedUrl(s3, new PutObjectCommand({ Bucket: uploads, Key: "a.png" }), { expiresIn: 300 });
+```
+
+A `:public` bucket's objects can be read by anyone at
+`<AWS_ENDPOINT_URL_S3>/<bucket>/<key>`; listing and writing still need the
+credentials. Object Storage has no bucket events: uploads tell the app
+themselves (presigned URL, then a queue job).
+
 ## Running
 
 The container runs `maxcloud-functions`, which starts the function named in

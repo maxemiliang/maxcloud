@@ -31,7 +31,72 @@ type Entry struct {
 	// Deploy is "direct" for an app mcloud deploy applies itself; empty
 	// (gitops) for one Flux applies from git.
 	Deploy string `json:"deploy,omitempty"`
+	// Buckets are the app's S3 buckets, comma-separated, each optionally
+	// ":public": "uploads,assets:public". The maxcloud controller names
+	// them mc-<app>--<bucket>.
+	Buckets string `json:"buckets,omitempty"`
 }
+
+// Bucket is one entry of Entry.Buckets.
+type Bucket struct {
+	Name   string
+	Public bool
+}
+
+// bucketRe: lowercase letters and digits with single hyphens between, so
+// "--" only ever separates the app from the bucket (mc-<app>--<bucket>).
+var bucketRe = regexp.MustCompile(`^[a-z0-9]([a-z0-9]|-[a-z0-9])*$`)
+
+// ParseBuckets reads an Entry.Buckets value.
+func ParseBuckets(s string) ([]Bucket, error) {
+	var out []Bucket
+	seen := map[string]bool{}
+	for _, item := range strings.Split(s, ",") {
+		item = strings.TrimSpace(item)
+		if item == "" {
+			continue
+		}
+		name, opt, _ := strings.Cut(item, ":")
+		b := Bucket{Name: name}
+		switch opt {
+		case "":
+		case "public":
+			b.Public = true
+		default:
+			return nil, fmt.Errorf("bucket %q: the only option is :public", item)
+		}
+		if !bucketRe.MatchString(name) {
+			return nil, fmt.Errorf("bucket %q: lowercase letters, digits and single dashes", name)
+		}
+		if name == "db" {
+			return nil, fmt.Errorf("bucket %q: reserved for the app's database backups", name)
+		}
+		if strings.HasSuffix(name, "-s3alias") {
+			return nil, fmt.Errorf("bucket %q: names ending in -s3alias are reserved by S3", name)
+		}
+		if seen[name] {
+			return nil, fmt.Errorf("bucket %q is listed twice", name)
+		}
+		seen[name] = true
+		out = append(out, b)
+	}
+	return out, nil
+}
+
+// FormatBuckets is the canonical Entry.Buckets value.
+func FormatBuckets(bs []Bucket) string {
+	parts := make([]string, len(bs))
+	for i, b := range bs {
+		parts[i] = b.Name
+		if b.Public {
+			parts[i] += ":public"
+		}
+	}
+	return strings.Join(parts, ",")
+}
+
+// S3 bucket names are at most 63 characters: mc-<app>--<bucket>.
+const maxBucketName = 63
 
 // DeployDirect marks an app that mcloud deploy applies itself.
 const DeployDirect = "direct"
@@ -78,6 +143,24 @@ func (e *Entry) Validate() error {
 	}
 	if reserved[e.Name] || strings.HasPrefix(e.Name, "kube-") {
 		return fmt.Errorf("app name %q: reserved for the platform", e.Name)
+	}
+	// "--" separates app and bucket in bucket names (mc-<app>--<bucket>);
+	// in an app name it would let one app's S3 policy match another's
+	// buckets.
+	if strings.Contains(e.Name, "--") {
+		return fmt.Errorf("app name %q: no double dashes", e.Name)
+	}
+	if e.Buckets != "" {
+		bs, err := ParseBuckets(e.Buckets)
+		if err != nil {
+			return err
+		}
+		for _, b := range bs {
+			if n := len("mc-" + e.Name + "--" + b.Name); n > maxBucketName {
+				return fmt.Errorf("bucket %q: mc-%s--%s would be %d characters, S3 allows %d", b.Name, e.Name, b.Name, n, maxBucketName)
+			}
+		}
+		e.Buckets = FormatBuckets(bs)
 	}
 	if e.Repo != "" && !repoRe.MatchString(e.Repo) {
 		return fmt.Errorf("repo %q: expected <owner>/<repo>", e.Repo)
@@ -153,6 +236,7 @@ func (e *Entry) fields() []field {
 	for _, f := range []field{
 		{"name", e.Name}, {"repo", e.Repo}, {"path", e.Path}, {"branch", e.Branch},
 		{"cpu", e.CPU}, {"memory", e.Memory}, {"pods", e.Pods}, {"deploy", e.Deploy},
+		{"buckets", e.Buckets},
 	} {
 		if f.value != "" {
 			fs = append(fs, f)
@@ -185,6 +269,7 @@ func Parse(data []byte) (*Entry, error) {
 	e := &Entry{
 		Name: s("name"), Repo: s("repo"), Path: s("path"), Branch: s("branch"),
 		CPU: s("cpu"), Memory: s("memory"), Pods: s("pods"), Deploy: s("deploy"),
+		Buckets: s("buckets"),
 	}
 	if e.Name == "" {
 		return nil, fmt.Errorf("entry has no name")
