@@ -7,8 +7,9 @@ from [maxemiliang/homelab](https://github.com/maxemiliang/homelab).
 This repo will hold:
 
 - `mcloud`, the command line (Go, `cmd/mcloud`). Available now.
-- `@max-cloud/functions`, the Node.js/TypeScript SDK for writing functions.
-  Planned.
+- `@max-cloud/functions`, the Node.js/TypeScript SDK for writing HTTP,
+  scheduled and queue functions (`packages/functions`, see its README).
+  Built; not on npm yet.
 - A Go SDK. Planned.
 
 ## How an app gets deployed
@@ -67,4 +68,10 @@ a commit to the homelab repo is a deploy. Pass `--dry-run` to only see it, or
 ```fish
 go test ./...
 go run ./cmd/mcloud --help
+
+npm ci
+# The queue tests need a Postgres; without TEST_DATABASE_URL they're skipped.
+docker run -d --rm --name pg -p 127.0.0.1:55432:5432 -e POSTGRES_PASSWORD=test postgres:18
+set -x TEST_DATABASE_URL postgres://postgres:test@127.0.0.1:55432/postgres
+npm test --workspaces
 ```

@@ -1,0 +1,39 @@
+{
+  "name": "@max-cloud/functions",
+  "version": "0.1.0",
+  "description": "Write HTTP, scheduled and queue functions for maxcloud, the homelab's run platform",
+  "keywords": ["functions", "serverless", "knative", "keda"],
+  "license": "MIT",
+  "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/maxemiliang/maxcloud.git",
+    "directory": "packages/functions"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "bin": {
+    "maxcloud-functions": "./dist/cli.js"
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test --test-concurrency=1 \"src/**/*.test.ts\""
+  },
+  "dependencies": {
+    "pg": "^8.23.1"
+  },
+  "devDependencies": {
+    "@types/node": "^24.19.2",
+    "@types/pg": "^8.23.1",
+    "typescript": "^7.0.2"
+  }
+}

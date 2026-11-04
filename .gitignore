@@ -1,2 +1,4 @@
 /mcloud
 /dist/
+node_modules/
+packages/*/dist/
