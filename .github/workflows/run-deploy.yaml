@@ -58,7 +58,7 @@ jobs:
       PAKETO_BUILDER_VERSION: 0.0.213
       # mcloud, for `functions: true` apps: a commit of this repo until
       # maxcloud has releases.
-      MCLOUD_VERSION: 457a5cfd98baea462c761fc3b9805b67ef6888a0
+      MCLOUD_VERSION: 759c9c3c61ecf8dc2caeb8df0aa9a24376681b4d
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
