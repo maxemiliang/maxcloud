@@ -1,6 +1,6 @@
 {
   "name": "@max-cloud/functions",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Write HTTP, scheduled and queue functions for maxcloud, the homelab's run platform",
   "keywords": ["functions", "serverless", "knative", "keda"],
   "license": "MIT",
