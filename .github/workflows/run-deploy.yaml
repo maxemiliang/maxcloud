@@ -56,9 +56,9 @@ jobs:
       # non-root user, which the restricted Pod Security level requires.
       # renovate: datasource=docker depName=paketobuildpacks/ubuntu-noble-builder
       PAKETO_BUILDER_VERSION: 0.0.213
-      # mcloud, for `functions: true` apps: a commit of this repo until
-      # maxcloud has releases.
-      MCLOUD_VERSION: 759c9c3c61ecf8dc2caeb8df0aa9a24376681b4d
+      # mcloud, for `functions: true` apps: a release of this repo.
+      # renovate: datasource=github-releases depName=maxemiliang/maxcloud
+      MCLOUD_VERSION: v0.1.0
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -117,18 +117,17 @@ jobs:
       # MAXCLOUD_DESCRIBE=1 (it prints one tagged line and exits), and mcloud
       # turns that into manifests. Asking the image, not the source, means
       # the manifests always match what was built.
-      - if: inputs.functions
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version: "1.27"
-          cache: false
       - name: Generate the functions' manifests
         if: inputs.functions
         run: |
-          go install "github.com/maxemiliang/maxcloud/cmd/mcloud@${MCLOUD_VERSION}"
-          timeout 120 docker run --rm -e MAXCLOUD_DESCRIBE=1 "${{ steps.image.outputs.ref }}" >describe.out
-          "$(go env GOPATH)/bin/mcloud" generate --from describe.out --dir "${{ inputs.manifests }}" --image "${{ inputs.image }}"
-          rm describe.out
+          file="mcloud_${MCLOUD_VERSION#v}_linux_amd64.tar.gz"
+          base="https://github.com/maxemiliang/maxcloud/releases/download/${MCLOUD_VERSION}"
+          (cd "$RUNNER_TEMP" &&
+            curl -sSfL -O "${base}/${file}" -O "${base}/checksums.txt" &&
+            grep " ${file}\$" checksums.txt | sha256sum -c - &&
+            tar -xzf "$file" mcloud)
+          timeout 120 docker run --rm -e MAXCLOUD_DESCRIBE=1 "${{ steps.image.outputs.ref }}" >"$RUNNER_TEMP/describe.out"
+          "$RUNNER_TEMP/mcloud" generate --from "$RUNNER_TEMP/describe.out" --dir "${{ inputs.manifests }}" --image "${{ inputs.image }}"
 
       # kustomize is preinstalled on GitHub's Ubuntu runners.
       - name: Pin the image in the manifests
