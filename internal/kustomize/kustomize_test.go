@@ -65,3 +65,23 @@ func TestRemoveResource(t *testing.T) {
 		t.Error("removed an entry that isn't there")
 	}
 }
+
+// The layout `kustomize edit` writes: list items not indented.
+func TestUnindentedList(t *testing.T) {
+	in := "kind: Kustomization\nresources:\n- functions.yaml\n# comment\nimages:\n- digest: sha256:abc\n  name: app\n"
+	got, changed, err := AddResource(in, "functions.yaml")
+	if err != nil || changed || got != in {
+		t.Fatalf("already listed: changed=%v err=%v\n%s", changed, err, got)
+	}
+	got, _, err = AddResource(in, "database.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(got, "resources:\n- database.yaml\n- functions.yaml\n# comment\nimages:\n- digest") {
+		t.Errorf("got\n%s", got)
+	}
+	got, changed, _ = RemoveResource(got, "database.yaml")
+	if !changed || got != in {
+		t.Errorf("remove: got\n%s", got)
+	}
+}

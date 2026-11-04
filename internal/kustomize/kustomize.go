@@ -9,12 +9,15 @@ import (
 	"strings"
 )
 
-var resourceItem = regexp.MustCompile(`^(\s+)-\s+(\S+)\s*$`)
+// List items, indented or not: kustomize itself writes them unindented
+// (`kustomize edit`), people usually indent them.
+var resourceItem = regexp.MustCompile(`^(\s*)-\s+(\S+)\s*$`)
 
 // resourcesBlock finds the items of the top-level `resources:` list: their
 // line indexes, values and indentation. Edits are made on the text so the
 // file's comments survive.
 func resourcesBlock(lines []string) (start int, items []int, indent string, err error) {
+	found := false
 	start = -1
 	for i, l := range lines {
 		if strings.TrimRight(l, " ") == "resources:" {
@@ -35,9 +38,9 @@ func resourcesBlock(lines []string) (start int, items []int, indent string, err 
 			break
 		}
 		items = append(items, i)
-		indent = m[1]
+		indent, found = m[1], true
 	}
-	if indent == "" {
+	if !found {
 		indent = "  "
 	}
 	return start, items, indent, nil

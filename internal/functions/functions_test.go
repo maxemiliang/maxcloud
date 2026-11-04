@@ -141,6 +141,12 @@ func TestWriteDir(t *testing.T) {
 	if err != nil || len(changed) != 0 {
 		t.Errorf("rerun changed %v, %v", changed, err)
 	}
+	// After `kustomize edit set image` (unindented lists), a rerun still
+	// sees what's listed.
+	os.WriteFile(filepath.Join(dir, "kustomization.yaml"), []byte("apiVersion: kustomize.config.k8s.io/v1beta1\nkind: Kustomization\nresources:\n- database.yaml\n- functions.yaml\nimages:\n- digest: sha256:abc\n  name: app\n  newName: ghcr.io/o/r\n"), 0o644)
+	if changed, err := WriteDir(dir, d, ""); err != nil || len(changed) != 0 {
+		t.Errorf("after kustomize edit: changed %v, %v", changed, err)
+	}
 	// The user's own manifests stay listed, and an existing images block isn't duplicated.
 	os.WriteFile(filepath.Join(dir, "kustomization.yaml"), []byte("apiVersion: kustomize.config.k8s.io/v1beta1\nkind: Kustomization\nresources:\n  - sso.yaml\nimages:\n  - name: app\n    newName: ghcr.io/o/r\n    digest: sha256:abc\n"), 0o644)
 	if _, err := WriteDir(dir, d, ""); err != nil {
