@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -60,5 +61,43 @@ func TestSource(t *testing.T) {
 	}
 	if got := source(&registry.Entry{Name: "s", Repo: "o/s", Branch: "prod"}, "o/homelab"); got != "o/s@prod:deploy/k8s" {
 		t.Error(got)
+	}
+}
+
+func TestInitWritesStarters(t *testing.T) {
+	for _, lang := range []string{"node", "go"} {
+		dir := filepath.Join(t.TempDir(), "my-app")
+		os.MkdirAll(dir, 0o755)
+		t.Chdir(dir)
+		g := &globals{in: strings.NewReader(""), out: io.Discard, errOut: io.Discard}
+		cmd := initCmd(g)
+		cmd.SetArgs([]string{"--lang", lang})
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("%s: %v", lang, err)
+		}
+		for _, p := range []string{"maxcloud.yaml", ".github/workflows/deploy.yaml", "deploy/k8s/kustomization.yaml"} {
+			if _, err := os.Stat(p); err != nil {
+				t.Errorf("%s: no %s", lang, p)
+			}
+		}
+		y, _ := os.ReadFile("maxcloud.yaml")
+		if !strings.Contains(string(y), "app: my-app\n") {
+			t.Errorf("%s: maxcloud.yaml:\n%s", lang, y)
+		}
+		if lang == "go" {
+			m, _ := os.ReadFile("main.go")
+			if !strings.Contains(string(m), `"Hello from %s\n"`) {
+				t.Errorf("main.go:\n%s", m)
+			}
+			gm, _ := os.ReadFile("go.mod")
+			if !strings.HasPrefix(string(gm), "module my-app\n") {
+				t.Errorf("go.mod:\n%s", gm)
+			}
+		} else {
+			pj, _ := os.ReadFile("package.json")
+			if !strings.Contains(string(pj), `"name": "my-app"`) {
+				t.Errorf("package.json:\n%s", pj)
+			}
+		}
 	}
 }

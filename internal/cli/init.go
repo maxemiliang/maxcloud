@@ -67,13 +67,6 @@ export const hello = onRequest(async (req) => {
 	".gitignore": `node_modules/
 dist/
 `,
-}
-
-// Always part of an app, whatever language it's in.
-var appFiles = map[string]string{
-	"maxcloud.yaml": `# This repo's app on maxcloud: mcloud status, logs and deploy run here use it.
-app: %[1]s
-`,
 	// Paketo only compiles TypeScript when told to.
 	"project.toml": `# Buildpacks settings (Paketo): run "npm run build" before the image is made.
 [_]
@@ -82,6 +75,43 @@ schema-version = "0.2"
 [[io.buildpacks.build.env]]
 name = "BP_NODE_RUN_SCRIPTS"
 value = "build"
+`,
+}
+
+// The files a new Go functions app starts with.
+var goStarter = map[string]string{
+	"go.mod": `module %[2]s
+
+go 1.25.0
+`,
+	"main.go": `package main
+
+import (
+	"fmt"
+	"net/http"
+
+	"github.com/maxemiliang/maxcloud/functions"
+)
+
+func main() {
+	// Every registered function is deployed on its own. This one is a
+	// Knative service: private (cluster-local) until you add
+	// functions.Public(), and scaled to zero when idle. See
+	// functions.Schedule and functions.Queue for the other kinds.
+	functions.HTTPFunc("hello", hello)
+	functions.Start()
+}
+
+func hello(w http.ResponseWriter, r *http.Request) {
+	fmt.Fprintf(w, "Hello from %s\n", r.URL.Path)
+}
+`,
+}
+
+// Always part of an app, whatever language it's in.
+var appFiles = map[string]string{
+	"maxcloud.yaml": `# This repo's app on maxcloud: mcloud status, logs and deploy run here use it.
+app: %[1]s
 `,
 	".github/workflows/deploy.yaml": `# Every push to main deploys this app to maxcloud (maxemiliang/maxcloud,
 # .github/workflows/run-deploy.yaml): builds the image, writes the
@@ -121,14 +151,16 @@ images:
 
 func initCmd(g *globals) *cobra.Command {
 	var register bool
+	var lang string
 	var cf commitFlags
 	c := &cobra.Command{
 		Use:   "init [NAME]",
 		Short: "Set up this repo as a functions app on maxcloud",
 		Long: `Set up the repo in the current directory as a maxcloud functions app
-(Node.js/TypeScript, @max-cloud/functions). In an empty repo it writes a
-starter app; in an existing Node.js app it adds only what deploys need and
-says what to change in package.json. Existing files are never overwritten.
+in TypeScript (@max-cloud/functions) or Go (--lang go, the functions
+package). In an empty repo it writes a starter app; in an existing Node.js or
+Go app it adds only what deploys need and says what's still missing.
+Existing files are never overwritten.
 
 NAME (default: the directory's name) becomes the app's namespace and part of
 its URLs. With --register it also registers the app (mcloud apps create),
@@ -152,21 +184,35 @@ with this repo's GitHub remote as its source.`,
 			for p, content := range appFiles {
 				files[p] = content
 			}
-			pkg, err := os.ReadFile("package.json")
-			switch {
-			case errors.Is(err, os.ErrNotExist):
-				for p, content := range starter {
-					files[p] = content
-				}
-			case err != nil:
-				return err
-			default:
+			repo := originRepo()
+			if _, err := os.Stat("go.mod"); err == nil {
+				lang = "go"
+				fmt.Fprintln(g.errOut, "go.mod: register your functions in main and call functions.Start() (go get github.com/maxemiliang/maxcloud/functions)")
+			} else if pkg, err := os.ReadFile("package.json"); err == nil {
+				lang = "node"
 				for _, w := range checkPackageJSON(pkg) {
 					fmt.Fprintf(g.errOut, "package.json: %s\n", w)
 				}
-				if !strings.Contains(string(pkg), `"build"`) {
-					delete(files, "project.toml") // nothing to compile
+				if strings.Contains(string(pkg), `"build"`) {
+					files["project.toml"] = starter["project.toml"]
 				}
+			} else {
+				var start map[string]string
+				switch lang {
+				case "node":
+					start = starter
+				case "go":
+					start = goStarter
+				default:
+					return fmt.Errorf("--lang %q: node or go", lang)
+				}
+				for p, content := range start {
+					files[p] = content
+				}
+			}
+			module := name
+			if repo != "" {
+				module = "github.com/" + repo
 			}
 
 			for _, p := range sortedKeys(files) {
@@ -177,18 +223,20 @@ with this repo's GitHub remote as its source.`,
 				if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
 					return err
 				}
-				content := files[p]
-				if strings.Contains(content, "%[1]s") {
-					content = fmt.Sprintf(content, name)
-				}
+				content := strings.NewReplacer("%[1]s", name, "%[2]s", module).Replace(files[p])
 				if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
 					return err
 				}
 				fmt.Fprintf(g.out, "  wrote   %s\n", p)
 			}
 
-			repo := originRepo()
-			fmt.Fprintf(g.out, "\nNext:\n  npm install          # creates package-lock.json, which the build needs\n  git add -A && git commit -m \"maxcloud app\"\n")
+			fmt.Fprintf(g.out, "\nNext:\n")
+			if lang == "go" {
+				fmt.Fprintf(g.out, "  go get github.com/maxemiliang/maxcloud/functions@latest && go mod tidy\n")
+			} else {
+				fmt.Fprintf(g.out, "  npm install          # creates package-lock.json, which the build needs\n")
+			}
+			fmt.Fprintf(g.out, "  git add -A && git commit -m \"maxcloud app\"\n")
 			if register {
 				if repo == "" {
 					return errors.New("--register: this repo has no GitHub remote (origin) yet")
@@ -205,6 +253,7 @@ with this repo's GitHub remote as its source.`,
 			return nil
 		},
 	}
+	c.Flags().StringVar(&lang, "lang", "node", "language of a new app: node (TypeScript) or go; an existing go.mod or package.json decides by itself")
 	c.Flags().BoolVar(&register, "register", false, "also register the app on maxcloud (a commit to the registry)")
 	cf.bind(c.Flags(), false)
 	return c

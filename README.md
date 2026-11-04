@@ -9,7 +9,8 @@ This repo holds:
 - `mcloud`, the command line (Go, `cmd/mcloud`). Available now.
 - `@max-cloud/functions`, the Node.js/TypeScript SDK for writing HTTP,
   scheduled and queue functions (`packages/functions`, see its README).
-- A Go SDK. Planned.
+- `github.com/maxemiliang/maxcloud/functions`, the same for Go (`functions/`,
+  see its README).
 
 ## How an app gets deployed
 
@@ -63,7 +64,7 @@ set -Ux MCLOUD_KUBECONFIG ~/.kube/homelab.yaml
 ## Commands
 
 ```fish
-mcloud init                                         # in a new repo: a functions app, ready to deploy
+mcloud init                                         # in a new repo: a functions app (--lang go for Go)
 mcloud apps create shop --repo maxemiliang/shop     # register it (once)
 mcloud deploy                                       # push, follow build, Flux and rollout
 

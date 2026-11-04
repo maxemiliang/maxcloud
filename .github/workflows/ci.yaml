@@ -13,6 +13,17 @@ permissions:
 jobs:
   go:
     runs-on: ubuntu-latest
+    # The Go SDK's queue tests run against a real Postgres.
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_PASSWORD: test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready --health-interval 2s --health-timeout 5s --health-retries 15
+    env:
+      TEST_DATABASE_URL: postgres://postgres:test@localhost:5432/postgres
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
@@ -23,6 +34,13 @@ jobs:
       - run: go vet ./...
       - run: go test -race ./...
       - run: go build ./cmd/mcloud
+      # The Go SDK is its own module (functions/), so apps don't pull in mcloud's dependencies.
+      - name: Go SDK
+        working-directory: functions
+        run: |
+          test -z "$(gofmt -l .)" || { gofmt -l .; exit 1; }
+          go vet ./...
+          go test -race ./...
 
   node:
     runs-on: ubuntu-latest
