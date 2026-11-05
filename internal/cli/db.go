@@ -223,12 +223,18 @@ func dbBranchCreateCmd(g *globals) *cobra.Command {
 			if !wait {
 				return nil
 			}
+			fmt.Fprintln(g.out, "Restoring it from the backups takes a few minutes (a recovery Job, then Postgres starts).")
 			ctx, cancel := context.WithTimeout(cmd.Context(), 15*time.Minute)
 			defer cancel()
+			last := ""
 			for {
 				b, err := k.GetBranch(ctx, name, branch)
 				if err != nil {
 					return err
+				}
+				if line := strings.TrimSpace(b.Phase + ": " + b.Message); b.Phase != "" && line != last {
+					fmt.Fprintf(g.out, "  %s %s\n", time.Now().Format("15:04:05"), line)
+					last = line
 				}
 				switch b.Phase {
 				case "Ready":
