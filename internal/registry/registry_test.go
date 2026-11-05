@@ -101,3 +101,28 @@ func TestBuckets(t *testing.T) {
 		t.Error("app name with -- should be rejected")
 	}
 }
+
+func TestDB(t *testing.T) {
+	e := Entry{Name: "shop", Repo: "a/b", DB: "true", DBInstances: "2", DBSize: "2Gi"}
+	if err := e.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	back, err := Parse(e.Render())
+	if err != nil || *back != e {
+		t.Errorf("round trip: %+v, %v", back, err)
+	}
+	off := Entry{Name: "shop", Repo: "a/b", DB: "false"}
+	if err := off.Validate(); err != nil || off.DB != "" {
+		t.Errorf("db=false: %q, %v", off.DB, err)
+	}
+	for _, bad := range []Entry{
+		{Name: "shop", Repo: "a/b", DB: "yes"},
+		{Name: "shop", Repo: "a/b", DBSize: "2Gi"},                // without --db
+		{Name: "shop", Repo: "a/b", DB: "true", DBInstances: "3"}, // 1 or 2
+		{Name: "shop", Repo: "a/b", DB: "true", DBSize: "lots"},
+	} {
+		if err := bad.Validate(); err == nil {
+			t.Errorf("%+v: want an error", bad)
+		}
+	}
+}

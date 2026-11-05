@@ -85,6 +85,10 @@ func entryFlags(f *pflag.FlagSet, e *registry.Entry) {
 	f.StringVar(&e.Pods, "pods", "", "quota: number of pods (default 20)")
 	f.StringVar(&e.Deploy, "deploy", "", "gitops (default: Flux applies the app's manifests from git) or direct (mcloud deploy applies them)")
 	f.StringVar(&e.Buckets, "buckets", "", "S3 buckets, comma-separated; name:public for one anyone can read (uploads,assets:public). Removing one from the list keeps its objects")
+	f.StringVar(&e.DB, "db", "", "a Postgres database run by the maxcloud controller, backed up and restored by itself (--db, or --db=false to remove it: its backups are kept)")
+	f.Lookup("db").NoOptDefVal = "true"
+	f.StringVar(&e.DBInstances, "db-instances", "", "database instances: 1 (default), or 2 for a replica on the other node")
+	f.StringVar(&e.DBSize, "db-size", "", "database disk per instance (default 1Gi; can grow, not shrink)")
 }
 
 type commitFlags struct {
@@ -204,22 +208,23 @@ func appsSetCmd(g *globals) *cobra.Command {
 		Long: `Change fields of a registered app. Only the flags you pass change; pass an
 empty value (--cpu "") to go back to the default.`,
 		Example: `  mcloud apps set shop --cpu 500m --memory 2Gi
-  mcloud apps set shop --buckets uploads,assets:public`,
+  mcloud apps set shop --buckets uploads,assets:public
+  mcloud apps set shop --db --db-size 2Gi`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name := args[0]
 			ctx := cmd.Context()
 			changed := map[string]*string{}
-			for flag, v := range map[string]*string{"repo": &flags.Repo, "path": &flags.Path, "branch": &flags.Branch, "cpu": &flags.CPU, "memory": &flags.Memory, "pods": &flags.Pods, "deploy": &flags.Deploy, "buckets": &flags.Buckets} {
+			for flag, v := range map[string]*string{"repo": &flags.Repo, "path": &flags.Path, "branch": &flags.Branch, "cpu": &flags.CPU, "memory": &flags.Memory, "pods": &flags.Pods, "deploy": &flags.Deploy, "buckets": &flags.Buckets, "db": &flags.DB, "db-instances": &flags.DBInstances, "db-size": &flags.DBSize} {
 				if cmd.Flags().Changed(flag) {
 					changed[flag] = v
 				}
 			}
 			if len(changed) == 0 {
-				return errors.New("nothing to change: pass --cpu, --memory, --pods, --repo, --path, --branch, --deploy or --buckets")
+				return errors.New("nothing to change: pass --cpu, --memory, --pods, --repo, --path, --branch, --deploy, --buckets or --db")
 			}
 			apply := func(e *registry.Entry) {
-				fields := map[string]*string{"repo": &e.Repo, "path": &e.Path, "branch": &e.Branch, "cpu": &e.CPU, "memory": &e.Memory, "pods": &e.Pods, "deploy": &e.Deploy, "buckets": &e.Buckets}
+				fields := map[string]*string{"repo": &e.Repo, "path": &e.Path, "branch": &e.Branch, "cpu": &e.CPU, "memory": &e.Memory, "pods": &e.Pods, "deploy": &e.Deploy, "buckets": &e.Buckets, "db": &e.DB, "db-instances": &e.DBInstances, "db-size": &e.DBSize}
 				for flag, v := range changed {
 					*fields[flag] = *v
 				}
@@ -318,6 +323,9 @@ func diffEntries(a, b *registry.Entry) []string {
 		{"pods", a.Pods, b.Pods, registry.DefaultPods},
 		{"deploy", a.Deploy, b.Deploy, "gitops"},
 		{"buckets", a.Buckets, b.Buckets, "none"},
+		{"db", a.DB, b.DB, "none"},
+		{"db-instances", a.DBInstances, b.DBInstances, "1"},
+		{"db-size", a.DBSize, b.DBSize, "1Gi"},
 	} {
 		if f.a != f.b {
 			out = append(out, fmt.Sprintf("%s %s -> %s", f.name, show(f.a, f.def), show(f.b, f.def)))

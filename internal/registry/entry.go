@@ -35,6 +35,12 @@ type Entry struct {
 	// ":public": "uploads,assets:public". The maxcloud controller names
 	// them mc-<app>--<bucket>.
 	Buckets string `json:"buckets,omitempty"`
+	// DB is "true" for an app with a Postgres database run by the maxcloud
+	// controller (Cluster db, backed up to mc-<app>--db), with DBInstances
+	// (1 or 2) and DBSize (disk per instance).
+	DB          string `json:"db,omitempty"`
+	DBInstances string `json:"dbInstances,omitempty"`
+	DBSize      string `json:"dbSize,omitempty"`
 }
 
 // Bucket is one entry of Entry.Buckets.
@@ -150,6 +156,25 @@ func (e *Entry) Validate() error {
 	if strings.Contains(e.Name, "--") {
 		return fmt.Errorf("app name %q: no double dashes", e.Name)
 	}
+	switch e.DB {
+	case "", "true":
+	case "false":
+		e.DB = ""
+	default:
+		return fmt.Errorf("db %q: true or false", e.DB)
+	}
+	if e.DB == "" && (e.DBInstances != "" || e.DBSize != "") {
+		return fmt.Errorf("db-instances and db-size need --db")
+	}
+	if e.DBInstances != "" && e.DBInstances != "1" && e.DBInstances != "2" {
+		return fmt.Errorf("db-instances %q: 1, or 2 for a replica on the other node", e.DBInstances)
+	}
+	if e.DBSize != "" {
+		v, err := resource.ParseQuantity(e.DBSize)
+		if err != nil || v.Sign() <= 0 {
+			return fmt.Errorf("db-size %q: expected a positive quantity such as 1Gi", e.DBSize)
+		}
+	}
 	if e.Buckets != "" {
 		bs, err := ParseBuckets(e.Buckets)
 		if err != nil {
@@ -237,6 +262,7 @@ func (e *Entry) fields() []field {
 		{"name", e.Name}, {"repo", e.Repo}, {"path", e.Path}, {"branch", e.Branch},
 		{"cpu", e.CPU}, {"memory", e.Memory}, {"pods", e.Pods}, {"deploy", e.Deploy},
 		{"buckets", e.Buckets},
+		{"db", e.DB}, {"dbInstances", e.DBInstances}, {"dbSize", e.DBSize},
 	} {
 		if f.value != "" {
 			fs = append(fs, f)
@@ -270,6 +296,7 @@ func Parse(data []byte) (*Entry, error) {
 		Name: s("name"), Repo: s("repo"), Path: s("path"), Branch: s("branch"),
 		CPU: s("cpu"), Memory: s("memory"), Pods: s("pods"), Deploy: s("deploy"),
 		Buckets: s("buckets"),
+		DB:      s("db"), DBInstances: s("dbInstances"), DBSize: s("dbSize"),
 	}
 	if e.Name == "" {
 		return nil, fmt.Errorf("entry has no name")

@@ -217,9 +217,14 @@ func labels(f Function) obj {
 
 func env(f Function, o Options) []any {
 	e := []any{obj{"name": "FUNCTION_TARGET", "value": f.Name}}
-	if o.Database {
-		e = append(e, obj{"name": "DATABASE_URL", "valueFrom": obj{"secretKeyRef": obj{"name": DatabaseName + "-app", "key": "uri"}}})
+	ref := obj{"name": DatabaseName + "-app", "key": "uri"}
+	if !o.Database {
+		// No database.yaml: the app may still have a database from the
+		// registry (the maxcloud controller's, also Cluster db), so take
+		// its URL if it's there.
+		ref["optional"] = true
 	}
+	e = append(e, obj{"name": "DATABASE_URL", "valueFrom": obj{"secretKeyRef": ref}})
 	return e
 }
 

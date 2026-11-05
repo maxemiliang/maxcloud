@@ -119,6 +119,36 @@ func TestManifests(t *testing.T) {
 	}
 }
 
+// Without database.yaml, DATABASE_URL is optional: the app may have a
+// database from the registry instead, or none. With it, it's required.
+// Every function also gets the app's bucket credentials, if it has any.
+func TestManifestsOptionalStorage(t *testing.T) {
+	d, err := Parse([]byte(desc))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, withDB := range []bool{false, true} {
+		out, err := Manifests(d, Options{Database: withDB})
+		if err != nil {
+			t.Fatal(err)
+		}
+		c := get(docs(t, out)["Service/api"], "spec", "template", "spec", "containers", 0)
+		if get(c, "env", 1, "name") != "DATABASE_URL" {
+			t.Fatalf("env %v", get(c, "env"))
+		}
+		optional := get(c, "env", 1, "valueFrom", "secretKeyRef", "optional")
+		if withDB && optional != nil {
+			t.Errorf("with database.yaml, DATABASE_URL should be required, got optional=%v", optional)
+		}
+		if !withDB && optional != true {
+			t.Errorf("without database.yaml, DATABASE_URL should be optional, got %v", optional)
+		}
+		if get(c, "envFrom", 0, "secretRef", "name") != StorageSecret || get(c, "envFrom", 0, "secretRef", "optional") != true {
+			t.Errorf("envFrom %v", get(c, "envFrom"))
+		}
+	}
+}
+
 func TestWriteDir(t *testing.T) {
 	d, _ := Parse([]byte(desc))
 	dir := filepath.Join(t.TempDir(), "deploy", "k8s")

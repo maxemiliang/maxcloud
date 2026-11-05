@@ -12,7 +12,7 @@ This repo holds:
 - `github.com/maxemiliang/maxcloud/functions`, the same for Go (`functions/`,
   see its README).
 - `maxcloud-controller` (`controller/`), which gives apps their S3
-  buckets (and later databases). See its README.
+  buckets and Postgres databases. See its README.
 
 ## How an app gets deployed
 
@@ -90,6 +90,21 @@ mcloud apps set shop --buckets uploads,assets:public
 SDKs' `bucketName("uploads")` gives the full name. Removing a bucket from
 the list keeps it and its objects.
 
+## Databases
+
+An app gets a Postgres database (the way a Worker gets D1, but Postgres)
+from its registry entry too:
+
+```fish
+mcloud apps set shop --db                  # --db-size 2Gi, --db-instances 2
+```
+
+The controller runs it with CloudNativePG, backs it up continuously to the
+bucket `mc-shop--db`, and restores it from there by itself if its cluster
+is lost. Every function gets `DATABASE_URL`. An app with a `database.yaml`
+(what mcloud writes for queue functions) already has a database `db`; the
+controller won't take that one over, so drop the file before switching.
+
 ## Install
 
 ```fish
@@ -116,6 +131,7 @@ mcloud deploy                                       # push, follow build, Flux a
 mcloud apps list                                    # registered apps, did the last deploy apply
 mcloud apps set shop --cpu 500m --memory 2Gi        # change its quota
 mcloud apps set shop --buckets uploads,assets:public  # its S3 buckets
+mcloud apps set shop --db                             # a Postgres database, backed up
 mcloud apps delete shop                             # remove it, namespace and data included
 
 mcloud status shop        # deploy, services and URLs, workloads, databases, problems
