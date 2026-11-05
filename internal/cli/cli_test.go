@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/maxemiliang/maxcloud/internal/registry"
 )
@@ -98,6 +99,30 @@ func TestInitWritesStarters(t *testing.T) {
 			if !strings.Contains(string(pj), `"name": "my-app"`) {
 				t.Errorf("package.json:\n%s", pj)
 			}
+		}
+	}
+}
+
+func TestParseAt(t *testing.T) {
+	now := time.Date(2026, 11, 5, 12, 0, 0, 0, time.UTC)
+	for in, want := range map[string]time.Time{
+		"15m":                       now.Add(-15 * time.Minute),
+		"2h30m":                     now.Add(-150 * time.Minute),
+		"2026-11-05T10:00:00Z":      time.Date(2026, 11, 5, 10, 0, 0, 0, time.UTC),
+		"2026-11-05T11:00:00+02:00": time.Date(2026, 11, 5, 9, 0, 0, 0, time.UTC),
+	} {
+		got, err := parseAt(in, now)
+		if err != nil || !got.Equal(want) {
+			t.Errorf("parseAt(%q) = %v, %v; want %v", in, got, err, want)
+		}
+	}
+	local, err := parseAt("2026-11-05 10:00", now.Add(48*time.Hour))
+	if err != nil || local.Hour() != 10 || local.Location() != time.Local {
+		t.Errorf("local time: %v, %v", local, err)
+	}
+	for _, bad := range []string{"", "-5m", "0s", "tomorrow", "2026-11-06T00:00:00Z"} {
+		if _, err := parseAt(bad, now); err == nil {
+			t.Errorf("parseAt(%q): want an error", bad)
 		}
 	}
 }

@@ -105,6 +105,12 @@ is lost. Every function gets `DATABASE_URL`. An app with a `database.yaml`
 (what mcloud writes for queue functions) already has a database `db`; the
 controller won't take that one over, so drop the file before switching.
 
+`mcloud db restore --at TIME` takes it back to a point in time (in place;
+later writes are gone from it), and `mcloud db branch create NAME [--at
+TIME]` makes a throwaway copy with its own `DATABASE_URL`-style URL, for
+trying a migration or a preview. Both restore from the backups, so they
+reach back as far as the retention (7 days by default).
+
 ## Secrets and key-value storage
 
 `mcloud secrets set NAME` stores an app's secret, like `wrangler secret
@@ -144,6 +150,11 @@ mcloud apps set shop --db                             # a Postgres database, bac
 
 mcloud queue ls shop                # jobs per queue and state, latest failed ones
 mcloud queue retry shop 41 42       # run failed jobs again (or --failed)
+
+mcloud db restore shop --at 15m     # the database as it was 15 minutes ago, in place
+mcloud db branch create shop try    # a throwaway copy (--at for a point in time)
+mcloud db branch list shop
+mcloud db recover shop --from 3     # unblock: restore backup generation 3
 
 mcloud secrets set STRIPE_KEY       # in the app's repo: asks for the value
 mcloud secrets list                 # names only
