@@ -126,6 +126,24 @@ direct app keeps it in a Secret on the cluster. Every function gets the
 app's secrets as environment variables; the SDKs' `secret("NAME")` reads
 one. For KV, the SDKs' `kv` stores JSON values in the app's database.
 
+## Logging in
+
+mcloud (and kubectl) can log in to the cluster through the homelab's
+Authelia instead of using an admin kubeconfig. The cluster's API server
+trusts Authelia's ID tokens, and you act with what your groups allow:
+
+```fish
+mcloud kubeconfig                         # writes ~/.kube/homelab-oidc.yaml from your current one
+set -Ux MCLOUD_KUBECONFIG ~/.kube/homelab-oidc.yaml
+mcloud login                              # device code: approve it in a browser (--browser: this machine's)
+kubectl --kubeconfig ~/.kube/homelab-oidc.yaml auth whoami
+```
+
+The kubeconfig runs `mcloud credential` for a token: the ID token lasts an
+hour and is refreshed by itself; logging in again is needed after 12 hours
+or `mcloud logout`. If Authelia or the cluster is down, get an admin
+kubeconfig with `upctl kubernetes config` (the homelab's break-glass).
+
 ## Install
 
 ```fish
@@ -161,6 +179,9 @@ mcloud db restore shop --at 15m     # the database as it was 15 minutes ago, in 
 mcloud db branch create shop try    # a throwaway copy (--at for a point in time)
 mcloud db branch list shop
 mcloud db recover shop --from 3     # unblock: restore backup generation 3
+
+mcloud login                        # log in to the cluster through Authelia (mcloud kubeconfig first)
+mcloud logout
 
 mcloud secrets set STRIPE_KEY       # in the app's repo: asks for the value
 mcloud secrets list                 # names only

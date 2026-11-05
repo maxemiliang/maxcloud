@@ -1,6 +1,8 @@
 package cli
 
 import (
+	"encoding/json"
+	"github.com/maxemiliang/maxcloud/internal/auth"
 	"io"
 	"os"
 	"path/filepath"
@@ -168,5 +170,37 @@ func TestProjectEntry(t *testing.T) {
 	var bad project
 	if err := yaml.Unmarshal([]byte("app: x\ndb: maybe\n"), &bad); err == nil {
 		t.Error("db: maybe accepted")
+	}
+}
+
+func TestCredentialPrintsTheCachedToken(t *testing.T) {
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	cfg := auth.Config{Issuer: auth.DefaultIssuer, ClientID: auth.DefaultClientID}
+	exp := time.Now().Add(time.Hour).Truncate(time.Second)
+	if err := auth.Save(cfg, &auth.Tokens{IDToken: "the-id-token", Expiry: exp}); err != nil {
+		t.Fatal(err)
+	}
+	var out strings.Builder
+	g := &globals{in: strings.NewReader(""), out: &out, errOut: io.Discard}
+	c := credentialCmd(g)
+	c.SetArgs(nil)
+	if err := c.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	var cred struct {
+		APIVersion, Kind string
+		Status           struct {
+			Token               string
+			ExpirationTimestamp time.Time
+		}
+	}
+	if err := json.Unmarshal([]byte(out.String()), &cred); err != nil {
+		t.Fatalf("%v: %s", err, out.String())
+	}
+	if cred.Kind != "ExecCredential" || cred.APIVersion != "client.authentication.k8s.io/v1" || cred.Status.Token != "the-id-token" {
+		t.Errorf("credential = %+v", cred)
+	}
+	if !cred.Status.ExpirationTimestamp.Before(exp) {
+		t.Errorf("expires %v, want before the token's %v", cred.Status.ExpirationTimestamp, exp)
 	}
 }
