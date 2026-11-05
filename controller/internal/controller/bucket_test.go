@@ -165,7 +165,7 @@ func newEnv(t *testing.T, objs ...client.Object) *env {
 	if err := v1.AddToScheme(scheme); err != nil {
 		t.Fatal(err)
 	}
-	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(objs...).WithStatusSubresource(&v1.Bucket{}, &v1.Database{}).Build()
+	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(objs...).WithStatusSubresource(&v1.Bucket{}, &v1.Database{}, &v1.DatabaseBranch{}).Build()
 	s := newFakeStorage()
 	p := &fakePolicies{policies: map[string]string{}}
 	id := &Identity{Client: c, APIReader: c, Storage: s, Endpoint: "https://example.upcloudobjects.com", Region: "europe-1"}

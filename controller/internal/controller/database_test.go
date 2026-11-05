@@ -178,8 +178,32 @@ func (e *dbEnv) marker() Marker {
 }
 
 func (e *dbEnv) backUp(gen int64) {
-	e.objects.put(dbBucket, serverName(gen)+"/base/20261105T120000/backup.info", "backup_label=x\nstatus=DONE\n")
-	e.objects.put(dbBucket, serverName(gen)+"/base/20261105T120000/data.tar.gz", "...")
+	e.backUpAt(gen, time.Date(2026, 11, 5, 7, 0, 0, 0, time.UTC))
+}
+
+// backUpAt stores a finished base backup of generation gen that ended at end.
+func (e *dbEnv) backUpAt(gen int64, end time.Time) {
+	id := end.UTC().Format("20060102T150405")
+	info := "backup_label=x\nstatus=DONE\nend_time=" + end.UTC().Format("2006-01-02 15:04:05.000000+00:00") + "\n"
+	e.objects.put(dbBucket, serverName(gen)+"/base/"+id+"/backup.info", info)
+	e.objects.put(dbBucket, serverName(gen)+"/base/"+id+"/data.tar.gz", "...")
+}
+
+func (e *dbEnv) annotate(key, value string) {
+	e.t.Helper()
+	db := e.db()
+	if db.Annotations == nil {
+		db.Annotations = map[string]string{}
+	}
+	db.Annotations[key] = value
+	if err := e.client.Update(context.Background(), db); err != nil {
+		e.t.Fatal(err)
+	}
+}
+
+func targetOf(c *unstructured.Unstructured) string {
+	t, _, _ := unstructured.NestedString(c.Object, "spec", "bootstrap", "recovery", "recoveryTarget", "targetTime")
+	return t
 }
 
 func bootstrapOf(c *unstructured.Unstructured) (method, from string) {
@@ -442,5 +466,128 @@ func TestIdentitySharedByBucketAndDatabase(t *testing.T) {
 	e.mustReconcile("shop", "uploads")
 	if _, ok := e.secret("shop"); !ok {
 		t.Error("the Secret went while the Database still needs it")
+	}
+}
+
+// A ready database at generation 1: Cluster ready, base backup, marker.
+func readyDB(t *testing.T) *dbEnv {
+	e := newDBEnv(t, tenantNS("shop"), database("shop"))
+	e.reconcileDB()
+	e.setClusterReady()
+	e.backUpAt(1, time.Date(2026, 11, 5, 7, 44, 0, 0, time.UTC))
+	e.reconcileDB()
+	if m := e.marker(); m.State != StateReady {
+		t.Fatalf("setup: marker %+v", m)
+	}
+	return e
+}
+
+func TestRestoreToAPointInTime(t *testing.T) {
+	e := readyDB(t) // now is 2026-11-05T12:00Z in these tests
+	e.annotate(v1.RestoreToAnnotation, "2026-11-05T10:30:00Z")
+
+	// Planned in the marker, then the Cluster is taken down.
+	e.reconcileDB()
+	m := e.marker()
+	if m.Generation != 2 || m.State != StateRestoring || m.RestoredFrom != 1 || m.TargetTime == nil ||
+		!m.TargetTime.Equal(time.Date(2026, 11, 5, 10, 30, 0, 0, time.UTC)) {
+		t.Fatalf("marker = %+v", m)
+	}
+	if _, ok := e.get(clusterGVK, "db"); ok {
+		t.Fatal("the Cluster wasn't taken down")
+	}
+	if db := e.db(); db.Status.Phase != v1.PhaseRestoring {
+		t.Errorf("phase = %s", db.Status.Phase)
+	}
+
+	// Brought back from generation 1, up to that time, into generation 2.
+	e.reconcileDB()
+	c := e.cluster()
+	if method, from := bootstrapOf(c); method != "recovery" || from != "db-1" {
+		t.Errorf("bootstrap = %s from %q", method, from)
+	}
+	if got := targetOf(c); got != "2026-11-05T10:30:00Z" {
+		t.Errorf("targetTime = %q", got)
+	}
+	if got := clusterServerName(c); got != "db-2" {
+		t.Errorf("serverName = %q", got)
+	}
+	db := e.db()
+	if _, ok := db.Annotations[v1.RestoreToAnnotation]; ok {
+		t.Error("annotation not removed")
+	}
+	if db.Status.RestoredTo == nil || condition(db, "Restore") == nil || condition(db, "Restore").Status != metav1.ConditionTrue {
+		t.Errorf("status = %+v", db.Status)
+	}
+
+	// Lost again before its own backup: the same restore again, same target.
+	e.deleteCluster()
+	e.reconcileDB()
+	if got := targetOf(e.cluster()); got != "2026-11-05T10:30:00Z" {
+		t.Errorf("retry lost the target: %q", got)
+	}
+}
+
+func TestRestoreToPicksTheNewestGenerationBeforeIt(t *testing.T) {
+	e := readyDB(t)
+	// Generation 2 exists from an earlier restore, backed up at 09:00.
+	e.deleteCluster()
+	e.reconcileDB()
+	e.setClusterReady()
+	e.backUpAt(2, time.Date(2026, 11, 5, 9, 0, 0, 0, time.UTC))
+	e.reconcileDB()
+
+	for _, tc := range []struct {
+		at   string
+		from string
+	}{
+		{"2026-11-05T08:30:00Z", "db-1"}, // before generation 2's first backup
+		{"2026-11-05T11:00:00Z", "db-2"},
+	} {
+		e.annotate(v1.RestoreToAnnotation, tc.at)
+		e.reconcileDB() // plan, take down
+		e.reconcileDB() // restore
+		if _, from := bootstrapOf(e.cluster()); from != tc.from {
+			t.Errorf("restore to %s: from %s, want %s", tc.at, from, tc.from)
+		}
+		e.setClusterReady()
+		gen := e.marker().Generation
+		e.backUpAt(gen, time.Date(2026, 11, 5, 11, 30, 0, 0, time.UTC))
+		e.reconcileDB()
+	}
+}
+
+func TestRestoreToRefused(t *testing.T) {
+	for _, at := range []string{"2026-11-05T06:00:00Z", "2026-11-06T00:00:00Z", "yesterday"} {
+		t.Run(at, func(t *testing.T) {
+			e := readyDB(t)
+			before := e.cluster().GetUID()
+			e.annotate(v1.RestoreToAnnotation, at)
+			e.reconcileDB()
+			db := e.db()
+			if c := condition(db, "Restore"); c == nil || c.Status != metav1.ConditionFalse {
+				t.Errorf("Restore = %+v", c)
+			}
+			if _, ok := db.Annotations[v1.RestoreToAnnotation]; ok {
+				t.Error("annotation left behind")
+			}
+			if e.cluster().GetUID() != before || e.marker().Generation != 1 {
+				t.Error("the database was touched")
+			}
+		})
+	}
+}
+
+func TestParseBackupInfo(t *testing.T) {
+	info := parseBackupInfo([]byte("backup_label=None\nstatus=DONE\nend_time=2026-11-05 07:44:41.123456+00:00\n"))
+	if info["status"] != "DONE" {
+		t.Errorf("status = %q", info["status"])
+	}
+	end, err := parseBarmanTime(info["end_time"])
+	if err != nil || !end.Equal(time.Date(2026, 11, 5, 7, 44, 41, 123456000, time.UTC)) {
+		t.Errorf("end = %v, %v", end, err)
+	}
+	if _, err := parseBarmanTime("2026-11-05 07:44:41+02:00"); err != nil {
+		t.Error(err)
 	}
 }

@@ -150,7 +150,7 @@ func run(metricsAddr, probeAddr string, leaderElect bool) error {
 	}).SetupWithManager(mgr); err != nil {
 		return fmt.Errorf("bucket controller: %w", err)
 	}
-	if err := (&controller.DatabaseReconciler{
+	databases := &controller.DatabaseReconciler{
 		Client:       mgr.GetClient(),
 		Identity:     identity,
 		Storage:      storage,
@@ -158,8 +158,12 @@ func run(metricsAddr, probeAddr string, leaderElect bool) error {
 		Endpoint:     cfg.endpoint,
 		Image:        cfg.postgresImage,
 		StorageClass: cfg.dbStorageClass,
-	}).SetupWithManager(mgr); err != nil {
+	}
+	if err := databases.SetupWithManager(mgr); err != nil {
 		return fmt.Errorf("database controller: %w", err)
+	}
+	if err := (&controller.BranchReconciler{Client: mgr.GetClient(), DB: databases}).SetupWithManager(mgr); err != nil {
+		return fmt.Errorf("database branch controller: %w", err)
 	}
 
 	if !cfg.tokenExpires.IsZero() {

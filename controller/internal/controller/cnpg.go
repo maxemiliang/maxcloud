@@ -2,6 +2,7 @@ package controller
 
 import (
 	"fmt"
+	"time"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -107,7 +108,7 @@ func firstBackup(db *v1.Database, gen int64) *unstructured.Unstructured {
 // cluster is the database's CloudNativePG Cluster, writing its backups to
 // generation gen. from > 0 restores generation from instead of starting
 // empty.
-func cluster(db *v1.Database, image, storageClass string, gen, from int64) *unstructured.Unstructured {
+func cluster(db *v1.Database, image, storageClass string, gen, from int64, target *time.Time) *unstructured.Unstructured {
 	u := newUnstructured(clusterGVK, db.Namespace, db.Name)
 	spec := map[string]any{
 		"instances":         int64(db.Spec.Instances),
@@ -142,13 +143,15 @@ func cluster(db *v1.Database, image, storageClass string, gen, from int64) *unst
 			"initdb": map[string]any{"database": appDatabase, "owner": appDatabase},
 		}
 	} else {
-		spec["bootstrap"] = map[string]any{
-			"recovery": map[string]any{
-				"source":   "origin",
-				"database": appDatabase,
-				"owner":    appDatabase,
-			},
+		recovery := map[string]any{
+			"source":   "origin",
+			"database": appDatabase,
+			"owner":    appDatabase,
 		}
+		if target != nil {
+			recovery["recoveryTarget"] = map[string]any{"targetTime": target.UTC().Format(time.RFC3339)}
+		}
+		spec["bootstrap"] = map[string]any{"recovery": recovery}
 		spec["externalClusters"] = []any{map[string]any{
 			"name": "origin",
 			"plugin": map[string]any{

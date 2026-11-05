@@ -253,6 +253,12 @@ spec:
                   from.
                 format: int64
                 type: integer
+              restoredTo:
+                description: |-
+                  RestoredTo is the point in time the current generation was restored
+                  to, if it was (restore-to).
+                format: date-time
+                type: string
             type: object
         type: object
         x-kubernetes-validations:

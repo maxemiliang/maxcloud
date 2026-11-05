@@ -132,7 +132,97 @@ func (r *DatabaseReconciler) reconcile(ctx context.Context, db *v1.Database, app
 			"a Cluster %s already exists and isn't this Database's (a database.yaml in the app's repo?): "+
 				"remove it, or the registry's db field", db.Name))
 	}
+	if db.Annotations[v1.RestoreToAnnotation] != "" {
+		return r.restoreTo(ctx, db, bucket, c)
+	}
 	return r.update(ctx, db, bucket, c)
+}
+
+// restoreTo starts a restore to a point in time (RestoreToAnnotation): it
+// plans it in the marker, then takes the Cluster down. create, called once
+// the Cluster is gone, does the restore from the plan, so a controller
+// restart halfway through carries on with the same restore.
+func (r *DatabaseReconciler) restoreTo(ctx context.Context, db *v1.Database, bucket string, c *unstructured.Unstructured) (ctrl.Result, error) {
+	t, err := restoreToAnnotation(db, r.now())
+	if err != nil {
+		return r.refuseRestore(ctx, db, err.Error())
+	}
+	data, found, err := r.Objects.GetObject(ctx, bucket, markerKey)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+	var m *Marker
+	if found {
+		if m, err = parseMarker(data); err != nil {
+			return r.block(ctx, db, fmt.Sprintf("%s in %s: %v", markerKey, bucket, err))
+		}
+	}
+	planned := m != nil && m.State == StateRestoring && m.TargetTime != nil && m.TargetTime.Equal(t)
+	if !planned {
+		current, err := parseServerName(clusterServerName(c))
+		if err != nil {
+			return r.block(ctx, db, fmt.Sprintf("Cluster %s: %v", db.Name, err))
+		}
+		if m != nil {
+			current = max(current, m.Generation)
+		}
+		src, ok, err := r.sourceFor(ctx, bucket, current, t)
+		if err != nil {
+			return ctrl.Result{}, err
+		}
+		if !ok {
+			return r.refuseRestore(ctx, db, fmt.Sprintf(
+				"can't restore to %s: no finished base backup from before then (backups are kept for %s)",
+				t.UTC().Format(time.RFC3339), db.Spec.Backup.Retention))
+		}
+		next := Marker{Generation: current + 1, State: StateRestoring, RestoredFrom: src, TargetTime: &t, Updated: r.now()}
+		if err := r.Objects.PutObject(ctx, bucket, markerKey, next.json()); err != nil {
+			return ctrl.Result{}, err
+		}
+		log.FromContext(ctx).Info("restore to a point in time planned", "target", t, "from", src, "generation", next.Generation)
+	}
+	if c.GetDeletionTimestamp() == nil {
+		if err := r.Delete(ctx, c); client.IgnoreNotFound(err) != nil {
+			return ctrl.Result{}, err
+		}
+	}
+	return ctrl.Result{RequeueAfter: 5 * time.Second}, r.setStatus(ctx, db, v1.PhaseRestoring, metav1.ConditionFalse, ReasonInProgress,
+		fmt.Sprintf("taking Cluster %s down to restore it to %s", db.Name, t.UTC().Format(time.RFC3339)))
+}
+
+// refuseRestore drops a restore-to it can't do, and says why in the
+// Restore condition (its own, so the next reconcile doesn't overwrite it).
+// The database is left as it was.
+func (r *DatabaseReconciler) refuseRestore(ctx context.Context, db *v1.Database, why string) (ctrl.Result, error) {
+	log.FromContext(ctx).Info("restore refused", "reason", why)
+	patch := client.MergeFrom(db.DeepCopy())
+	delete(db.Annotations, v1.RestoreToAnnotation)
+	if err := r.Patch(ctx, db, patch); err != nil {
+		return ctrl.Result{}, err
+	}
+	setDefaults(db)
+	meta.SetStatusCondition(&db.Status.Conditions, metav1.Condition{
+		Type: "Restore", Status: metav1.ConditionFalse, Reason: "Refused",
+		Message: why + "; the database was left as it was", ObservedGeneration: db.Generation,
+	})
+	return ctrl.Result{Requeue: true}, r.Status().Update(ctx, db)
+}
+
+// sourceFor finds the generation to restore time t from: the newest one up
+// to newest with a finished base backup that ended before t.
+func (r *DatabaseReconciler) sourceFor(ctx context.Context, bucket string, newest int64, t time.Time) (int64, bool, error) {
+	for g := newest; g >= 1; g-- {
+		ends, err := r.baseBackups(ctx, bucket, g)
+		if err != nil {
+			return 0, false, err
+		}
+		for _, end := range ends {
+			if !end.IsZero() && !end.After(t) {
+				return g, true, nil
+			}
+		}
+	}
+	return 0, false, nil
 }
 
 // create brings a missing Cluster back: a new database, or a restore.
@@ -162,7 +252,9 @@ func (r *DatabaseReconciler) create(ctx context.Context, db *v1.Database, bucket
 	m := Marker{Generation: p.Generation, State: StateInitializing, Updated: r.now()}
 	phase := v1.PhaseCreating
 	if p.Action == actRestore {
-		m.State, m.RestoredFrom = StateRestoring, p.From
+		// The target too: a retry of an interrupted restore to a point in
+		// time must stop at the same time, not at the latest.
+		m.State, m.RestoredFrom, m.TargetTime = StateRestoring, p.From, p.Target
 		phase = v1.PhaseRestoring
 	}
 	if err := r.Objects.PutObject(ctx, bucket, markerKey, m.json()); err != nil {
@@ -173,16 +265,18 @@ func (r *DatabaseReconciler) create(ctx context.Context, db *v1.Database, bucket
 	if err := r.apply(ctx, db, objectStore(db, bucket, r.Endpoint)); err != nil {
 		return ctrl.Result{}, err
 	}
-	c := cluster(db, r.Image, r.StorageClass, p.Generation, p.From)
+	c := cluster(db, r.Image, r.StorageClass, p.Generation, p.From, p.Target)
 	if err := controllerutil.SetControllerReference(db, c, r.Scheme()); err != nil {
 		return ctrl.Result{}, err
 	}
 	if err := r.Create(ctx, c); err != nil {
 		return ctrl.Result{}, err
 	}
-	if recoverFrom > 0 {
+	// What was asked for is done (the marker carries it from here).
+	if _, a := db.Annotations[v1.RecoverFromAnnotation]; a || db.Annotations[v1.RestoreToAnnotation] != "" {
 		patch := client.MergeFrom(db.DeepCopy())
 		delete(db.Annotations, v1.RecoverFromAnnotation)
+		delete(db.Annotations, v1.RestoreToAnnotation)
 		if err := r.Patch(ctx, db, patch); err != nil {
 			return ctrl.Result{}, err
 		}
@@ -190,6 +284,16 @@ func (r *DatabaseReconciler) create(ctx context.Context, db *v1.Database, bucket
 	}
 
 	db.Status.Generation, db.Status.RestoredFrom = p.Generation, p.From
+	db.Status.RestoredTo = nil
+	if p.Target != nil {
+		db.Status.RestoredTo = &metav1.Time{Time: *p.Target}
+	}
+	if p.Action == actRestore {
+		meta.SetStatusCondition(&db.Status.Conditions, metav1.Condition{
+			Type: "Restore", Status: metav1.ConditionTrue, Reason: "Restored",
+			Message: p.Reason + fmt.Sprintf(" into generation %d", p.Generation), ObservedGeneration: db.Generation,
+		})
+	}
 	meta.RemoveStatusCondition(&db.Status.Conditions, "Blocked")
 	return ctrl.Result{RequeueAfter: time.Minute}, r.setStatus(ctx, db, phase, metav1.ConditionFalse, ReasonInProgress, p.Reason)
 }
@@ -266,7 +370,7 @@ func (r *DatabaseReconciler) update(ctx context.Context, db *v1.Database, bucket
 // patchCluster changes what can change on a live Cluster: instances, PDB,
 // resources and a bigger disk. Never the bootstrap or where it archives.
 func (r *DatabaseReconciler) patchCluster(ctx context.Context, db *v1.Database, c *unstructured.Unstructured) error {
-	want := cluster(db, r.Image, r.StorageClass, 0, 0)
+	want := cluster(db, r.Image, r.StorageClass, 0, 0, nil)
 	before := c.DeepCopy()
 	for _, f := range [][]string{{"spec", "instances"}, {"spec", "enablePDB"}, {"spec", "resources"}} {
 		v, _, _ := unstructured.NestedFieldCopy(want.Object, f...)
@@ -320,26 +424,63 @@ func (r *DatabaseReconciler) look(ctx context.Context, bucket string, recoverFro
 	return v, nil
 }
 
-// hasBase reports whether generation gen has a finished base backup: a
-// barman backup.info that says status=DONE.
+// hasBase reports whether generation gen has a finished base backup.
 func (r *DatabaseReconciler) hasBase(ctx context.Context, bucket string, gen int64) (bool, error) {
+	ends, err := r.baseBackups(ctx, bucket, gen)
+	return len(ends) > 0, err
+}
+
+// baseBackups lists when generation gen's finished base backups ended:
+// barman's backup.info files that say status=DONE (a zero time if its
+// end_time can't be read).
+func (r *DatabaseReconciler) baseBackups(ctx context.Context, bucket string, gen int64) ([]time.Time, error) {
 	keys, err := r.Objects.Keys(ctx, bucket, serverName(gen)+"/base/", 1000)
 	if err != nil {
-		return false, err
+		return nil, err
 	}
+	var ends []time.Time
 	for _, k := range keys {
 		if !strings.HasSuffix(k, "/backup.info") {
 			continue
 		}
 		data, found, err := r.Objects.GetObject(ctx, bucket, k)
 		if err != nil {
-			return false, err
+			return nil, err
 		}
-		if found && strings.Contains(string(data), "status=DONE") {
-			return true, nil
+		if !found {
+			continue
+		}
+		info := parseBackupInfo(data)
+		if info["status"] != "DONE" {
+			continue
+		}
+		end, _ := parseBarmanTime(info["end_time"])
+		ends = append(ends, end)
+	}
+	return ends, nil
+}
+
+// parseBackupInfo reads barman's backup.info: key=value lines.
+func parseBackupInfo(data []byte) map[string]string {
+	out := map[string]string{}
+	for _, line := range strings.Split(string(data), "\n") {
+		k, v, ok := strings.Cut(strings.TrimSpace(line), "=")
+		if ok {
+			out[strings.TrimSpace(k)] = strings.TrimSpace(v)
 		}
 	}
-	return false, nil
+	return out
+}
+
+// parseBarmanTime reads a backup.info time such as
+// "2026-11-05 07:44:41.123456+00:00".
+func parseBarmanTime(s string) (time.Time, error) {
+	for _, layout := range []string{"2006-01-02 15:04:05.999999999-07:00", "2006-01-02 15:04:05-07:00", time.RFC3339Nano} {
+		if t, err := time.Parse(layout, s); err == nil {
+			return t, nil
+		}
+	}
+	return time.Time{}, fmt.Errorf("unreadable time %q", s)
 }
 
 // apply creates or updates an object the Database owns, as built.
@@ -487,6 +628,20 @@ func setDefaults(db *v1.Database) {
 	if db.Spec.ReclaimPolicy == "" {
 		db.Spec.ReclaimPolicy = v1.Retain
 	}
+}
+
+// restoreToAnnotation reads RestoreToAnnotation: an RFC 3339 time in the
+// past.
+func restoreToAnnotation(db *v1.Database, now time.Time) (time.Time, error) {
+	s := strings.TrimSpace(db.Annotations[v1.RestoreToAnnotation])
+	t, err := time.Parse(time.RFC3339, s)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("%s=%q: expected a time like 2026-11-05T10:00:00Z", v1.RestoreToAnnotation, s)
+	}
+	if !t.Before(now) {
+		return time.Time{}, fmt.Errorf("%s=%q is in the future", v1.RestoreToAnnotation, s)
+	}
+	return t, nil
 }
 
 func recoverFromAnnotation(db *v1.Database) (int64, error) {

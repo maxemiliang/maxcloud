@@ -12,6 +12,14 @@ import (
 // owns the spec.
 const RecoverFromAnnotation = "maxcloud.gronblom.dev/recover-from"
 
+// RestoreToAnnotation on a Database restores it, in place, to a point in
+// time ("2026-11-05T10:00:00Z"): the controller takes the Cluster down and
+// brings it back as it was then, as a new backup generation. Everything
+// written after that time is gone from the database (still in the older
+// generation's backups). The controller removes the annotation when the
+// restore has started.
+const RestoreToAnnotation = "maxcloud.gronblom.dev/restore-to"
+
 // DatabaseSpec is the app's Postgres database, run by CloudNativePG: a
 // Cluster named like the Database (db), whose connection details are in
 // the Secret db-app, backed up continuously to the app's bucket
@@ -88,6 +96,11 @@ type DatabaseStatus struct {
 	// RestoredFrom is the generation the current one was restored from.
 	// +optional
 	RestoredFrom int64 `json:"restoredFrom,omitempty"`
+
+	// RestoredTo is the point in time the current generation was restored
+	// to, if it was (restore-to).
+	// +optional
+	RestoredTo *metav1.Time `json:"restoredTo,omitempty"`
 
 	// +optional
 	Phase DatabasePhase `json:"phase,omitempty"`

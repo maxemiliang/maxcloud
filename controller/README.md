@@ -157,6 +157,43 @@ bucket's generations, then pick one:
 kubectl -n shop annotate database db maxcloud.gronblom.dev/recover-from=2
 ```
 
-It restores that generation into a new one and removes the annotation.
-Restoring to a point in time, and branches (a second `Cluster` from a
-point in time), come later.
+It restores that generation into a new one and removes the annotation
+(`mcloud db recover --from 2` does this).
+
+## Restoring to a point in time
+
+```fish
+kubectl -n shop annotate database db maxcloud.gronblom.dev/restore-to=2026-11-05T10:00:00Z
+# or: mcloud db restore shop --at "2026-11-05 10:00"
+```
+
+The controller finds the newest generation with a finished base backup
+from before that time, writes the plan (new generation, source, target
+time) to the marker, takes the `Cluster` down, and restores the source up
+to that time into the new generation. With the plan in the marker, an
+interruption anywhere carries on with the same restore. Everything written
+after the target is gone from the database, but still in the older
+generation's backups. A time before the oldest backup (or in the future)
+is refused: the `Restore` condition says why, and nothing is touched.
+
+One gap: a time in the minute or two after an earlier restore, before the
+new generation's first base backup, can't be reached. The old
+generation's WAL ends where the new one starts, so the recovery won't
+reach its target (the `MaxcloudDatabaseNotReady` alert fires).
+
+## Branches
+
+A `DatabaseBranch` is a throwaway copy of the database: restored from its
+backups (the latest, or `spec.at`) into a `Cluster` `db-<branch>` with one
+instance, no PDB and **no WAL archiving**, so it never writes into the
+database's backups or marker. Its URL is in the Secret
+`db-<branch>-app`. Apps may create these themselves (they count against
+the app's quota); deleting the branch deletes its `Cluster`. A branch is
+restored once: its spec can't change, and if its `Cluster` is deleted it
+fails rather than coming back.
+
+```fish
+mcloud db branch create shop try-migration          # latest
+mcloud db branch create shop yesterday --at 24h
+mcloud db branch delete shop try-migration
+```

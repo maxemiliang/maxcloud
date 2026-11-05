@@ -19,9 +19,12 @@ type Marker struct {
 	//   initializing  a new, empty database (initdb), no base backup yet
 	//   restoring     restored from RestoredFrom, no base backup of its own yet
 	//   ready         has a base backup of its own
-	State        string    `json:"state"`
-	RestoredFrom int64     `json:"restoredFrom,omitempty"`
-	Updated      time.Time `json:"updated"`
+	State        string `json:"state"`
+	RestoredFrom int64  `json:"restoredFrom,omitempty"`
+	// TargetTime: the restore stops at this point in time (restore-to),
+	// not at the end of RestoredFrom's WAL.
+	TargetTime *time.Time `json:"targetTime,omitempty"`
+	Updated    time.Time  `json:"updated"`
 }
 
 const (
@@ -81,8 +84,9 @@ const (
 // plan is what to do when the database's Cluster doesn't exist.
 type plan struct {
 	Action     action
-	Generation int64 // the generation the new Cluster writes to
-	From       int64 // actRestore: the generation to restore
+	Generation int64      // the generation the new Cluster writes to
+	From       int64      // actRestore: the generation to restore
+	Target     *time.Time // actRestore: stop at this time, nil for the latest
 	Reason     string
 }
 
@@ -166,14 +170,15 @@ func decide(v bucketView, recoverFrom int64) plan {
 			return plan{Action: actRestore, From: n, Generation: n + 1,
 				Reason: fmt.Sprintf("the Cluster is gone: restoring generation %d", n)}
 		case !v.Any[n] && v.Base[from]:
-			// The restore never got to archive anything: try it again.
-			return plan{Action: actRestore, From: from, Generation: n,
-				Reason: fmt.Sprintf("retrying the restore of generation %d", from)}
+			// The restore never got to archive anything (or is a restore to
+			// a point in time that was just planned): do it.
+			return plan{Action: actRestore, From: from, Generation: n, Target: m.TargetTime,
+				Reason: restoreReason(from, m.TargetTime)}
 		case v.Base[from]:
 			// It archived some WAL but no base backup: leave that folder
 			// alone and restore the source again into a new one.
-			return plan{Action: actRestore, From: from, Generation: n + 1,
-				Reason: fmt.Sprintf("retrying the restore of generation %d into a new generation", from)}
+			return plan{Action: actRestore, From: from, Generation: n + 1, Target: m.TargetTime,
+				Reason: restoreReason(from, m.TargetTime) + " (into a new generation)"}
 		}
 		return plan{Action: actBlock, Reason: fmt.Sprintf(
 			"generation %d was being restored from %d, and neither has a finished base backup", n, from)}
@@ -183,3 +188,10 @@ func decide(v bucketView, recoverFrom int64) plan {
 
 // markerKey is the marker's key in the bucket.
 const markerKey = "maxcloud.json"
+
+func restoreReason(from int64, target *time.Time) string {
+	if target != nil {
+		return fmt.Sprintf("restoring generation %d to %s", from, target.UTC().Format(time.RFC3339))
+	}
+	return fmt.Sprintf("restoring generation %d", from)
+}

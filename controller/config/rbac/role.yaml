@@ -37,6 +37,7 @@ rules:
   - maxcloud.gronblom.dev
   resources:
   - buckets
+  - databasebranches
   - databases
   verbs:
   - get
@@ -55,6 +56,7 @@ rules:
   - maxcloud.gronblom.dev
   resources:
   - buckets/status
+  - databasebranches/status
   - databases/status
   verbs:
   - get
