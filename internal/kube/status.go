@@ -22,6 +22,7 @@ type App struct {
 	Deploy   Condition       // the app's Flux Kustomization
 	Revision string          // last revision Flux applied
 	Applied  bool            // the Kustomization exists
+	InGit    bool            // registered in the homelab repo, not with mcloud
 }
 
 // Apps lists the registered apps.
@@ -52,7 +53,9 @@ func (c *Client) app(ctx context.Context, provider *unstructured.Unstructured) (
 			}
 			return ""
 		}
-		a.Entry = &registry.Entry{Name: s("name"), Repo: s("repo"), Path: s("path"), Branch: s("branch"), CPU: s("cpu"), Memory: s("memory"), Pods: s("pods"), Deploy: s("deploy")}
+		a.Entry = &registry.Entry{Name: s("name"), Repo: s("repo"), Path: s("path"), Branch: s("branch"), CPU: s("cpu"), Memory: s("memory"), Pods: s("pods"), Deploy: s("deploy"),
+			Buckets: s("buckets"), DB: s("db"), DBInstances: s("dbInstances"), DBSize: s("dbSize")}
+		a.InGit = provider.GetLabels()[registry.FluxOwnerLabel] != ""
 		if a.Entry.Name != "" {
 			a.Name = a.Entry.Name
 		}

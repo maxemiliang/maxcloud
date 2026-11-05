@@ -18,12 +18,17 @@ This repo holds:
 
 1. **Set up the repo.** `mcloud init` writes a starter functions app (or
    adds what an existing Node.js app needs), its deploy workflow and a
-   `maxcloud.yaml`.
-2. **Register the app.** `mcloud apps create` (or `init --register`)
-   commits one entry to the homelab repo's app registry
-   (`apps/maxcloud/apps/<name>.yaml`). From that entry, Flux creates the
-   app's namespace, with a quota and guardrails, and a reconciler for the
-   app's `deploy/k8s`.
+   `maxcloud.yaml`: the whole app's definition, like a `wrangler.toml`
+   (quota, buckets, database).
+2. **Register the app.** The first `mcloud deploy` does it, from
+   `maxcloud.yaml` (or `mcloud apps create`). It adds the app's entry to
+   the registry in the cluster, with your kubeconfig: no commit to the
+   homelab repo. From that entry the platform creates the app's namespace
+   with its quota and guardrails, its buckets and database, and a
+   reconciler for the app's `deploy/k8s`. Later deploys keep the entry in
+   line with `maxcloud.yaml`; the maxcloud controller keeps a copy of
+   every entry in Object Storage and puts them back after a cluster
+   rebuild.
 3. **Push to deploy.** Every push to `main` runs the deploy workflow
    (`.github/workflows/run-deploy.yaml` in this repo, which app repos call):
    - it builds the image (buildpacks, or the repo's Dockerfile);
@@ -56,8 +61,7 @@ For quick functions and experiments there's no need for git at all:
 
 ```fish
 mcloud init --deploy direct                 # a starter with deploy: direct in maxcloud.yaml
-mcloud apps create quick --deploy direct    # namespace and quota, nothing from git
-mcloud deploy                               # build here, push, apply, wait until ready
+mcloud deploy                               # register, build here, push, apply, wait until ready
 ```
 
 `mcloud deploy` builds the working tree, uncommitted changes included: with
@@ -169,16 +173,22 @@ mcloud logs shop web -f   # follow one service, including pods that start later
 mcloud generate           # what deploy/k8s would become (asks the built app)
 ```
 
-Run inside an app's repo, `status` and `logs` take the app name from a
-`maxcloud.yaml` there:
+Run inside an app's repo, commands take the app from its `maxcloud.yaml`,
+which also holds what `mcloud deploy` keeps the app's registry entry in
+line with (what it leaves out stays as it is):
 
 ```yaml
 app: shop
+quota: {cpu: 500m, memory: 2Gi}
+buckets: [uploads, assets:public]
+db: {size: 2Gi}          # or db: true
 ```
 
-`create`, `set` and `delete` show the change and ask before committing, since
-a commit to the homelab repo is a deploy. Pass `--dry-run` to only see it, or
-`--yes` to skip the question. `delete` asks you to type the app's name.
+`create`, `set` and `delete` change the registry in the cluster with your
+kubeconfig (no commit anywhere), and show the change and ask first, since it
+deploys. Pass `--dry-run` to only see it, or `--yes` to skip the question.
+`delete` asks you to type the app's name. Apps registered in the homelab
+repo itself (the platform's own, like run-demo) change there instead.
 
 ## Releasing
 

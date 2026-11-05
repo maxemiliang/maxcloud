@@ -303,3 +303,48 @@ func Parse(data []byte) (*Entry, error) {
 	}
 	return e, nil
 }
+
+// Labels on an entry made in the cluster by mcloud (not from homelab git).
+const (
+	ManagedByLabel = "app.kubernetes.io/managed-by"
+	ManagedBy      = "mcloud"
+	// FluxOwnerLabel is on objects Flux applied from git: entries that
+	// still live in the homelab repo.
+	FluxOwnerLabel = "kustomize.toolkit.fluxcd.io/name"
+	// Namespace of the registry's entries.
+	Namespace = "flux-system"
+)
+
+// Object is e as the ResourceSetInputProvider the registry reads, for the
+// Kubernetes API.
+func (e *Entry) Object() map[string]any {
+	values := map[string]any{}
+	for _, f := range e.fields() {
+		values[f.key] = f.value
+	}
+	return map[string]any{
+		"apiVersion": "fluxcd.controlplane.io/v1",
+		"kind":       "ResourceSetInputProvider",
+		"metadata": map[string]any{
+			"name":      e.Name,
+			"namespace": Namespace,
+			"labels": map[string]any{
+				AppLabel:       "true",
+				ManagedByLabel: ManagedBy,
+			},
+		},
+		"spec": map[string]any{
+			"type":          "Static",
+			"defaultValues": values,
+		},
+	}
+}
+
+// FromObject reads an entry back from its ResourceSetInputProvider.
+func FromObject(obj map[string]any) (*Entry, error) {
+	data, err := yaml.Marshal(obj)
+	if err != nil {
+		return nil, err
+	}
+	return Parse(data)
+}

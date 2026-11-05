@@ -29,8 +29,11 @@ and mcloud deploy only follows along. Uncommitted changes aren't deployed.
 With nothing new to push, --rebuild runs the workflow again (e.g. after a
 change in the homelab platform).
 
-A direct app (registered with --deploy direct, or deploy: direct in
-maxcloud.yaml) is deployed without git: mcloud builds the working tree,
+The app's settings (quota, buckets, database, source) come from
+maxcloud.yaml: the first deploy registers the app, later ones bring its
+registry entry in line. No commit to the homelab repo.
+
+A direct app (deploy: direct in maxcloud.yaml) is deployed without git: mcloud builds the working tree,
 uncommitted changes included, pushes the image, and applies the functions'
 manifests with your kubeconfig. Pushing to GHCR needs docker login ghcr.io
 (a token with write:packages); building without a Dockerfile needs pack.`,
@@ -42,13 +45,27 @@ manifests with your kubeconfig. Pushing to GHCR needs docker login ghcr.io
 				return err
 			}
 			name := p.App
-			if direct || p.Deploy == "direct" {
-				k, err := g.kube()
-				if err != nil {
-					return err
+			if direct {
+				p.Deploy = "direct"
+			}
+			k, err := g.kube()
+			if err != nil {
+				return err
+			}
+			ctx, cancel := context.WithTimeout(ctx, timeout)
+			defer cancel()
+			// The app's registry entry comes from maxcloud.yaml: registered on
+			// the first deploy, kept in line after that. No homelab commit.
+			created, err := g.syncApp(ctx, k, p)
+			if err != nil {
+				return err
+			}
+			if p.Deploy == "direct" {
+				if created {
+					if err := g.waitNamespace(ctx, name, 3*time.Minute); err != nil {
+						return err
+					}
 				}
-				ctx, cancel := context.WithTimeout(ctx, timeout)
-				defer cancel()
 				return g.deployDirect(ctx, k, p)
 			}
 			repo := originRepo()
@@ -66,12 +83,6 @@ manifests with your kubeconfig. Pushing to GHCR needs docker login ghcr.io
 			if err != nil {
 				return err
 			}
-			k, err := g.kube()
-			if err != nil {
-				return err
-			}
-			ctx, cancel := context.WithTimeout(ctx, timeout)
-			defer cancel()
 
 			if !noPush {
 				fmt.Fprintf(g.out, "Pushing %s to %s ...\n", branch, repo)

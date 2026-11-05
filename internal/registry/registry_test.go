@@ -126,3 +126,19 @@ func TestDB(t *testing.T) {
 		}
 	}
 }
+
+func TestObjectRoundTrip(t *testing.T) {
+	e := Entry{Name: "shop", Repo: "a/b", CPU: "500m", Buckets: "uploads,assets:public", DB: "true", DBSize: "2Gi"}
+	if err := e.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	o := e.Object()
+	labels := o["metadata"].(map[string]any)["labels"].(map[string]any)
+	if labels[AppLabel] != "true" || labels[ManagedByLabel] != ManagedBy {
+		t.Errorf("labels = %v", labels)
+	}
+	back, err := FromObject(o)
+	if err != nil || *back != e {
+		t.Errorf("round trip: %+v, %v", back, err)
+	}
+}

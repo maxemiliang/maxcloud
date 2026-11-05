@@ -3,6 +3,7 @@ package cli
 
 import (
 	"bufio"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -31,7 +32,6 @@ type globals struct {
 	kubeContext string
 	registry    string // <owner>/<repo> of the homelab repo
 	branch      string
-	dir         string // the registry's directory in that repo
 
 	in     io.Reader
 	out    io.Writer
@@ -70,7 +70,6 @@ GitHub access uses $GH_TOKEN, else the GitHub CLI's login.`,
 	f.StringVar(&g.kubeContext, "context", "", "kubeconfig context")
 	f.StringVar(&g.registry, "registry", envOr("MCLOUD_REGISTRY", "maxemiliang/homelab"), "GitHub repo holding the app registry ($MCLOUD_REGISTRY)")
 	f.StringVar(&g.branch, "registry-branch", "main", "branch of the registry repo")
-	f.StringVar(&g.dir, "registry-dir", "apps/maxcloud", "registry directory in that repo")
 	_ = f.MarkHidden("registry-branch")
 	_ = f.MarkHidden("registry-dir")
 
@@ -98,12 +97,58 @@ func (g *globals) github() (*github.Client, error) {
 	return github.New(t), nil
 }
 
-// project is an app repo's maxcloud.yaml.
+// project is an app repo's maxcloud.yaml: the whole app's definition, like
+// a wrangler.toml. mcloud deploy keeps the app's registry entry in line with
+// it; fields left out keep what the entry has (or the defaults).
 type project struct {
 	App    string `json:"app"`
 	Deploy string `json:"deploy"` // "direct" for direct deploys
 	Image  string `json:"image"`  // image repository for direct deploys
-	Dir    string `json:"-"`      // where the file is: the repo's root
+
+	// GitOps source: the repo (default: the origin remote), manifests
+	// directory and branch.
+	Repo   string `json:"repo"`
+	Path   string `json:"path"`
+	Branch string `json:"branch"`
+
+	Quota   *projectQuota `json:"quota"`
+	Buckets []string      `json:"buckets"` // "uploads", "assets:public"
+	DB      *projectDB    `json:"db"`      // db: true, or db: {size: 2Gi, instances: 2}
+
+	Dir string `json:"-"` // where the file is: the repo's root
+}
+
+type projectQuota struct {
+	CPU    string `json:"cpu"`
+	Memory string `json:"memory"`
+	Pods   string `json:"pods"`
+}
+
+// projectDB is the app's database: `db: true`, `db: false`, or settings.
+type projectDB struct {
+	Enabled   bool
+	Size      string
+	Instances string
+}
+
+func (d *projectDB) UnmarshalJSON(b []byte) error {
+	var on bool
+	if err := json.Unmarshal(b, &on); err == nil {
+		d.Enabled = on
+		return nil
+	}
+	var v struct {
+		Size      string `json:"size"`
+		Instances any    `json:"instances"`
+	}
+	if err := json.Unmarshal(b, &v); err != nil {
+		return fmt.Errorf("db: true, false, or {size: 2Gi, instances: 2}")
+	}
+	d.Enabled, d.Size = true, v.Size
+	if v.Instances != nil {
+		d.Instances = fmt.Sprint(v.Instances)
+	}
+	return nil
 }
 
 // loadProject finds maxcloud.yaml in the current directory or a parent.

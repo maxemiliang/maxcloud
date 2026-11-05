@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/maxemiliang/maxcloud/internal/registry"
+	"sigs.k8s.io/yaml"
 )
 
 func TestAppNameFromProjectFile(t *testing.T) {
@@ -124,5 +125,48 @@ func TestParseAt(t *testing.T) {
 		if _, err := parseAt(bad, now); err == nil {
 			t.Errorf("parseAt(%q): want an error", bad)
 		}
+	}
+}
+
+func TestProjectEntry(t *testing.T) {
+	read := func(y string) *project {
+		t.Helper()
+		var p project
+		if err := yaml.Unmarshal([]byte(y), &p); err != nil {
+			t.Fatal(err)
+		}
+		return &p
+	}
+	// A new app: everything from maxcloud.yaml.
+	p := read("app: shop\nrepo: o/shop\nquota: {cpu: 500m}\nbuckets: [uploads, assets:public]\ndb: {size: 2Gi, instances: 2}\n")
+	e := p.entry(nil)
+	if e.Name != "shop" || e.Repo != "o/shop" || e.CPU != "500m" || e.Buckets != "uploads,assets:public" || e.DB != "true" || e.DBSize != "2Gi" || e.DBInstances != "2" {
+		t.Errorf("new entry = %+v", e)
+	}
+	if err := e.Validate(); err != nil {
+		t.Error(err)
+	}
+
+	// An existing app: what maxcloud.yaml leaves out stays.
+	base := &registry.Entry{Name: "shop", Repo: "o/shop", CPU: "1", Memory: "2Gi", Buckets: "old", DB: "true", DBSize: "5Gi"}
+	e = read("app: shop\nbuckets: [new]\n").entry(base)
+	if e.CPU != "1" || e.Memory != "2Gi" || e.Buckets != "new" || e.DB != "true" || e.DBSize != "5Gi" {
+		t.Errorf("merged = %+v", e)
+	}
+	// db: true keeps the size; db: false removes the database.
+	if e := read("app: shop\ndb: true\n").entry(base); e.DB != "true" || e.DBSize != "5Gi" {
+		t.Errorf("db: true = %+v", e)
+	}
+	if e := read("app: shop\ndb: false\n").entry(base); e.DB != "" || e.DBSize != "" {
+		t.Errorf("db: false = %+v", e)
+	}
+	// A direct app has no git source.
+	if e := read("app: quick\ndeploy: direct\n").entry(&registry.Entry{Name: "quick", Repo: "o/q"}); e.Repo != "" || !e.Direct() {
+		t.Errorf("direct = %+v", e)
+	}
+	// Bad db value.
+	var bad project
+	if err := yaml.Unmarshal([]byte("app: x\ndb: maybe\n"), &bad); err == nil {
+		t.Error("db: maybe accepted")
 	}
 }

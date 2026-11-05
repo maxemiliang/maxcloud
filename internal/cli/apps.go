@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"path"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -14,7 +13,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/maxemiliang/maxcloud/internal/github"
-	"github.com/maxemiliang/maxcloud/internal/kustomize"
+	"github.com/maxemiliang/maxcloud/internal/kube"
 	"github.com/maxemiliang/maxcloud/internal/registry"
 )
 
@@ -46,9 +45,13 @@ func appsListCmd(g *globals) *cobra.Command {
 				return nil
 			}
 			tw := tabwriter.NewWriter(g.out, 0, 4, 2, ' ', 0)
-			fmt.Fprintln(tw, "NAME\tSOURCE\tDEPLOYED\tREVISION\tMESSAGE")
+			fmt.Fprintln(tw, "NAME\tSOURCE\tREGISTERED\tDEPLOYED\tREVISION\tMESSAGE")
 			for _, a := range apps {
-				fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n", a.Name, source(a.Entry, g.registry), mark(a.Deploy.Status, a.Applied), shortRev(a.Revision), truncate(a.Deploy.Message, 60))
+				where := "cluster"
+				if a.InGit {
+					where = "homelab git"
+				}
+				fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n", a.Name, source(a.Entry, g.registry), where, mark(a.Deploy.Status, a.Applied), shortRev(a.Revision), truncate(a.Deploy.Message, 60))
 			}
 			return tw.Flush()
 		},
@@ -105,23 +108,23 @@ func (cf *commitFlags) bind(f *pflag.FlagSet, wait bool) {
 	}
 }
 
-func (g *globals) entryPath(name string) string { return path.Join(g.dir, registry.FilePath(name)) }
-func (g *globals) kustPath() string             { return path.Join(g.dir, "kustomization.yaml") }
-
 func appsCreateCmd(g *globals) *cobra.Command {
 	var e registry.Entry
 	var cf commitFlags
 	c := &cobra.Command{
 		Use:   "create NAME",
 		Short: "Register an app: its namespace, quota and deploys from its repo",
-		Long: `Register an app on maxcloud. This commits one file to the registry (and
-lists it there), and Flux then creates the app's namespace with its quota and
-guardrails, and starts deploying the app's manifests from its repo.
+		Long: `Register an app on maxcloud. This adds the app's entry to the registry in
+the cluster (with your kubeconfig, no commit anywhere), and the registry then
+creates the app's namespace with its quota and guardrails, its buckets and
+database, and starts deploying the app's manifests from its repo.
+
+In an app's repo, mcloud deploy does this by itself from maxcloud.yaml.
 
 The name becomes the namespace, and public services get
 https://<service>-<name>.gronblom.dev.`,
 		Example: `  mcloud apps create shop --repo maxemiliang/shop
-  mcloud apps create shop --repo maxemiliang/shop --cpu 500m --memory 2Gi`,
+  mcloud apps create shop --repo maxemiliang/shop --cpu 500m --memory 2Gi --db`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			e.Name = args[0]
@@ -133,56 +136,44 @@ https://<service>-<name>.gronblom.dev.`,
 	return c
 }
 
-// createApp registers e: one commit to the registry, after showing it and
-// asking (unless cf says otherwise).
+// createApp registers e in the cluster, after showing it and asking
+// (unless cf says otherwise).
 func (g *globals) createApp(ctx context.Context, e registry.Entry, cf commitFlags) error {
 	if err := e.Validate(); err != nil {
 		return err
 	}
-	gh, err := g.github()
+	k, err := g.kube()
 	if err != nil {
 		return err
+	}
+	if cur, err := k.GetRegistryEntry(ctx, e.Name); err != nil {
+		return err
+	} else if cur != nil {
+		return fmt.Errorf("%s is already registered; change it with `mcloud apps set`", e.Name)
 	}
 	if err := g.checkNamespace(ctx, e.Name); err != nil {
 		return err
 	}
 	if e.Repo != "" && !e.Direct() {
-		g.checkRepo(ctx, gh, &e)
+		if gh, err := g.github(); err == nil {
+			g.checkRepo(ctx, gh, &e)
+		}
 	}
 
-	content := e.Render()
-	fmt.Fprintf(g.out, "Adds %s to %s (%s):\n\n%s\n", g.entryPath(e.Name), g.registry, g.branch, indent(string(content)))
-	fmt.Fprintf(g.out, "and lists it in %s.\n\n", g.kustPath())
+	fmt.Fprintf(g.out, "Registers %s:\n\n%s\n", e.Name, indent(string(e.Render())))
 	if cf.dryRun {
 		return nil
 	}
 	if !cf.yes {
-		ok, err := g.confirm(fmt.Sprintf("Commit to %s, which deploys it?", g.registry))
+		ok, err := g.confirm("Register it, which creates its namespace and deploys it?")
 		if err != nil || !ok {
 			return orAborted(err)
 		}
 	}
-	sha, err := gh.Commit(ctx, github.Repo(g.registry), g.branch, fmt.Sprintf("feat(maxcloud): add app %s\n\nRegistered with mcloud: %s.", e.Name, source(&e, g.registry)),
-		func(read github.Reader) ([]github.Change, error) {
-			if _, err := read(g.entryPath(e.Name)); err == nil {
-				return nil, fmt.Errorf("%s is already registered; change it with `mcloud apps set`", e.Name)
-			} else if !errors.Is(err, github.ErrNotFound) {
-				return nil, err
-			}
-			k, err := read(g.kustPath())
-			if err != nil {
-				return nil, err
-			}
-			nk, _, err := kustomize.AddResource(string(k), registry.FilePath(e.Name))
-			if err != nil {
-				return nil, err
-			}
-			return []github.Change{{Path: g.entryPath(e.Name), Content: content}, {Path: g.kustPath(), Content: []byte(nk)}}, nil
-		})
-	if err != nil {
+	if err := k.PutRegistryEntry(ctx, &e); err != nil {
 		return err
 	}
-	fmt.Fprintf(g.out, "Committed https://github.com/%s/commit/%s\n", g.registry, sha)
+	fmt.Fprintf(g.out, "Registered %s.\n", e.Name)
 	if e.Repo != "" && !e.Direct() {
 		fmt.Fprintf(g.out, `
 For Flux to read %[1]s, the homelab's Flux GitHub App needs access to it:
@@ -229,76 +220,27 @@ empty value (--cpu "") to go back to the default.`,
 					*fields[flag] = *v
 				}
 			}
-			gh, err := g.github()
+			k, err := g.kube()
 			if err != nil {
 				return err
 			}
-			cur, err := gh.File(ctx, github.Repo(g.registry), g.branch, g.entryPath(name))
-			if errors.Is(err, github.ErrNotFound) {
-				return fmt.Errorf("%s isn't registered (no %s)", name, g.entryPath(name))
-			} else if err != nil {
+			cur, err := k.GetRegistryEntry(ctx, name)
+			if err != nil {
 				return err
 			}
-			old, err := registry.Parse(cur)
-			if err != nil {
-				return fmt.Errorf("%s: %w", g.entryPath(name), err)
+			if cur == nil {
+				return fmt.Errorf("%s isn't registered (mcloud apps list)", name)
 			}
+			if cur.InGit {
+				return fmt.Errorf("%s is registered in the homelab repo: change apps/maxcloud/apps/%s.yaml there", name, name)
+			}
+			old := cur.Entry
 			e := *old
 			apply(&e)
 			if err := e.Validate(); err != nil {
 				return err
 			}
-			if e == *old {
-				fmt.Fprintln(g.out, "Nothing changes.")
-				return nil
-			}
-			fmt.Fprintf(g.out, "Changes %s in %s:\n", name, g.registry)
-			for _, d := range diffEntries(old, &e) {
-				fmt.Fprintf(g.out, "  %s\n", d)
-			}
-			if old.Direct() != e.Direct() {
-				fmt.Fprintf(g.out, "\nSwitching how %s deploys replaces its workloads: ", name)
-				if e.Direct() {
-					fmt.Fprintln(g.out, "Flux removes everything it applied (databases included, if they came from git), and the app is down until `mcloud deploy` applies it again.")
-				} else {
-					fmt.Fprintln(g.out, "Flux applies the app from git and takes over objects of the same name; delete any that mcloud applied and git doesn't have.")
-				}
-			}
-			fmt.Fprintln(g.out)
-			if cf.dryRun {
-				return nil
-			}
-			if !cf.yes {
-				ok, err := g.confirm("Commit, which deploys the change?")
-				if err != nil || !ok {
-					return orAborted(err)
-				}
-			}
-			sha, err := gh.Commit(ctx, github.Repo(g.registry), g.branch, fmt.Sprintf("chore(maxcloud): %s: %s", name, strings.Join(diffEntries(old, &e), ", ")),
-				func(read github.Reader) ([]github.Change, error) {
-					cur, err := read(g.entryPath(name))
-					if err != nil {
-						return nil, err
-					}
-					e, err := registry.Parse(cur)
-					if err != nil {
-						return nil, err
-					}
-					apply(e)
-					if err := e.Validate(); err != nil {
-						return nil, err
-					}
-					return []github.Change{{Path: g.entryPath(name), Content: e.Render()}}, nil
-				})
-			if err != nil {
-				return err
-			}
-			if sha == "" {
-				fmt.Fprintln(g.out, "Nothing changed.")
-				return nil
-			}
-			fmt.Fprintf(g.out, "Committed https://github.com/%s/commit/%s\n", g.registry, sha)
-			return nil
+			return g.changeApp(ctx, k, old, &e, cf)
 		},
 	}
 	entryFlags(c.Flags(), &flags)
@@ -334,6 +276,46 @@ func diffEntries(a, b *registry.Entry) []string {
 	return out
 }
 
+// changeApp shows what changes from old to e, asks (unless cf says
+// otherwise), and writes e to the registry.
+func (g *globals) changeApp(ctx context.Context, k *kube.Client, old, e *registry.Entry, cf commitFlags) error {
+	diff := diffEntries(old, e)
+	if len(diff) == 0 {
+		fmt.Fprintln(g.out, "Nothing changes.")
+		return nil
+	}
+	fmt.Fprintf(g.out, "Changes %s:\n", e.Name)
+	for _, d := range diff {
+		fmt.Fprintf(g.out, "  %s\n", d)
+	}
+	if old.Direct() != e.Direct() {
+		fmt.Fprintf(g.out, "\nSwitching how %s deploys replaces its workloads: ", e.Name)
+		if e.Direct() {
+			fmt.Fprintln(g.out, "Flux removes everything it applied from the app's repo, and the app is down until `mcloud deploy` applies it again.")
+		} else {
+			fmt.Fprintln(g.out, "Flux applies the app from git and takes over objects of the same name; delete any that mcloud applied and git doesn't have.")
+		}
+	}
+	if old.DB == "true" && e.DB != "true" {
+		fmt.Fprintln(g.out, "\nRemoving the database deletes it; its backups stay in Object Storage.")
+	}
+	fmt.Fprintln(g.out)
+	if cf.dryRun {
+		return nil
+	}
+	if !cf.yes {
+		ok, err := g.confirm("Apply the change?")
+		if err != nil || !ok {
+			return orAborted(err)
+		}
+	}
+	if err := k.PutRegistryEntry(ctx, e); err != nil {
+		return err
+	}
+	fmt.Fprintln(g.out, "Changed.")
+	return nil
+}
+
 func appsDeleteCmd(g *globals) *cobra.Command {
 	var cf commitFlags
 	c := &cobra.Command{
@@ -347,26 +329,29 @@ one.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name := args[0]
 			ctx := cmd.Context()
-			gh, err := g.github()
+			k, err := g.kube()
 			if err != nil {
 				return err
 			}
-			if _, err := gh.File(ctx, github.Repo(g.registry), g.branch, g.entryPath(name)); errors.Is(err, github.ErrNotFound) {
-				return fmt.Errorf("%s isn't registered (no %s)", name, g.entryPath(name))
-			} else if err != nil {
+			cur, err := k.GetRegistryEntry(ctx, name)
+			if err != nil {
 				return err
 			}
-			fmt.Fprintf(g.out, "Removes %s from %s. Flux then deletes namespace %s and everything in it", g.entryPath(name), g.registry, name)
-			if k, err := g.kube(); err == nil {
-				if st, err := k.AppStatus(ctx, name); err == nil && len(st.Databases) > 0 {
-					var dbs []string
-					for _, d := range st.Databases {
-						dbs = append(dbs, d.Name)
-					}
-					fmt.Fprintf(g.out, ", including the database(s) %s", strings.Join(dbs, ", "))
-				}
+			if cur == nil {
+				return fmt.Errorf("%s isn't registered (mcloud apps list)", name)
 			}
-			fmt.Fprint(g.out, ".\n\n")
+			if cur.InGit {
+				return fmt.Errorf("%s is registered in the homelab repo: remove apps/maxcloud/apps/%s.yaml there", name, name)
+			}
+			fmt.Fprintf(g.out, "Removes %s from the registry, which then deletes namespace %s and everything in it", name, name)
+			if st, err := k.AppStatus(ctx, name); err == nil && len(st.Databases) > 0 {
+				var dbs []string
+				for _, d := range st.Databases {
+					dbs = append(dbs, d.Name)
+				}
+				fmt.Fprintf(g.out, ", including the database(s) %s", strings.Join(dbs, ", "))
+			}
+			fmt.Fprint(g.out, ".\nBuckets and database backups in Object Storage are kept (still billed).\n\n")
 			if cf.dryRun {
 				return nil
 			}
@@ -376,34 +361,10 @@ one.`,
 					return orAborted(err)
 				}
 			}
-			sha, err := gh.Commit(ctx, github.Repo(g.registry), g.branch, fmt.Sprintf("chore(maxcloud): remove app %s", name),
-				func(read github.Reader) ([]github.Change, error) {
-					k, err := read(g.kustPath())
-					if err != nil {
-						return nil, err
-					}
-					nk, listed, err := kustomize.RemoveResource(string(k), registry.FilePath(name))
-					if err != nil {
-						return nil, err
-					}
-					var changes []github.Change
-					if listed {
-						changes = append(changes, github.Change{Path: g.kustPath(), Content: []byte(nk)})
-					}
-					if _, err := read(g.entryPath(name)); err == nil {
-						changes = append(changes, github.Change{Path: g.entryPath(name)})
-					} else if !errors.Is(err, github.ErrNotFound) {
-						return nil, err
-					}
-					if len(changes) == 0 {
-						return nil, fmt.Errorf("%s isn't registered any more", name)
-					}
-					return changes, nil
-				})
-			if err != nil {
+			if err := k.DeleteRegistryEntry(ctx, name); err != nil {
 				return err
 			}
-			fmt.Fprintf(g.out, "Committed https://github.com/%s/commit/%s\n", g.registry, sha)
+			fmt.Fprintf(g.out, "Removed %s.\n", name)
 			return nil
 		},
 	}

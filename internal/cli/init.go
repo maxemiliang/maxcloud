@@ -110,8 +110,18 @@ func hello(w http.ResponseWriter, r *http.Request) {
 
 // Always part of an app, whatever language it's in.
 var appFiles = map[string]string{
-	"maxcloud.yaml": `# This repo's app on maxcloud: mcloud status, logs and deploy run here use it.
+	"maxcloud.yaml": `# This repo's app on maxcloud: the whole app's definition. mcloud deploy
+# registers the app from it the first time and keeps it in line after that
+# (no commit to the homelab repo); mcloud status, logs and the rest use it too.
 app: %[1]s
+# What the app may reserve (defaults: 200m CPU, 1Gi memory, 20 pods):
+# quota: {cpu: 500m, memory: 2Gi}
+# S3 buckets in UpCloud Object Storage (bucketName("uploads") in the SDK);
+# ":public" lets anyone read one, at https://<bucket>--<app>.gronblom.dev/:
+# buckets: [uploads, assets:public]
+# A Postgres database (DATABASE_URL), backed up and restorable to a point in
+# time; queue functions need it:
+# db: true            # or {size: 2Gi, instances: 2}
 `,
 	".github/workflows/deploy.yaml": `# Every push to main deploys this app to maxcloud (maxemiliang/maxcloud,
 # .github/workflows/run-deploy.yaml): builds the image, writes the
