@@ -11,6 +11,9 @@
 //	MAXCLOUD_S3_REGION           default europe-1
 //	MAXCLOUD_POSTGRES_IMAGE      the databases' Postgres image (default in the code)
 //	MAXCLOUD_DB_STORAGE_CLASS    the databases' StorageClass (default: the cluster's)
+//	MAXCLOUD_PUBLIC_DOMAIN       gives public buckets <bucket>--<app>.<domain> (off if unset)
+//	MAXCLOUD_PUBLIC_GATEWAY      namespace/gateway/listener for those (default traefik/public/https-public)
+//	POD_NAMESPACE                where their route objects go (default maxcloud-system)
 //	AWS_ACCESS_KEY_ID            the controller's own S3 user
 //	AWS_SECRET_ACCESS_KEY
 package main
@@ -19,6 +22,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -41,6 +45,7 @@ var Version = "dev"
 type config struct {
 	token, serviceUUID, endpoint, region, accessKeyID, secretAccessKey string
 	postgresImage, dbStorageClass                                      string
+	publicDomain, publicGateway, namespace                             string
 	tokenExpires                                                       time.Time
 }
 
@@ -57,6 +62,13 @@ func configFromEnv() (config, error) {
 		c.region = "europe-1"
 	}
 	c.dbStorageClass = os.Getenv("MAXCLOUD_DB_STORAGE_CLASS")
+	c.publicDomain = os.Getenv("MAXCLOUD_PUBLIC_DOMAIN")
+	if c.publicGateway = os.Getenv("MAXCLOUD_PUBLIC_GATEWAY"); c.publicGateway == "" {
+		c.publicGateway = "traefik/public/https-public"
+	}
+	if c.namespace = os.Getenv("POD_NAMESPACE"); c.namespace == "" {
+		c.namespace = "maxcloud-system"
+	}
 	if c.postgresImage = os.Getenv("MAXCLOUD_POSTGRES_IMAGE"); c.postgresImage == "" {
 		c.postgresImage = controller.DefaultPostgresImage
 	}
@@ -140,12 +152,29 @@ func run(metricsAddr, probeAddr string, leaderElect bool) error {
 		Endpoint:  cfg.endpoint,
 		Region:    cfg.region,
 	}
+	var routes *controller.PublicRoutes
+	if cfg.publicDomain != "" {
+		gw := strings.Split(cfg.publicGateway, "/")
+		if len(gw) != 3 {
+			return fmt.Errorf("MAXCLOUD_PUBLIC_GATEWAY %q: expected namespace/gateway/listener", cfg.publicGateway)
+		}
+		u, err := url.Parse(cfg.endpoint)
+		if err != nil {
+			return fmt.Errorf("MAXCLOUD_S3_ENDPOINT: %w", err)
+		}
+		routes = &controller.PublicRoutes{
+			Client: mgr.GetClient(), Reader: mgr.GetAPIReader(), Namespace: cfg.namespace,
+			Domain: cfg.publicDomain, GatewayNamespace: gw[0], Gateway: gw[1], Listener: gw[2],
+			S3Host: u.Hostname(),
+		}
+	}
 	if err := (&controller.BucketReconciler{
 		Client:   mgr.GetClient(),
 		Identity: identity,
 		Storage:  storage,
 		Policies: s3c,
 		Metrics:  &controller.MetricsCache{Storage: storage, MaxAge: 2 * time.Minute},
+		Routes:   routes,
 		Endpoint: cfg.endpoint,
 	}).SetupWithManager(mgr); err != nil {
 		return fmt.Errorf("bucket controller: %w", err)

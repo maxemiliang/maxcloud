@@ -43,6 +43,11 @@ type BucketStatus struct {
 	// +optional
 	Endpoint string `json:"endpoint,omitempty"`
 
+	// URL a public bucket's objects are served at (behind the CDN), when
+	// the cluster gives public buckets hostnames.
+	// +optional
+	URL string `json:"url,omitempty"`
+
 	// SizeBytes and Objects are UpCloud's bucket metrics, refreshed every
 	// few minutes.
 	// +optional
@@ -69,6 +74,7 @@ type BucketStatus struct {
 // +kubebuilder:resource:categories=maxcloud
 // +kubebuilder:printcolumn:name="Bucket",type=string,JSONPath=`.status.bucketName`
 // +kubebuilder:printcolumn:name="Public",type=boolean,JSONPath=`.spec.public`
+// +kubebuilder:printcolumn:name="URL",type=string,JSONPath=`.status.url`
 // +kubebuilder:printcolumn:name="Size",type=integer,JSONPath=`.status.sizeBytes`
 // +kubebuilder:printcolumn:name="Ready",type=string,JSONPath=`.status.conditions[?(@.type=="Ready")].status`
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`

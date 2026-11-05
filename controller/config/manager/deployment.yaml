@@ -23,6 +23,11 @@ spec:
         - name: controller
           image: ghcr.io/maxemiliang/maxcloud-controller
           args: [--leader-elect]
+          env:
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
           envFrom:
             - secretRef:
                 name: maxcloud-controller

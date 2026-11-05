@@ -16,6 +16,7 @@ rules:
   - ""
   resources:
   - secrets
+  - services
   verbs:
   - create
   - delete
@@ -33,6 +34,15 @@ rules:
   - patch
   - update
   - watch
+- apiGroups:
+  - gateway.networking.k8s.io
+  resources:
+  - httproutes
+  verbs:
+  - create
+  - delete
+  - get
+  - update
 - apiGroups:
   - maxcloud.gronblom.dev
   resources:
@@ -76,3 +86,12 @@ rules:
   - patch
   - update
   - watch
+- apiGroups:
+  - traefik.io
+  resources:
+  - traefikservices
+  verbs:
+  - create
+  - delete
+  - get
+  - update

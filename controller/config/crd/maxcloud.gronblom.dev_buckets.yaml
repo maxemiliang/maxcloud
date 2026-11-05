@@ -23,6 +23,9 @@ spec:
     - jsonPath: .spec.public
       name: Public
       type: boolean
+    - jsonPath: .status.url
+      name: URL
+      type: string
     - jsonPath: .status.sizeBytes
       name: Size
       type: integer
@@ -165,6 +168,11 @@ spec:
                   few minutes.
                 format: int64
                 type: integer
+              url:
+                description: |-
+                  URL a public bucket's objects are served at (behind the CDN), when
+                  the cluster gives public buckets hostnames.
+                type: string
             type: object
         type: object
         x-kubernetes-validations:

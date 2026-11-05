@@ -48,6 +48,29 @@ holds the variables every AWS SDK reads, a pod only needs
 kind; `buckets.maxcloud.gronblom.dev` also works). A
 Bucket that isn't Ready says why in its `Ready` condition.
 
+### Public buckets on their own hostname
+
+With `MAXCLOUD_PUBLIC_DOMAIN` set, a `public: true` bucket also gets
+`https://<bucket>--<app>.<domain>/` (in `status.url`), on the cluster's
+Gateway: behind the CDN in front of the cluster, with its wildcard
+certificate. GET and HEAD only. The Gateway API can't route to a host
+outside the cluster (Traefik refuses ExternalName Services as HTTPRoute
+backends), so the route goes through Traefik's own objects, all in the
+controller's namespace:
+
+```
+HTTPRoute <bucket>--<app>.<domain>, GET/HEAD
+  -> TraefikService (https, passHostHeader: false)
+    -> Service type ExternalName <bucket>.<S3 host>:443
+```
+
+Traefik needs `providers.kubernetesCRD.allowExternalNameServices: true`
+and the controller's namespace in
+`providers.kubernetesGateway.crossProviderNamespaces`. Apps can make
+neither kind of object, nor routes in that namespace. `--` can't occur in
+app or bucket names, so the hostname can't collide with a Knative
+service's `<svc>-<app>`. The bucket is still public on the S3 endpoint too.
+
 ### Databases
 
 The registry's `db` field makes a `Database` named `db` in the app's

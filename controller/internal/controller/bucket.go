@@ -58,6 +58,8 @@ type BucketReconciler struct {
 	Storage  objectstorage.Storage
 	Policies objectstorage.BucketPolicies
 	Metrics  *MetricsCache
+	// Routes gives public buckets a hostname; nil or disabled: none.
+	Routes *PublicRoutes
 	// Endpoint of the Object Storage instance, shown in the status.
 	Endpoint string
 }
@@ -130,6 +132,19 @@ func (r *BucketReconciler) reconcile(ctx context.Context, b *v1.Bucket, app, buc
 		}
 	}
 
+	b.Status.URL = ""
+	if r.Routes.Enabled() {
+		if b.Spec.Public {
+			host := r.Routes.Hostname(app, b.Name)
+			if err := r.Routes.Ensure(ctx, bucket, host); err != nil {
+				return err
+			}
+			b.Status.URL = "https://" + host + "/"
+		} else if err := r.Routes.Remove(ctx, bucket); err != nil {
+			return err
+		}
+	}
+
 	b.Status.BucketName = bucket
 	b.Status.Endpoint = r.Endpoint
 	if m, ok, err := r.Metrics.Get(ctx, bucket); err != nil {
@@ -153,6 +168,13 @@ func (r *BucketReconciler) finalize(ctx context.Context, b *v1.Bucket, tenant bo
 	// Outside a tenant namespace nothing was ever created.
 	if tenant {
 		app := b.Namespace
+		if r.Routes.Enabled() {
+			if bucket, err := naming.Bucket(app, b.Name); err == nil {
+				if err := r.Routes.Remove(ctx, bucket); err != nil {
+					return err
+				}
+			}
+		}
 		if b.Spec.ReclaimPolicy == v1.Delete {
 			if bucket, err := naming.Bucket(app, b.Name); err == nil {
 				if err := r.Storage.DeleteBucket(ctx, bucket); err != nil {
