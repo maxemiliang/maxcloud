@@ -130,8 +130,13 @@ type Options struct {
 	// Image is the name the manifests use for the app's image, which the
 	// deploy workflow replaces with the built one. Default "app".
 	Image string
-	// Database: give every function DATABASE_URL from the db-app Secret.
-	Database bool
+	// LegacyDatabase: the app's deploy/k8s has a database.yaml, as mcloud
+	// wrote before the maxcloud controller ran databases. That file defines
+	// the Cluster db and KEDA's TriggerAuthentication db, and DATABASE_URL
+	// is required. Otherwise the database is the registry's (mcloud apps
+	// set --db): DATABASE_URL is optional, and queue functions get the
+	// TriggerAuthentication here.
+	LegacyDatabase bool
 	// Labels are added to every object (direct deploys mark theirs).
 	Labels map[string]string
 }
@@ -169,6 +174,9 @@ func Objects(d *Description, o Options) []map[string]any {
 			docs = append(docs, worker(f, o), scaledObject(f))
 		}
 	}
+	if d.NeedsDatabase() && !o.LegacyDatabase {
+		docs = append(docs, triggerAuthentication())
+	}
 	for _, doc := range docs {
 		if len(o.Labels) == 0 {
 			break
@@ -179,19 +187,6 @@ func Objects(d *Description, o Options) []map[string]any {
 		}
 	}
 	return docs
-}
-
-// DatabaseObjects returns DatabaseManifest's objects.
-func DatabaseObjects() ([]map[string]any, error) {
-	var out []map[string]any
-	for _, part := range strings.Split(DatabaseManifest, "\n---\n") {
-		var m map[string]any
-		if err := yaml.Unmarshal([]byte(part), &m); err != nil {
-			return nil, err
-		}
-		out = append(out, m)
-	}
-	return out, nil
 }
 
 // Manifests returns functions.yaml.
@@ -220,7 +215,7 @@ func labels(f Function) obj {
 func env(f Function, o Options) []any {
 	e := []any{obj{"name": "FUNCTION_TARGET", "value": f.Name}}
 	ref := obj{"name": DatabaseName + "-app", "key": "uri"}
-	if !o.Database {
+	if !o.LegacyDatabase {
 		// No database.yaml: the app may still have a database from the
 		// registry (the maxcloud controller's, also Cluster db), so take
 		// its URL if it's there.
@@ -394,49 +389,23 @@ func scaledObject(f Function) obj {
 	}
 }
 
-// DatabaseManifest is database.yaml, written once when the app first gets a
-// queue and the app's to change after that.
-const DatabaseManifest = `# The app's Postgres database, run by CloudNativePG: the queue for its queue
-# functions (table maxcloud_jobs), and free for the app's own tables.
-# Written once by mcloud; yours to change (size, instances) from here on.
-#
-# CloudNativePG keeps the connection details in the Secret db-app; every
-# function gets them as DATABASE_URL. No backups: those need an ObjectStore
-# from the homelab repo (apps/lankkupaja's database is the model).
-apiVersion: postgresql.cnpg.io/v1
-kind: Cluster
-metadata:
-  name: db
-spec:
-  # 1 instance: a node drain takes the database down for a minute. 2 adds a
-  # replica on the other node (about 150Mi more).
-  instances: 1
-  priorityClassName: tenant
-  storage:
-    # The default StorageClass keeps the disk if the claim is deleted.
-    size: 1Gi
-  resources:
-    requests:
-      cpu: 20m
-      memory: 128Mi
-    limits:
-      memory: 512Mi
-  bootstrap:
-    initdb:
-      database: app
-      owner: app
----
-# How KEDA logs in to count a queue's backlog.
-apiVersion: keda.sh/v1alpha1
-kind: TriggerAuthentication
-metadata:
-  name: db
-spec:
-  secretTargetRef:
-    - parameter: connection
-      name: db-app
-      key: uri
-`
+// triggerAuthentication is how KEDA logs in to count a queue's backlog:
+// the app database's connection URI from the Secret db-app, which
+// CloudNativePG writes for the Cluster db the maxcloud controller runs
+// (registry field db).
+func triggerAuthentication() obj {
+	return obj{
+		"apiVersion": "keda.sh/v1alpha1",
+		"kind":       "TriggerAuthentication",
+		"metadata": obj{
+			"name":   DatabaseName,
+			"labels": obj{"app.kubernetes.io/part-of": "maxcloud-functions"},
+		},
+		"spec": obj{
+			"secretTargetRef": []any{obj{"parameter": "connection", "name": DatabaseName + "-app", "key": "uri"}},
+		},
+	}
+}
 
 const newKustomization = `# What Flux applies from this repo into the app's namespace. functions.yaml
 # is generated from the app's functions on every deploy; list your own
@@ -449,9 +418,23 @@ images:
   - name: app
 `
 
-// WriteDir writes functions.yaml into dir (deploy/k8s), database.yaml if a
-// queue needs one and it isn't there, and lists both in kustomization.yaml,
-// creating it if needed. Returns the files it changed.
+// LegacyDatabaseFile is the database mcloud used to write for queue apps.
+const LegacyDatabaseFile = "database.yaml"
+
+// NeedsDatabaseHint is what to tell someone whose app has queue functions
+// and no database.yaml: the queue lives in the app's database, which the
+// registry provides.
+func NeedsDatabaseHint(app string) string {
+	if app == "" {
+		app = "<app>"
+	}
+	return "queue functions keep their jobs in the app's database: if " + app +
+		" has none yet, mcloud apps set " + app + " --db (the workers wait until it's there)"
+}
+
+// WriteDir writes functions.yaml into dir (deploy/k8s) and lists it in
+// kustomization.yaml, creating that if needed; an existing database.yaml
+// stays listed too. Returns the files it changed.
 func WriteDir(dir string, d *Description, image string) ([]string, error) {
 	if image == "" {
 		image = "app"
@@ -472,17 +455,13 @@ func WriteDir(dir string, d *Description, image string) ([]string, error) {
 		return nil
 	}
 
-	dbFile := filepath.Join(dir, "database.yaml")
-	_, err := os.Stat(dbFile)
+	// An app set up before the maxcloud controller ran databases may have
+	// a database.yaml: it keeps it. New ones get their database from the
+	// registry (mcloud apps set <app> --db) instead; NeedsDatabaseHint says so.
+	_, err := os.Stat(filepath.Join(dir, LegacyDatabaseFile))
 	hasDB := err == nil
-	if d.NeedsDatabase() && !hasDB {
-		if err := write("database.yaml", []byte(DatabaseManifest)); err != nil {
-			return nil, err
-		}
-		hasDB = true
-	}
 
-	m, err := Manifests(d, Options{Image: image, Database: hasDB})
+	m, err := Manifests(d, Options{Image: image, LegacyDatabase: hasDB})
 	if err != nil {
 		return nil, err
 	}
@@ -498,8 +477,8 @@ func WriteDir(dir string, d *Description, image string) ([]string, error) {
 		return nil, err
 	}
 	ks := strings.Replace(string(k), "resources: []\n", "resources:\n", 1)
-	for _, res := range []string{"functions.yaml", "database.yaml"} {
-		if res == "database.yaml" && !hasDB {
+	for _, res := range []string{"functions.yaml", LegacyDatabaseFile} {
+		if res == LegacyDatabaseFile && !hasDB {
 			continue
 		}
 		if ks, _, err = kustomize.AddResource(ks, res); err != nil {

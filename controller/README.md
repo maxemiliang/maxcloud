@@ -93,7 +93,8 @@ The controller turns it into a CloudNativePG `Cluster` `db` (so
 database), an `ObjectStore` writing WAL and base backups to the bucket
 `mc-shop--db` with the app's credentials, a daily `ScheduledBackup`, and a
 first `Backup` for every new generation. It won't take over a `Cluster` db
-it didn't create (say, from a `database.yaml` in the app's repo): it
+it didn't create (say, from a `database.yaml` mcloud wrote before
+v0.5.0): it
 stops with a Blocked condition instead.
 
 `kubectl get maxcloud -A` shows the phase (Creating, Restoring, Ready,

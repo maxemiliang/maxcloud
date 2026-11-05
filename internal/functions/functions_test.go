@@ -76,7 +76,7 @@ func TestManifests(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	out, err := Manifests(d, Options{Database: true})
+	out, err := Manifests(d, Options{LegacyDatabase: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -128,7 +128,7 @@ func TestManifestsOptionalStorage(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, withDB := range []bool{false, true} {
-		out, err := Manifests(d, Options{Database: withDB})
+		out, err := Manifests(d, Options{LegacyDatabase: withDB})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -156,24 +156,34 @@ func TestWriteDir(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(changed) != 3 {
-		t.Errorf("changed %v", changed)
+	if len(changed) != 2 {
+		t.Errorf("changed %v (want functions.yaml and kustomization.yaml)", changed)
+	}
+	// No database.yaml any more: the database comes from the registry.
+	if _, err := os.Stat(filepath.Join(dir, LegacyDatabaseFile)); err == nil {
+		t.Error("wrote database.yaml")
 	}
 	k, _ := os.ReadFile(filepath.Join(dir, "kustomization.yaml"))
-	for _, want := range []string{"  - database.yaml\n  - functions.yaml\n", "images:\n  - name: app\n"} {
+	for _, want := range []string{"  - functions.yaml\n", "images:\n  - name: app\n"} {
 		if !strings.Contains(string(k), want) {
 			t.Errorf("kustomization lacks %q:\n%s", want, k)
 		}
 	}
-	// Second run: nothing changes. An edited database.yaml is kept.
-	os.WriteFile(filepath.Join(dir, "database.yaml"), []byte("# mine\n"), 0o644)
-	changed, err = WriteDir(dir, d, "")
-	if err != nil || len(changed) != 0 {
+	if strings.Contains(string(k), "database.yaml") {
+		t.Errorf("kustomization lists database.yaml:\n%s", k)
+	}
+	// The queue's KEDA login is in functions.yaml now.
+	f, _ := os.ReadFile(filepath.Join(dir, "functions.yaml"))
+	if !strings.Contains(string(f), "kind: TriggerAuthentication") {
+		t.Errorf("functions.yaml has no TriggerAuthentication:\n%s", f)
+	}
+	// Second run: nothing changes.
+	if changed, err := WriteDir(dir, d, ""); err != nil || len(changed) != 0 {
 		t.Errorf("rerun changed %v, %v", changed, err)
 	}
 	// After `kustomize edit set image` (unindented lists), a rerun still
 	// sees what's listed.
-	os.WriteFile(filepath.Join(dir, "kustomization.yaml"), []byte("apiVersion: kustomize.config.k8s.io/v1beta1\nkind: Kustomization\nresources:\n- database.yaml\n- functions.yaml\nimages:\n- digest: sha256:abc\n  name: app\n  newName: ghcr.io/o/r\n"), 0o644)
+	os.WriteFile(filepath.Join(dir, "kustomization.yaml"), []byte("apiVersion: kustomize.config.k8s.io/v1beta1\nkind: Kustomization\nresources:\n- functions.yaml\nimages:\n- digest: sha256:abc\n  name: app\n  newName: ghcr.io/o/r\n"), 0o644)
 	if changed, err := WriteDir(dir, d, ""); err != nil || len(changed) != 0 {
 		t.Errorf("after kustomize edit: changed %v, %v", changed, err)
 	}
@@ -185,5 +195,37 @@ func TestWriteDir(t *testing.T) {
 	k, _ = os.ReadFile(filepath.Join(dir, "kustomization.yaml"))
 	if !strings.Contains(string(k), "  - sso.yaml\n") || strings.Count(string(k), "images:") != 1 || !strings.Contains(string(k), "digest: sha256:abc") {
 		t.Errorf("kustomization:\n%s", k)
+	}
+}
+
+// An app that already has a database.yaml keeps it: it stays listed, and
+// functions.yaml doesn't define a second TriggerAuthentication db.
+func TestWriteDirKeepsALegacyDatabase(t *testing.T) {
+	d, _ := Parse([]byte(desc))
+	dir := filepath.Join(t.TempDir(), "deploy", "k8s")
+	os.MkdirAll(dir, 0o755)
+	os.WriteFile(filepath.Join(dir, LegacyDatabaseFile), []byte("# mine\n"), 0o644)
+	if _, err := WriteDir(dir, d, ""); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(filepath.Join(dir, LegacyDatabaseFile)); string(b) != "# mine\n" {
+		t.Errorf("database.yaml changed: %q", b)
+	}
+	k, _ := os.ReadFile(filepath.Join(dir, "kustomization.yaml"))
+	if !strings.Contains(string(k), "  - database.yaml\n  - functions.yaml\n") {
+		t.Errorf("kustomization:\n%s", k)
+	}
+	f, _ := os.ReadFile(filepath.Join(dir, "functions.yaml"))
+	if strings.Contains(string(f), "kind: TriggerAuthentication") {
+		t.Error("a second TriggerAuthentication db next to database.yaml's")
+	}
+}
+
+func TestNoTriggerAuthenticationWithoutQueues(t *testing.T) {
+	d := &Description{Functions: []Function{{Name: "api", Kind: "http"}}}
+	for _, o := range Objects(d, Options{}) {
+		if o["kind"] == "TriggerAuthentication" {
+			t.Error("an app without queues got a TriggerAuthentication")
+		}
 	}
 }

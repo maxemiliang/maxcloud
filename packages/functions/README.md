@@ -53,7 +53,8 @@ retries it `retries` times.
 
 `onQueue(queue, handler)` or `onQueue(options, handler)`. `enqueue(queue,
 payload)` adds a job from anywhere in the app. Jobs live in the app's
-Postgres database (`DATABASE_URL`), in a table the SDK creates
+Postgres database (`DATABASE_URL`; the app gets one with `mcloud apps set
+<app> --db`), in a table the SDK creates
 (`maxcloud_jobs`).
 
 | Option | Default | |

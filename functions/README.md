@@ -66,8 +66,9 @@ worker. Use at most 40 lowercase letters, digits and dashes.
 
 ## Queues
 
-Jobs live in the app's Postgres database (`$DATABASE_URL`), in a table the
-SDK creates (`maxcloud_jobs`).
+Jobs live in the app's Postgres database (`$DATABASE_URL`; the app gets
+one with `mcloud apps set <app> --db`), in a table the SDK creates
+(`maxcloud_jobs`).
 
 - **Retries:** a job whose handler returns an error, panics, or passes its
   timeout is retried, and so is one whose worker died, once its lease runs

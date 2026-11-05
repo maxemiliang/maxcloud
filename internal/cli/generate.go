@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 
 	"github.com/spf13/cobra"
 
@@ -18,8 +19,8 @@ func generateCmd(g *globals) *cobra.Command {
 		Use:   "generate",
 		Short: "Write deploy/k8s from the app's functions",
 		Long: `Write the manifests for the app's functions into deploy/k8s:
-functions.yaml (rewritten every time), database.yaml (the first time a
-queue needs it, then left alone) and the kustomization listing them.
+functions.yaml (rewritten every time) and the kustomization listing it.
+Queue functions need the app's database: mcloud apps set <app> --db.
 
 The deploy workflow runs this on every push, from the image it built. Run it
 locally to see what a deploy would change: it asks the built app
@@ -55,6 +56,16 @@ locally to see what a deploy would change: it asks the built app
 			}
 			for _, p := range changed {
 				fmt.Fprintf(g.errOut, "wrote %s\n", p)
+			}
+			if _, err := os.Stat(filepath.Join(dir, functions.LegacyDatabaseFile)); d.NeedsDatabase() && err != nil {
+				app, _ := appName(nil)
+				hint := functions.NeedsDatabaseHint(app)
+				if os.Getenv("GITHUB_ACTIONS") == "true" {
+					// Shown on the workflow run's summary page.
+					fmt.Fprintln(g.errOut, "::notice title=Queue functions need a database::"+hint)
+				} else {
+					fmt.Fprintln(g.errOut, "note: "+hint)
+				}
 			}
 			return nil
 		},

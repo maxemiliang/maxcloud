@@ -72,25 +72,22 @@ func (g *globals) deployDirect(ctx context.Context, k *kube.Client, p *project) 
 		return err
 	}
 
-	hasDB, err := k.Exists(ctx, kube.GVRCNPGCluster, name, functions.DatabaseName)
-	if err != nil {
-		return err
-	}
-	if d.NeedsDatabase() && !hasDB {
-		db, err := functions.DatabaseObjects()
+	if d.NeedsDatabase() {
+		db, err := k.GetDatabase(ctx, name)
 		if err != nil {
 			return err
 		}
-		fmt.Fprintln(g.out, "Creating the app's database (the queue needs one) ...")
-		if err := k.Apply(ctx, name, db); err != nil {
+		hasCluster, err := k.Exists(ctx, kube.GVRCNPGCluster, name, functions.DatabaseName)
+		if err != nil {
 			return err
 		}
-		hasDB = true
+		if db == nil && !hasCluster {
+			fmt.Fprintln(g.errOut, "note: "+functions.NeedsDatabaseHint(name))
+		}
 	}
 	objs := functions.Objects(d, functions.Options{
-		Image:    image,
-		Database: hasDB,
-		Labels:   map[string]string{kube.DirectLabel: kube.FieldManager},
+		Image:  image,
+		Labels: map[string]string{kube.DirectLabel: kube.FieldManager},
 	})
 	for _, f := range d.Functions {
 		fmt.Fprintf(g.out, "  %-9s %s\n", f.Kind, f.Name)

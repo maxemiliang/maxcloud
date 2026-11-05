@@ -32,16 +32,11 @@ func TestDirectApplyDryRun(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	db, err := functions.DatabaseObjects()
-	if err != nil {
-		t.Fatal(err)
-	}
 	objs := functions.Objects(d, functions.Options{
-		Image:    "ghcr.io/maxemiliang/fn-demo@sha256:2dd7d61dd23dd5e87917a2d65775afd360c43f16ebb2882c9934ed78aa233828",
-		Database: true,
-		Labels:   map[string]string{kube.DirectLabel: kube.FieldManager},
+		Image:  "ghcr.io/maxemiliang/fn-demo@sha256:2dd7d61dd23dd5e87917a2d65775afd360c43f16ebb2882c9934ed78aa233828",
+		Labels: map[string]string{kube.DirectLabel: kube.FieldManager},
 	})
-	for _, o := range append(db, objs...) {
+	for _, o := range objs {
 		if err := k.Apply(context.Background(), ns, []map[string]any{o}); err != nil {
 			t.Error(err)
 		}

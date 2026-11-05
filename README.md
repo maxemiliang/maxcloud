@@ -42,8 +42,9 @@ Each kind of function becomes:
 | `onSchedule` | a CronJob |
 | `onQueue` | a Deployment that KEDA scales from 0 on the queue's backlog |
 
-Apps with a queue also get a Postgres database (`database.yaml`, written
-once and then yours to change).
+Queues keep their jobs in the app's Postgres database, which the registry
+gives it: `mcloud apps set <app> --db` (mcloud says so when an app with a
+queue has none).
 
 The homelab README's "Run an app" covers the platform side, and its
 `templates/run-app` is the starting point for apps that aren't functions;
@@ -101,9 +102,10 @@ mcloud apps set shop --db                  # --db-size 2Gi, --db-instances 2
 
 The controller runs it with CloudNativePG, backs it up continuously to the
 bucket `mc-shop--db`, and restores it from there by itself if its cluster
-is lost. Every function gets `DATABASE_URL`. An app with a `database.yaml`
-(what mcloud writes for queue functions) already has a database `db`; the
-controller won't take that one over, so drop the file before switching.
+is lost. Every function gets `DATABASE_URL`. An app set up before this may
+have a `database.yaml` (what mcloud used to write for queue functions, with
+no backups): it keeps working, but the controller won't take it over.
+Moving it is a dump and restore (homelab `docs/runbooks/move-database-to-registry.md`).
 
 `mcloud db restore --at TIME` takes it back to a point in time (in place;
 later writes are gone from it), and `mcloud db branch create NAME [--at
