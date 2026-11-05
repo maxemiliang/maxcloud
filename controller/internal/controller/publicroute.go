@@ -3,6 +3,8 @@ package controller
 import (
 	"context"
 	"fmt"
+	"strings"
+	"unicode"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -25,10 +27,10 @@ import (
 //	  -> TraefikService (passHostHeader: false, https)
 //	    -> Service of type ExternalName: <bucket>.<S3 host>:443
 //
-// Traefik needs kubernetesCRD.allowExternalNameServices, and this namespace
-// in kubernetesGateway.crossProviderNamespaces (so its HTTPRoutes may name
-// a TraefikService). Apps can make neither object, and can't put routes in
-// this namespace.
+// Traefik needs kubernetesCRD.allowExternalNameServices, this namespace in
+// kubernetesGateway.crossProviderNamespaces (so its HTTPRoutes may name a
+// TraefikService), and kubernetesCRD.safeNaming off (see traefikServiceRef).
+// Apps can make neither object, and can't put routes in this namespace.
 type PublicRoutes struct {
 	Client client.Client
 	// Reader reads straight from the API server: no cache of every
@@ -120,8 +122,7 @@ func (p *PublicRoutes) Ensure(ctx context.Context, bucket, hostname string) erro
 			"backendRefs": []any{map[string]any{
 				"group": "traefik.io",
 				"kind":  "TraefikService",
-				// Traefik's own name for it (namespace-name@provider).
-				"name": p.Namespace + "-" + bucket + "@kubernetescrd",
+				"name": traefikServiceRef(p.Namespace, bucket),
 			}},
 		}},
 	}
@@ -177,4 +178,16 @@ func (p *PublicRoutes) applyUnstructured(ctx context.Context, want *unstructured
 			u.SetAnnotations(a)
 		}
 	})
+}
+
+// traefikServiceRef is the name Traefik gives a TraefikService, as a
+// Gateway API backendRef must spell it: its CRD provider's legacy naming
+// (safeNaming off) joins namespace and name with "-" and normalizes the
+// result, every run of other characters becoming one "-". So
+// maxcloud-system/mc-shop--assets is maxcloud-system-mc-shop-assets.
+func traefikServiceRef(namespace, name string) string {
+	parts := strings.FieldsFunc(namespace+"-"+name, func(r rune) bool {
+		return !unicode.IsLetter(r) && !unicode.IsNumber(r)
+	})
+	return strings.Join(parts, "-") + "@kubernetescrd"
 }

@@ -64,9 +64,10 @@ HTTPRoute <bucket>--<app>.<domain>, GET/HEAD
     -> Service type ExternalName <bucket>.<S3 host>:443
 ```
 
-Traefik needs `providers.kubernetesCRD.allowExternalNameServices: true`
-and the controller's namespace in
-`providers.kubernetesGateway.crossProviderNamespaces`. Apps can make
+Traefik needs `providers.kubernetesCRD.allowExternalNameServices: true`,
+`providers.kubernetesCRD.safeNaming: false` (the route names the
+TraefikService by Traefik's legacy, normalized name) and the controller's
+namespace in `providers.kubernetesGateway.crossProviderNamespaces`. Apps can make
 neither kind of object, nor routes in that namespace. `--` can't occur in
 app or bucket names, so the hostname can't collide with a Knative
 service's `<svc>-<app>`. The bucket is still public on the S3 endpoint too.

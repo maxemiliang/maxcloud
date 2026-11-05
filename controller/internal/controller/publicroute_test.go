@@ -70,7 +70,8 @@ func TestPublicBucketGetsAHostname(t *testing.T) {
 	}
 	rules, _, _ := unstructured.NestedSlice(route.Object, "spec", "rules")
 	ref := rules[0].(map[string]any)["backendRefs"].([]any)[0].(map[string]any)
-	if ref["kind"] != "TraefikService" || ref["name"] != "maxcloud-system-mc-shop--assets@kubernetescrd" {
+	// Traefik's normalized name: the "--" becomes "-" (found on the cluster).
+	if ref["kind"] != "TraefikService" || ref["name"] != "maxcloud-system-mc-shop-assets@kubernetescrd" {
 		t.Errorf("backendRef = %v", ref)
 	}
 	matches := rules[0].(map[string]any)["matches"].([]any)
@@ -119,5 +120,16 @@ func TestNoHostnamesWhenOff(t *testing.T) {
 	}
 	if _, ok := e.policies.policies["mc-shop--assets"]; !ok {
 		t.Error("still public through the S3 endpoint")
+	}
+}
+
+func TestTraefikServiceRef(t *testing.T) {
+	for in, want := range map[[2]string]string{
+		{"maxcloud-system", "mc-run-demo--cdn"}: "maxcloud-system-mc-run-demo-cdn@kubernetescrd",
+		{"ns", "a.b_c"}:                         "ns-a-b-c@kubernetescrd",
+	} {
+		if got := traefikServiceRef(in[0], in[1]); got != want {
+			t.Errorf("traefikServiceRef(%q, %q) = %q, want %q", in[0], in[1], got, want)
+		}
 	}
 }
