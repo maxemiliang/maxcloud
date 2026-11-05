@@ -93,6 +93,24 @@ bucket, err := functions.BucketName("uploads") // "mc-shop--uploads"
 _, err = s3c.PutObject(ctx, &s3.PutObjectInput{Bucket: &bucket, Key: aws.String("a.txt"), Body: r})
 ```
 
+## Key-value storage
+
+`KVGet`, `KVSet`, `KVDelete` and `KVList` are a key-value store (like
+Workers KV) in the app's Postgres database (`DATABASE_URL`; the app needs
+one: `mcloud apps set <app> --db`). Values are JSON.
+
+```go
+err := functions.KVSet(ctx, "session:42", session, time.Hour) // 0: no expiry
+found, err := functions.KVGet(ctx, "session:42", &session)
+keys, next, err := functions.KVList(ctx, "session:", "", 100)
+```
+
+## Secrets
+
+`mcloud secrets set STRIPE_KEY` (in the app's repo) stores a secret; every
+function gets it as an environment variable. `functions.Secret("STRIPE_KEY")`
+reads it, with an error that says how to set it when it's missing.
+
 ## Running
 
 `functions.Start()` runs the function named in `$FUNCTION_TARGET` (or

@@ -105,6 +105,15 @@ is lost. Every function gets `DATABASE_URL`. An app with a `database.yaml`
 (what mcloud writes for queue functions) already has a database `db`; the
 controller won't take that one over, so drop the file before switching.
 
+## Secrets and key-value storage
+
+`mcloud secrets set NAME` stores an app's secret, like `wrangler secret
+put`. A GitOps app keeps it in `deploy/k8s/secrets.sops.yaml`, encrypted
+with SOPS to the homelab's age key (Flux decrypts it): commit and push. A
+direct app keeps it in a Secret on the cluster. Every function gets the
+app's secrets as environment variables; the SDKs' `secret("NAME")` reads
+one. For KV, the SDKs' `kv` stores JSON values in the app's database.
+
 ## Install
 
 ```fish
@@ -135,6 +144,10 @@ mcloud apps set shop --db                             # a Postgres database, bac
 
 mcloud queue ls shop                # jobs per queue and state, latest failed ones
 mcloud queue retry shop 41 42       # run failed jobs again (or --failed)
+
+mcloud secrets set STRIPE_KEY       # in the app's repo: asks for the value
+mcloud secrets list                 # names only
+mcloud secrets unset STRIPE_KEY
 mcloud apps delete shop                             # remove it, namespace and data included
 
 mcloud status shop        # deploy, services and URLs, workloads, databases, problems

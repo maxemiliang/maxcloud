@@ -98,6 +98,31 @@ A `:public` bucket's objects can be read by anyone at
 credentials. Object Storage has no bucket events: uploads tell the app
 themselves (presigned URL, then a queue job).
 
+## Key-value storage
+
+`kv` is a key-value store (like Workers KV) in the app's Postgres
+database (`DATABASE_URL`, so the app needs one: `mcloud apps set <app>
+--db`). Values are JSON; reads see writes right away.
+
+```ts
+import { kv } from "@max-cloud/functions";
+
+await kv.set("session:42", { user: "ann" }, { ttlSeconds: 3600 });
+const s = await kv.get<{ user: string }>("session:42"); // undefined if missing or expired
+await kv.delete("session:42");
+const { keys, cursor } = await kv.list({ prefix: "session:", limit: 100 });
+```
+
+It's one table, `maxcloud_kv`, made on first use. Pass `{ client }` to
+`set` or `delete` to write in your own transaction.
+
+## Secrets
+
+`mcloud secrets set STRIPE_KEY` (in the app's repo) stores a secret; every
+function gets it as an environment variable. `secret("STRIPE_KEY")` reads
+it, and throws a helpful error if it isn't set. Read secrets in handlers,
+not at module load: `--describe` loads the module without them.
+
 ## Running
 
 The container runs `maxcloud-functions`, which starts the function named in

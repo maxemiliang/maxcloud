@@ -116,3 +116,39 @@ func (c *Client) NamespaceExists(ctx context.Context, name string) (bool, error)
 	}
 	return err == nil, err
 }
+
+// SecretData returns a Secret's values, empty if there's no such Secret.
+func (c *Client) SecretData(ctx context.Context, ns, name string) (map[string]string, error) {
+	s, err := c.Core.CoreV1().Secrets(ns).Get(ctx, name, metav1.GetOptions{})
+	if apierrors.IsNotFound(err) {
+		return map[string]string{}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	out := map[string]string{}
+	for k, v := range s.Data {
+		out[k] = string(v)
+	}
+	return out, nil
+}
+
+// ApplySecret writes an Opaque Secret with exactly these values.
+func (c *Client) ApplySecret(ctx context.Context, ns, name string, data map[string]string) error {
+	obj := map[string]any{
+		"apiVersion": "v1",
+		"kind":       "Secret",
+		"metadata": map[string]any{
+			"name":   name,
+			"labels": map[string]any{"app.kubernetes.io/managed-by": "mcloud"},
+		},
+		"type":       "Opaque",
+		"stringData": data,
+	}
+	// Replace, not merge: an unset key must go.
+	err := c.Core.CoreV1().Secrets(ns).Delete(ctx, name, metav1.DeleteOptions{})
+	if err != nil && !apierrors.IsNotFound(err) {
+		return err
+	}
+	return c.Apply(ctx, ns, []map[string]any{obj})
+}
