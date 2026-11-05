@@ -112,6 +112,23 @@ itself from its backups. A finalizer on each entry deletes the copy first
 when the app is deleted on purpose, so a deleted app doesn't come back.
 Entries that live in the homelab repo aren't copied: git has them.
 
+### maxcloud.yaml from the app's repo
+
+A GitOps app's `maxcloud.yaml` takes effect on push, with no credentials in
+CI: Flux already fetches the app's repo (the GitRepository its entry
+generates, which has to include `/maxcloud.yaml`). When its revision
+changes, the controller downloads the artifact from Flux's
+source-controller, checks its digest, and writes the file's quota, buckets
+and database into the app's entry. The rest of the entry (repo, path,
+deploy mode) stays what mcloud registered.
+
+It writes as the user `maxcloud:app-sync` (impersonated), not as itself,
+so the cluster's limits on what a developer may ask for apply: a
+`maxcloud.yaml` asking for more is refused, and the entry gets the reason
+in the annotation `maxcloud.gronblom.dev/sync-error` and a Warning event.
+`maxcloud.gronblom.dev/synced-revision` is the last revision handled.
+Entries in the homelab repo are left alone.
+
 ## Running it
 
 From a tag, a cluster applies [`config/`](config/kustomization.yaml): the
@@ -132,6 +149,11 @@ CRDs, RBAC and the Deployment. The cluster provides the namespace
   and `MAXCLOUD_DB_STORAGE_CLASS` for the databases' disks. Prefer a class
   that deletes its disks: a restore throws the old disk away (the bucket is
   what keeps the data), and a retaining class leaves one behind each time.
+
+For the sync from apps' repos the cluster also provides: a NetworkPolicy
+letting `maxcloud-system` reach source-controller in `flux-system`, and a
+Role there for the user `maxcloud:app-sync` to update
+ResourceSetInputProviders.
 
 It acts only in namespaces labelled `run.gronblom.dev/tenant: "true"`.
 Metrics are on `:8080/metrics`: `maxcloud_bucket_size_bytes`,

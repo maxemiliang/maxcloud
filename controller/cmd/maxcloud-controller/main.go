@@ -30,7 +30,9 @@ import (
 
 	"k8s.io/apimachinery/pkg/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	"k8s.io/client-go/rest"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
@@ -137,7 +139,8 @@ func run(metricsAddr, probeAddr string, leaderElect bool) error {
 		return err
 	}
 
-	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
+	restConfig := ctrl.GetConfigOrDie()
+	mgr, err := ctrl.NewManager(restConfig, ctrl.Options{
 		Scheme:                 scheme,
 		Metrics:                metricsserver.Options{BindAddress: metricsAddr},
 		HealthProbeBindAddress: probeAddr,
@@ -204,6 +207,21 @@ func run(metricsAddr, probeAddr string, leaderElect bool) error {
 		Client: mgr.GetClient(), Storage: storage, Objects: s3c, Bucket: cfg.registryBucket,
 	}).SetupWithManager(mgr); err != nil {
 		return fmt.Errorf("registry backup: %w", err)
+	}
+
+	// GitOps apps' maxcloud.yaml reaches their registry entry through Flux.
+	// Writes impersonate maxcloud:app-sync, so the admission ceiling applies
+	// as for a developer.
+	syncConfig := rest.CopyConfig(restConfig)
+	syncConfig.Impersonate = rest.ImpersonationConfig{UserName: "maxcloud:app-sync"}
+	syncWriter, err := client.New(syncConfig, client.Options{Scheme: scheme})
+	if err != nil {
+		return fmt.Errorf("app sync client: %w", err)
+	}
+	if err := (&controller.AppSync{
+		Client: mgr.GetClient(), Writer: syncWriter, Recorder: mgr.GetEventRecorderFor("maxcloud-controller"),
+	}).SetupWithManager(mgr); err != nil {
+		return fmt.Errorf("app sync: %w", err)
 	}
 
 	if !cfg.tokenExpires.IsZero() {

@@ -25,8 +25,10 @@ This repo holds:
    the registry in the cluster, with your kubeconfig: no commit to the
    homelab repo. From that entry the platform creates the app's namespace
    with its quota and guardrails, its buckets and database, and a
-   reconciler for the app's `deploy/k8s`. Later deploys keep the entry in
-   line with `maxcloud.yaml`; the maxcloud controller keeps a copy of
+   reconciler for the app's `deploy/k8s`. After that, a pushed change to
+   `maxcloud.yaml` reaches the entry by itself (the controller reads it
+   from Flux), within the limits a developer may ask for; `mcloud deploy`
+   does it too. The maxcloud controller keeps a copy of
    every entry in Object Storage and puts them back after a cluster
    rebuild.
 3. **Push to deploy.** Every push to `main` runs the deploy workflow

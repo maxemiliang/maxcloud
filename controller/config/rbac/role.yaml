@@ -7,6 +7,13 @@ rules:
 - apiGroups:
   - ""
   resources:
+  - events
+  verbs:
+  - create
+  - patch
+- apiGroups:
+  - ""
+  resources:
   - namespaces
   verbs:
   - get
@@ -22,6 +29,14 @@ rules:
   - delete
   - get
   - update
+- apiGroups:
+  - ""
+  resourceNames:
+  - maxcloud:app-sync
+  resources:
+  - users
+  verbs:
+  - impersonate
 - apiGroups:
   - barmancloud.cnpg.io
   resources:
@@ -102,6 +117,14 @@ rules:
   - list
   - patch
   - update
+  - watch
+- apiGroups:
+  - source.toolkit.fluxcd.io
+  resources:
+  - gitrepositories
+  verbs:
+  - get
+  - list
   - watch
 - apiGroups:
   - traefik.io
