@@ -5,7 +5,7 @@
 #     AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY
 #   - ConfigMap maxcloud-controller: MAXCLOUD_OBJECT_STORAGE_ID,
 #     MAXCLOUD_S3_ENDPOINT (and optionally MAXCLOUD_S3_REGION,
-#     MAXCLOUD_POSTGRES_IMAGE)
+#     MAXCLOUD_POSTGRES_IMAGE, MAXCLOUD_DB_STORAGE_CLASS)
 # Databases need CloudNativePG and its barman-cloud plugin in the cluster.
 # The homelab's are in its infrastructure/controllers/maxcloud.
 apiVersion: kustomize.config.k8s.io/v1beta1
@@ -21,4 +21,4 @@ resources:
 # The release workflow checks that this is the tag being released.
 images:
   - name: ghcr.io/maxemiliang/maxcloud-controller
-    newTag: 0.2.0
+    newTag: 0.3.0

@@ -88,13 +88,14 @@ func newDBEnv(t *testing.T, objs ...client.Object) *dbEnv {
 	e := newEnv(t, objs...)
 	o := &fakeObjects{storage: e.storage, objects: map[string]map[string][]byte{}}
 	return &dbEnv{env: e, objects: o, dr: &DatabaseReconciler{
-		Client:   e.client,
-		Identity: e.identity,
-		Storage:  e.storage,
-		Objects:  o,
-		Endpoint: "https://example.upcloudobjects.com",
-		Image:    "postgres:test",
-		Now:      func() time.Time { return time.Date(2026, 11, 5, 12, 0, 0, 0, time.UTC) },
+		Client:       e.client,
+		Identity:     e.identity,
+		Storage:      e.storage,
+		Objects:      o,
+		Endpoint:     "https://example.upcloudobjects.com",
+		Image:        "postgres:test",
+		StorageClass: "fast-delete",
+		Now:          func() time.Time { return time.Date(2026, 11, 5, 12, 0, 0, 0, time.UTC) },
 	}}
 }
 
@@ -219,6 +220,9 @@ func TestDatabaseLifecycle(t *testing.T) {
 	}
 	if prio, _, _ := unstructured.NestedString(c.Object, "spec", "priorityClassName"); prio != "tenant" {
 		t.Errorf("priorityClassName = %q", prio)
+	}
+	if sc, _, _ := unstructured.NestedString(c.Object, "spec", "storage", "storageClass"); sc != "fast-delete" {
+		t.Errorf("storageClass = %q, want the configured one", sc)
 	}
 	if pdb, _, _ := unstructured.NestedBool(c.Object, "spec", "enablePDB"); pdb {
 		t.Error("a single instance shouldn't have a PDB (it would block drains)")

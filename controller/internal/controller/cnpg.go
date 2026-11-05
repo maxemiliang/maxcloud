@@ -107,7 +107,7 @@ func firstBackup(db *v1.Database, gen int64) *unstructured.Unstructured {
 // cluster is the database's CloudNativePG Cluster, writing its backups to
 // generation gen. from > 0 restores generation from instead of starting
 // empty.
-func cluster(db *v1.Database, image string, gen, from int64) *unstructured.Unstructured {
+func cluster(db *v1.Database, image, storageClass string, gen, from int64) *unstructured.Unstructured {
 	u := newUnstructured(clusterGVK, db.Namespace, db.Name)
 	spec := map[string]any{
 		"instances":         int64(db.Spec.Instances),
@@ -116,10 +116,7 @@ func cluster(db *v1.Database, image string, gen, from int64) *unstructured.Unstr
 		// One instance can't keep a PodDisruptionBudget without blocking
 		// every node drain; it goes down for the minute a drain takes.
 		"enablePDB": db.Spec.Instances > 1,
-		"storage": map[string]any{
-			"size":               db.Spec.Size.String(),
-			"resizeInUseVolumes": true,
-		},
+		"storage":   storage(db, storageClass),
 		"resources": resources(db),
 		"postgresql": map[string]any{
 			"parameters": map[string]any{
@@ -165,6 +162,21 @@ func cluster(db *v1.Database, image string, gen, from int64) *unstructured.Unstr
 	}
 	u.Object["spec"] = spec
 	return u
+}
+
+// storage is the Cluster's disk. storageClass "" is the cluster's default.
+// The data's durability is the bucket, not the disk: a disk is thrown
+// away with its Cluster and a new one restored from the backups, so a
+// StorageClass that deletes disks avoids a leftover disk per restore.
+func storage(db *v1.Database, storageClass string) map[string]any {
+	s := map[string]any{
+		"size":               db.Spec.Size.String(),
+		"resizeInUseVolumes": true,
+	}
+	if storageClass != "" {
+		s["storageClass"] = storageClass
+	}
+	return s
 }
 
 func resources(db *v1.Database) map[string]any {

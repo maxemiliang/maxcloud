@@ -91,7 +91,10 @@ CRDs, RBAC and the Deployment. The cluster provides the namespace
     user, with full access to that instance (bucket policies).
 - ConfigMap `maxcloud-controller`: `MAXCLOUD_OBJECT_STORAGE_ID` (the
   instance's UUID), `MAXCLOUD_S3_ENDPOINT` (`https://...`) and optionally
-  `MAXCLOUD_S3_REGION` (default `europe-1`).
+  `MAXCLOUD_S3_REGION` (default `europe-1`), `MAXCLOUD_POSTGRES_IMAGE`,
+  and `MAXCLOUD_DB_STORAGE_CLASS` for the databases' disks. Prefer a class
+  that deletes its disks: a restore throws the old disk away (the bucket is
+  what keeps the data), and a retaining class leaves one behind each time.
 
 It acts only in namespaces labelled `run.gronblom.dev/tenant: "true"`.
 Metrics are on `:8080/metrics`: `maxcloud_bucket_size_bytes`,

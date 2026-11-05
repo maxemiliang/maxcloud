@@ -51,6 +51,9 @@ type DatabaseReconciler struct {
 	Objects  objectstorage.Objects
 	Endpoint string
 	Image    string
+	// StorageClass of new Clusters' disks, "" for the cluster's default.
+	// Existing Clusters keep theirs.
+	StorageClass string
 	// Now is time.Now, replaceable in tests.
 	Now func() time.Time
 }
@@ -170,7 +173,7 @@ func (r *DatabaseReconciler) create(ctx context.Context, db *v1.Database, bucket
 	if err := r.apply(ctx, db, objectStore(db, bucket, r.Endpoint)); err != nil {
 		return ctrl.Result{}, err
 	}
-	c := cluster(db, r.Image, p.Generation, p.From)
+	c := cluster(db, r.Image, r.StorageClass, p.Generation, p.From)
 	if err := controllerutil.SetControllerReference(db, c, r.Scheme()); err != nil {
 		return ctrl.Result{}, err
 	}
@@ -263,7 +266,7 @@ func (r *DatabaseReconciler) update(ctx context.Context, db *v1.Database, bucket
 // patchCluster changes what can change on a live Cluster: instances, PDB,
 // resources and a bigger disk. Never the bootstrap or where it archives.
 func (r *DatabaseReconciler) patchCluster(ctx context.Context, db *v1.Database, c *unstructured.Unstructured) error {
-	want := cluster(db, r.Image, 0, 0)
+	want := cluster(db, r.Image, r.StorageClass, 0, 0)
 	before := c.DeepCopy()
 	for _, f := range [][]string{{"spec", "instances"}, {"spec", "enablePDB"}, {"spec", "resources"}} {
 		v, _, _ := unstructured.NestedFieldCopy(want.Object, f...)

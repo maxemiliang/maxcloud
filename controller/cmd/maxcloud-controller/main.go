@@ -10,6 +10,7 @@
 //	MAXCLOUD_S3_ENDPOINT         its S3 endpoint, https://...
 //	MAXCLOUD_S3_REGION           default europe-1
 //	MAXCLOUD_POSTGRES_IMAGE      the databases' Postgres image (default in the code)
+//	MAXCLOUD_DB_STORAGE_CLASS    the databases' StorageClass (default: the cluster's)
 //	AWS_ACCESS_KEY_ID            the controller's own S3 user
 //	AWS_SECRET_ACCESS_KEY
 package main
@@ -39,7 +40,7 @@ var Version = "dev"
 
 type config struct {
 	token, serviceUUID, endpoint, region, accessKeyID, secretAccessKey string
-	postgresImage                                                      string
+	postgresImage, dbStorageClass                                      string
 	tokenExpires                                                       time.Time
 }
 
@@ -55,6 +56,7 @@ func configFromEnv() (config, error) {
 	if c.region == "" {
 		c.region = "europe-1"
 	}
+	c.dbStorageClass = os.Getenv("MAXCLOUD_DB_STORAGE_CLASS")
 	if c.postgresImage = os.Getenv("MAXCLOUD_POSTGRES_IMAGE"); c.postgresImage == "" {
 		c.postgresImage = controller.DefaultPostgresImage
 	}
@@ -149,12 +151,13 @@ func run(metricsAddr, probeAddr string, leaderElect bool) error {
 		return fmt.Errorf("bucket controller: %w", err)
 	}
 	if err := (&controller.DatabaseReconciler{
-		Client:   mgr.GetClient(),
-		Identity: identity,
-		Storage:  storage,
-		Objects:  s3c,
-		Endpoint: cfg.endpoint,
-		Image:    cfg.postgresImage,
+		Client:       mgr.GetClient(),
+		Identity:     identity,
+		Storage:      storage,
+		Objects:      s3c,
+		Endpoint:     cfg.endpoint,
+		Image:        cfg.postgresImage,
+		StorageClass: cfg.dbStorageClass,
 	}).SetupWithManager(mgr); err != nil {
 		return fmt.Errorf("database controller: %w", err)
 	}
