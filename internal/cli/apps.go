@@ -100,10 +100,10 @@ type commitFlags struct {
 }
 
 func (cf *commitFlags) bind(f *pflag.FlagSet, wait bool) {
-	f.BoolVarP(&cf.yes, "yes", "y", false, "don't ask before committing")
-	f.BoolVar(&cf.dryRun, "dry-run", false, "show the change, commit nothing")
+	f.BoolVarP(&cf.yes, "yes", "y", false, "don't ask before changing the registry")
+	f.BoolVar(&cf.dryRun, "dry-run", false, "show the change, make none")
 	if wait {
-		f.BoolVar(&cf.wait, "wait", false, "after committing, wait until the app's deploy has applied")
+		f.BoolVar(&cf.wait, "wait", false, "then wait until the app's deploy has applied")
 		f.DurationVar(&cf.timeout, "timeout", 5*time.Minute, "how long --wait waits")
 	}
 }

@@ -54,10 +54,11 @@ func New() *cobra.Command {
 		Long: `mcloud registers apps on maxcloud (Knative on the homelab cluster) and
 shows how they're doing.
 
-An app is an entry in the homelab repo's app registry (apps/maxcloud): its
-namespace, quota and a Flux reconciler that applies the app's own repo.
-Registering, changing and removing apps are commits to that repo, which Flux
-deploys within a minute.
+An app is an entry in the app registry in the cluster (made from its
+maxcloud.yaml): its namespace, quota, buckets, database and a Flux
+reconciler that applies the app's own repo. mcloud deploy registers an app
+the first time and keeps the entry in line with maxcloud.yaml; mcloud apps
+changes it by hand. Neither is a commit anywhere.
 
 Cluster access uses $MCLOUD_KUBECONFIG, else the usual $KUBECONFIG.
 GitHub access uses $GH_TOKEN, else the GitHub CLI's login.`,
@@ -68,7 +69,7 @@ GitHub access uses $GH_TOKEN, else the GitHub CLI's login.`,
 	f := root.PersistentFlags()
 	f.StringVar(&g.kubeconfig, "kubeconfig", "", "kubeconfig file (default $MCLOUD_KUBECONFIG, else $KUBECONFIG)")
 	f.StringVar(&g.kubeContext, "context", "", "kubeconfig context")
-	f.StringVar(&g.registry, "registry", envOr("MCLOUD_REGISTRY", "maxemiliang/homelab"), "GitHub repo holding the app registry ($MCLOUD_REGISTRY)")
+	f.StringVar(&g.registry, "registry", envOr("MCLOUD_REGISTRY", "maxemiliang/homelab"), "the homelab repo, for its SOPS recipients and registry entries kept in git ($MCLOUD_REGISTRY)")
 	f.StringVar(&g.branch, "registry-branch", "main", "branch of the registry repo")
 	_ = f.MarkHidden("registry-branch")
 	_ = f.MarkHidden("registry-dir")

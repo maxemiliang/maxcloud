@@ -173,8 +173,9 @@ Go app it adds only what deploys need and says what's still missing.
 Existing files are never overwritten.
 
 NAME (default: the directory's name) becomes the app's namespace and part of
-its URLs. With --register it also registers the app (mcloud apps create),
-with this repo's GitHub remote as its source.`,
+its URLs. The first mcloud deploy registers the app from maxcloud.yaml;
+--register does it now (mcloud apps create), with this repo's GitHub remote
+as its source.`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			dir, err := os.Getwd()
@@ -235,9 +236,17 @@ with this repo's GitHub remote as its source.`,
 				module = "github.com/" + repo
 			}
 
+			verb := "wrote  "
+			if cf.dryRun {
+				verb = "writes "
+			}
 			for _, p := range sortedKeys(files) {
 				if _, err := os.Stat(p); err == nil {
 					fmt.Fprintf(g.out, "  exists  %s\n", p)
+					continue
+				}
+				if cf.dryRun {
+					fmt.Fprintf(g.out, "  %s %s\n", verb, p)
 					continue
 				}
 				if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
@@ -247,7 +256,7 @@ with this repo's GitHub remote as its source.`,
 				if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
 					return err
 				}
-				fmt.Fprintf(g.out, "  wrote   %s\n", p)
+				fmt.Fprintf(g.out, "  %s %s\n", verb, p)
 			}
 
 			fmt.Fprintf(g.out, "\nNext:\n")
@@ -271,23 +280,19 @@ with this repo's GitHub remote as its source.`,
 				return g.createApp(cmd.Context(), e, cf)
 			}
 			if deploy == "direct" {
-				fmt.Fprintf(g.out, "  mcloud apps create %s --deploy direct   # once, registers the app\n", name)
-			} else if repo != "" {
-				fmt.Fprintf(g.out, "  mcloud apps create %s --repo %s   # once, registers the app\n", name, repo)
+				fmt.Fprintf(g.out, "  mcloud deploy        # registers the app the first time, builds here, applies, waits until it's ready\n")
 			} else {
-				fmt.Fprintf(g.out, "  push it to GitHub, then: mcloud apps create %s --repo <owner>/<repo>\n", name)
-			}
-			if deploy == "direct" {
-				fmt.Fprintf(g.out, "  mcloud deploy        # builds here, pushes the image, applies, waits until it's ready\n")
-			} else {
-				fmt.Fprintf(g.out, "  mcloud deploy        # pushes, then follows the build and the rollout\n")
+				if repo == "" {
+					fmt.Fprintf(g.out, "  create its GitHub repo and push (gh repo create --source . --push)\n")
+				}
+				fmt.Fprintf(g.out, "  mcloud deploy        # registers the app the first time, pushes, follows the build and the rollout\n")
 			}
 			return nil
 		},
 	}
 	c.Flags().StringVar(&lang, "lang", "node", "language of a new app: node (TypeScript) or go; an existing go.mod or package.json decides by itself")
 	c.Flags().StringVar(&deploy, "deploy", "gitops", "gitops (push to deploy) or direct (mcloud deploy builds and applies from here, no git)")
-	c.Flags().BoolVar(&register, "register", false, "also register the app on maxcloud (a commit to the registry)")
+	c.Flags().BoolVar(&register, "register", false, "also register the app now (otherwise the first mcloud deploy does)")
 	cf.bind(c.Flags(), false)
 	return c
 }
