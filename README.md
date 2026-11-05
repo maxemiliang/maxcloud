@@ -132,6 +132,9 @@ mcloud apps list                                    # registered apps, did the l
 mcloud apps set shop --cpu 500m --memory 2Gi        # change its quota
 mcloud apps set shop --buckets uploads,assets:public  # its S3 buckets
 mcloud apps set shop --db                             # a Postgres database, backed up
+
+mcloud queue ls shop                # jobs per queue and state, latest failed ones
+mcloud queue retry shop 41 42       # run failed jobs again (or --failed)
 mcloud apps delete shop                             # remove it, namespace and data included
 
 mcloud status shop        # deploy, services and URLs, workloads, databases, problems

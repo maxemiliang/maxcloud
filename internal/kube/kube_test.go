@@ -141,3 +141,14 @@ func TestPruneOnlyRemovedDirectFunctions(t *testing.T) {
 		t.Error("the database was deleted")
 	}
 }
+
+func TestPsqlError(t *testing.T) {
+	in := "ERROR:  no table maxcloud_jobs in this database\nCONTEXT:  PL/pgSQL function inline_code_block line 3 at RAISE\n"
+	if got := psqlError(in); got != "no table maxcloud_jobs in this database" {
+		t.Errorf("psqlError = %q", got)
+	}
+	in = "ERROR:  syntax error at or near \"x\"\nLINE 1: select x y\n                 ^\n"
+	if got := psqlError(in); got != `syntax error at or near "x"` {
+		t.Errorf("psqlError = %q", got)
+	}
+}

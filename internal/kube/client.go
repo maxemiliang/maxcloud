@@ -16,6 +16,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 )
 
@@ -40,6 +41,7 @@ type Client struct {
 	DryRun bool
 
 	restMapper meta.RESTMapper
+	config     *rest.Config
 }
 
 // New connects using kubeconfig if set, else $MCLOUD_KUBECONFIG, else the
@@ -66,7 +68,7 @@ func New(kubeconfig, kubeContext string) (*Client, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Client{Core: core, Dyn: dyn}, nil
+	return &Client{Core: core, Dyn: dyn, config: cfg}, nil
 }
 
 // list returns nothing, not an error, when the kind isn't installed.
