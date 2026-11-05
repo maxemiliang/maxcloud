@@ -4,13 +4,16 @@
 #   - Secret maxcloud-controller: UPCLOUD_TOKEN, UPCLOUD_TOKEN_EXPIRES_AT,
 #     AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY
 #   - ConfigMap maxcloud-controller: MAXCLOUD_OBJECT_STORAGE_ID,
-#     MAXCLOUD_S3_ENDPOINT (and optionally MAXCLOUD_S3_REGION)
+#     MAXCLOUD_S3_ENDPOINT (and optionally MAXCLOUD_S3_REGION,
+#     MAXCLOUD_POSTGRES_IMAGE)
+# Databases need CloudNativePG and its barman-cloud plugin in the cluster.
 # The homelab's are in its infrastructure/controllers/maxcloud.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 namespace: maxcloud-system
 resources:
   - crd/maxcloud.gronblom.dev_buckets.yaml
+  - crd/maxcloud.gronblom.dev_databases.yaml
   - rbac/role.yaml
   - rbac/role_binding.yaml
   - rbac/leader_election.yaml
@@ -18,4 +21,4 @@ resources:
 # The release workflow checks that this is the tag being released.
 images:
   - name: ghcr.io/maxemiliang/maxcloud-controller
-    newTag: 0.1.0
+    newTag: 0.2.0

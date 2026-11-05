@@ -1,0 +1,264 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.23.0
+  name: databases.maxcloud.gronblom.dev
+spec:
+  group: maxcloud.gronblom.dev
+  names:
+    categories:
+    - maxcloud
+    kind: Database
+    listKind: DatabaseList
+    plural: databases
+    singular: database
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .status.phase
+      name: Phase
+      type: string
+    - jsonPath: .status.generation
+      name: Generation
+      type: integer
+    - jsonPath: .spec.instances
+      name: Instances
+      type: integer
+    - jsonPath: .spec.size
+      name: Size
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: |-
+          Database is a Postgres database for an app on the run platform. The app
+          registry creates it; apps can only read it.
+
+          One database per app for now: its Cluster is db, its backups mc-<app>--db.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: |-
+              DatabaseSpec is the app's Postgres database, run by CloudNativePG: a
+              Cluster named like the Database (db), whose connection details are in
+              the Secret db-app, backed up continuously to the app's bucket
+              mc-<app>--db.
+            properties:
+              backup:
+                description: Backup settings.
+                properties:
+                  retention:
+                    default: 7d
+                    description: 'Retention of backups and WAL, e.g. 7d: how far back
+                      a restore can go.'
+                    pattern: ^[1-9][0-9]*[dwm]$
+                    type: string
+                  schedule:
+                    default: 0 0 5 * * *
+                    description: |-
+                      Schedule of the base backups, CloudNativePG's six-field cron
+                      (seconds first). WAL is archived continuously in between.
+                    type: string
+                type: object
+              instances:
+                default: 1
+                description: |-
+                  Instances: 1, or 2 for a streaming replica on the other node, so a
+                  node drain fails over instead of taking the database down.
+                format: int32
+                maximum: 2
+                minimum: 1
+                type: integer
+              reclaimPolicy:
+                default: Retain
+                description: |-
+                  ReclaimPolicy of the backup bucket: Retain (default) keeps the
+                  backups when this object is deleted; Delete deletes them.
+                enum:
+                - Retain
+                - Delete
+                type: string
+              resources:
+                description: |-
+                  Resources of each Postgres instance (default: 20m CPU and 128Mi
+                  requested, 512Mi limit).
+                properties:
+                  claims:
+                    description: |-
+                      Claims lists the names of resources, defined in spec.resourceClaims,
+                      that are used by this container.
+
+                      This field depends on the
+                      DynamicResourceAllocation feature gate.
+
+                      This field is immutable. It can only be set for containers.
+                    items:
+                      description: ResourceClaim references one entry in PodSpec.ResourceClaims.
+                      properties:
+                        name:
+                          description: |-
+                            Name must match the name of one entry in pod.spec.resourceClaims of
+                            the Pod where this field is used. It makes that resource available
+                            inside a container.
+                          type: string
+                        request:
+                          description: |-
+                            Request is the name chosen for a request in the referenced claim.
+                            If empty, everything from the claim is made available, otherwise
+                            only the result of this request.
+                          type: string
+                      required:
+                      - name
+                      type: object
+                    type: array
+                    x-kubernetes-list-map-keys:
+                    - name
+                    x-kubernetes-list-type: map
+                  limits:
+                    additionalProperties:
+                      anyOf:
+                      - type: integer
+                      - type: string
+                      pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                      x-kubernetes-int-or-string: true
+                    description: |-
+                      Limits describes the maximum amount of compute resources allowed.
+                      More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
+                    type: object
+                  requests:
+                    additionalProperties:
+                      anyOf:
+                      - type: integer
+                      - type: string
+                      pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                      x-kubernetes-int-or-string: true
+                    description: |-
+                      Requests describes the minimum amount of compute resources required.
+                      If Requests is omitted for a container, it defaults to Limits if that is explicitly specified,
+                      otherwise to an implementation-defined value. Requests cannot exceed Limits.
+                      More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
+                    type: object
+                type: object
+              size:
+                anyOf:
+                - type: integer
+                - type: string
+                default: 1Gi
+                description: Size of each instance's disk. It can grow, never shrink.
+                pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                x-kubernetes-int-or-string: true
+            type: object
+          status:
+            properties:
+              bucket:
+                description: Bucket holding the backups.
+                type: string
+              conditions:
+                description: 'Conditions: Ready, Blocked.'
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - type
+                x-kubernetes-list-type: map
+              generation:
+                description: |-
+                  Generation of the backups the database writes now: they go to the
+                  folder db-<generation> in the bucket. A restore starts a new one, so
+                  older backups are never written over. The bucket's marker
+                  (maxcloud.json) is the source of truth; this is a copy.
+                format: int64
+                type: integer
+              observedGeneration:
+                format: int64
+                type: integer
+              phase:
+                description: DatabasePhase is where the database is in its life.
+                type: string
+              restoredFrom:
+                description: RestoredFrom is the generation the current one was restored
+                  from.
+                format: int64
+                type: integer
+            type: object
+        type: object
+        x-kubernetes-validations:
+        - message: 'name: must be db (one database per app)'
+          rule: self.metadata.name == 'db'
+    served: true
+    storage: true
+    subresources:
+      status: {}

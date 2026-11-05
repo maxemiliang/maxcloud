@@ -1,6 +1,6 @@
 // maxcloud-controller gives apps on the run platform the storage the app
-// registry asks for: S3 buckets in UpCloud Managed Object Storage (and later
-// Postgres databases).
+// registry asks for: S3 buckets in UpCloud Managed Object Storage, and
+// Postgres databases (CloudNativePG) backed up to them.
 //
 // Configuration, from the environment:
 //
@@ -9,6 +9,7 @@
 //	MAXCLOUD_OBJECT_STORAGE_ID   the Object Storage instance's UUID
 //	MAXCLOUD_S3_ENDPOINT         its S3 endpoint, https://...
 //	MAXCLOUD_S3_REGION           default europe-1
+//	MAXCLOUD_POSTGRES_IMAGE      the databases' Postgres image (default in the code)
 //	AWS_ACCESS_KEY_ID            the controller's own S3 user
 //	AWS_SECRET_ACCESS_KEY
 package main
@@ -38,6 +39,7 @@ var Version = "dev"
 
 type config struct {
 	token, serviceUUID, endpoint, region, accessKeyID, secretAccessKey string
+	postgresImage                                                      string
 	tokenExpires                                                       time.Time
 }
 
@@ -52,6 +54,9 @@ func configFromEnv() (config, error) {
 	}
 	if c.region == "" {
 		c.region = "europe-1"
+	}
+	if c.postgresImage = os.Getenv("MAXCLOUD_POSTGRES_IMAGE"); c.postgresImage == "" {
+		c.postgresImage = controller.DefaultPostgresImage
 	}
 	var missing []string
 	for name, v := range map[string]string{
@@ -125,16 +130,33 @@ func run(metricsAddr, probeAddr string, leaderElect bool) error {
 	}
 
 	storage := objectstorage.NewUpCloud(cfg.token, cfg.serviceUUID)
-	if err := (&controller.BucketReconciler{
+	s3c := objectstorage.NewS3(cfg.endpoint, cfg.region, cfg.accessKeyID, cfg.secretAccessKey)
+	identity := &controller.Identity{
 		Client:    mgr.GetClient(),
 		APIReader: mgr.GetAPIReader(),
 		Storage:   storage,
-		Policies:  objectstorage.NewS3(cfg.endpoint, cfg.region, cfg.accessKeyID, cfg.secretAccessKey),
-		Metrics:   &controller.MetricsCache{Storage: storage, MaxAge: 2 * time.Minute},
 		Endpoint:  cfg.endpoint,
 		Region:    cfg.region,
+	}
+	if err := (&controller.BucketReconciler{
+		Client:   mgr.GetClient(),
+		Identity: identity,
+		Storage:  storage,
+		Policies: s3c,
+		Metrics:  &controller.MetricsCache{Storage: storage, MaxAge: 2 * time.Minute},
+		Endpoint: cfg.endpoint,
 	}).SetupWithManager(mgr); err != nil {
 		return fmt.Errorf("bucket controller: %w", err)
+	}
+	if err := (&controller.DatabaseReconciler{
+		Client:   mgr.GetClient(),
+		Identity: identity,
+		Storage:  storage,
+		Objects:  s3c,
+		Endpoint: cfg.endpoint,
+		Image:    cfg.postgresImage,
+	}).SetupWithManager(mgr); err != nil {
+		return fmt.Errorf("database controller: %w", err)
 	}
 
 	if !cfg.tokenExpires.IsZero() {

@@ -22,9 +22,22 @@ rules:
   - get
   - update
 - apiGroups:
+  - barmancloud.cnpg.io
+  resources:
+  - objectstores
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
   - maxcloud.gronblom.dev
   resources:
   - buckets
+  - databases
   verbs:
   - get
   - list
@@ -35,13 +48,29 @@ rules:
   - maxcloud.gronblom.dev
   resources:
   - buckets/finalizers
+  - databases/finalizers
   verbs:
   - update
 - apiGroups:
   - maxcloud.gronblom.dev
   resources:
   - buckets/status
+  - databases/status
   verbs:
   - get
   - patch
   - update
+- apiGroups:
+  - postgresql.cnpg.io
+  resources:
+  - backups
+  - clusters
+  - scheduledbackups
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch

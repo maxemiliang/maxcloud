@@ -14,6 +14,12 @@
       "matchStrings": ["# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)\\s+\\w+: (?<currentValue>\\S+)"]
     },
     {
+      "description": "Container images pinned in the controller's Go code (the Postgres its databases run).",
+      "customType": "regex",
+      "managerFilePatterns": ["/^controller/internal/.+\\.go$/"],
+      "matchStrings": ["// renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)\\s+const \\w+ = \"[^\"]+:(?<currentValue>[^\"]+)\""]
+    },
+    {
       "description": "The same in Go code (the Paketo builder for direct deploys, kept equal to run-deploy.yaml's).",
       "customType": "regex",
       "managerFilePatterns": ["/^internal/.+\\.go$/"],

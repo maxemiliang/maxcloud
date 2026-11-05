@@ -152,6 +152,7 @@ type env struct {
 	client   client.Client
 	storage  *fakeStorage
 	policies *fakePolicies
+	identity *Identity
 	r        *BucketReconciler
 }
 
@@ -164,17 +165,17 @@ func newEnv(t *testing.T, objs ...client.Object) *env {
 	if err := v1.AddToScheme(scheme); err != nil {
 		t.Fatal(err)
 	}
-	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(objs...).WithStatusSubresource(&v1.Bucket{}).Build()
+	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(objs...).WithStatusSubresource(&v1.Bucket{}, &v1.Database{}).Build()
 	s := newFakeStorage()
 	p := &fakePolicies{policies: map[string]string{}}
-	return &env{t: t, client: c, storage: s, policies: p, r: &BucketReconciler{
-		Client:    c,
-		APIReader: c,
-		Storage:   s,
-		Policies:  p,
-		Metrics:   &MetricsCache{Storage: s, MaxAge: 0},
-		Endpoint:  "https://example.upcloudobjects.com",
-		Region:    "europe-1",
+	id := &Identity{Client: c, APIReader: c, Storage: s, Endpoint: "https://example.upcloudobjects.com", Region: "europe-1"}
+	return &env{t: t, client: c, storage: s, policies: p, identity: id, r: &BucketReconciler{
+		Client:   c,
+		Identity: id,
+		Storage:  s,
+		Policies: p,
+		Metrics:  &MetricsCache{Storage: s, MaxAge: 0},
+		Endpoint: "https://example.upcloudobjects.com",
 	}}
 }
 

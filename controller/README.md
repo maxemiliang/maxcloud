@@ -3,10 +3,10 @@
 Gives apps on maxcloud the storage the app registry asks for, the way
 Cloudflare gives a Worker its R2 bucket and D1 database:
 
-- **Buckets** (R2): S3 buckets in UpCloud Managed Object Storage. Available now.
-- **Databases** (D1): a CloudNativePG cluster per app, backed up to the
-  app's own bucket, restored automatically when it's gone. Planned; see
-  [Design](#design).
+- **Buckets** (R2): S3 buckets in UpCloud Managed Object Storage.
+- **Databases** (D1): a CloudNativePG cluster per app, backed up
+  continuously to the app's own bucket, and restored from those backups by
+  itself when its cluster is gone.
 
 It's a separate Go module, so mcloud and the SDKs don't pull in Kubernetes
 and AWS libraries.
@@ -47,6 +47,33 @@ holds the variables every AWS SDK reads, a pod only needs
 (not `kubectl get buckets`: in a cluster with Flux, that's Flux's Bucket
 kind; `buckets.maxcloud.gronblom.dev` also works). A
 Bucket that isn't Ready says why in its `Ready` condition.
+
+### Databases
+
+The registry's `db` field makes a `Database` named `db` in the app's
+namespace:
+
+```yaml
+apiVersion: maxcloud.gronblom.dev/v1alpha1
+kind: Database
+metadata: {name: db, namespace: shop}
+spec:
+  instances: 1           # 2: a replica on the other node
+  size: 1Gi              # can grow, never shrink
+  backup: {schedule: "0 0 5 * * *", retention: 7d}
+  reclaimPolicy: Retain  # what happens to the backups when this goes
+```
+
+The controller turns it into a CloudNativePG `Cluster` `db` (so
+`DATABASE_URL` comes from the Secret `db-app`, as for any CloudNativePG
+database), an `ObjectStore` writing WAL and base backups to the bucket
+`mc-shop--db` with the app's credentials, a daily `ScheduledBackup`, and a
+first `Backup` for every new generation. It won't take over a `Cluster` db
+it didn't create (say, from a `database.yaml` in the app's repo): it
+stops with a Blocked condition instead.
+
+`kubectl get maxcloud -A` shows the phase (Creating, Restoring, Ready,
+Blocked) and the backup generation.
 
 ## Running it
 
@@ -100,28 +127,33 @@ git tag controller/v0.2.0 && git push origin controller/v0.2.0
 `ghcr.io/maxemiliang/maxcloud-controller:0.2.0` (and refuses if `newTag`
 doesn't match). Clusters pick the tag in their `GitRepository`.
 
-## Design
+## How a database comes back
 
-**Buckets** are as above.
+What decides how a database starts lives in its bucket, not in the
+cluster: a marker object `maxcloud.json` (the app's policy can't write
+it) with the current backup **generation** and its state. Generation N's
+backups are the folder `db-N`; a restore always starts a new generation, so
+older backups are never written over. So a database whose `Cluster`, or
+whole namespace, or whole Kubernetes cluster is gone comes back by itself:
 
-**Databases (next).** A `Database` kind in the app's namespace (one per
-app, named `db`, so `db-app` and `DATABASE_URL` stay as they are today).
-The controller owns its CloudNativePG `Cluster`, `ObjectStore` and
-`ScheduledBackup`; backups go to the app's bucket `mc-<app>--db`, with the
-app's own credentials.
-
-The state that decides how a database starts lives in that bucket, not in
-the cluster: a marker object `maxcloud.json` with the current backup
-generation (the app's policy can't write it). So a database whose cluster
-or namespace is gone comes back from its backups by itself:
-
-| Database `db` has no `Cluster`, and | The controller |
+| `Cluster` db is missing, and | The controller |
 | --- | --- |
-| there's no bucket | creates it, writes generation 1, `initdb` |
-| the marker says generation N, which has a base backup | writes N+1, restores N into a new `Cluster` (backups now go to `db-N+1`) |
-| the marker says N but N has no base backup yet | **Blocked**: a person picks the generation to restore |
-| the bucket has objects but no marker, or any API error | **Blocked** or retry; never `initdb` |
+| there's no bucket, or it's empty | a new database: generation 1, `initdb` |
+| the marker's generation has a finished base backup | restores it into the next generation |
+| a restore was under way and never archived anything | tries that restore again |
+| the bucket has objects but no marker; or the marker's generation has WAL but no base backup; or the marker is unreadable | **Blocked**: never `initdb` over data it can't account for |
 
-It never writes over an older generation's backups, and never deletes a
-bucket unless its reclaim policy says so. Later: branches (a new `Cluster`
-from a point in time) and restores in place.
+A generation counts as restorable once barman's `backup.info` in
+`db-N/base/` says `status=DONE`; the controller takes that first base
+backup itself as soon as the new `Cluster` is ready.
+
+**When it's Blocked**, its `Blocked` condition says why. Look at the
+bucket's generations, then pick one:
+
+```fish
+kubectl -n shop annotate database db maxcloud.gronblom.dev/recover-from=2
+```
+
+It restores that generation into a new one and removes the annotation.
+Restoring to a point in time, and branches (a second `Cluster` from a
+point in time), come later.

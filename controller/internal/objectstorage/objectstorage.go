@@ -44,11 +44,22 @@ type Storage interface {
 	DeleteAccessKey(ctx context.Context, username, id string) error
 }
 
-// BucketPolicies is the part of the S3 API the controller uses.
+// BucketPolicies is the part of the S3 API the Bucket controller uses.
 type BucketPolicies interface {
 	PutBucketPolicy(ctx context.Context, bucket, document string) error
 	// DeleteBucketPolicy succeeds if the bucket has no policy.
 	DeleteBucketPolicy(ctx context.Context, bucket string) error
+}
+
+// Objects is the part of the S3 API the Database controller uses: the
+// restore marker, and looking at what backups a bucket holds.
+type Objects interface {
+	// GetObject returns the object, or found false if there's none.
+	GetObject(ctx context.Context, bucket, key string) (data []byte, found bool, err error)
+	PutObject(ctx context.Context, bucket, key string, data []byte) error
+	// Keys lists up to max keys under prefix ("" for the whole bucket).
+	// Both return ErrNoSuchBucket if the bucket doesn't exist.
+	Keys(ctx context.Context, bucket, prefix string, max int32) ([]string, error)
 }
 
 type BucketMetrics struct {
