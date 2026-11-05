@@ -117,3 +117,11 @@ func noSuchBucket(err error) bool {
 	var api smithy.APIError
 	return errors.As(err, &api) && api.ErrorCode() == "NoSuchBucket"
 }
+
+func (s *S3) DeleteObject(ctx context.Context, bucket, key string) error {
+	_, err := s.client.DeleteObject(ctx, &s3.DeleteObjectInput{Bucket: aws.String(bucket), Key: aws.String(key)})
+	if err != nil && !isNotFound(err) {
+		return fmt.Errorf("delete s3://%s/%s: %w", bucket, key, err)
+	}
+	return nil
+}

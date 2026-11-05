@@ -14,6 +14,7 @@
 //	MAXCLOUD_PUBLIC_DOMAIN       gives public buckets <bucket>--<app>.<domain> (off if unset)
 //	MAXCLOUD_PUBLIC_GATEWAY      namespace/gateway/listener for those (default traefik/public/https-public)
 //	POD_NAMESPACE                where their route objects go (default maxcloud-system)
+//	MAXCLOUD_REGISTRY_BUCKET     where the app registry's in-cluster entries are copied (default maxcloud-registry)
 //	AWS_ACCESS_KEY_ID            the controller's own S3 user
 //	AWS_SECRET_ACCESS_KEY
 package main
@@ -46,6 +47,7 @@ type config struct {
 	token, serviceUUID, endpoint, region, accessKeyID, secretAccessKey string
 	postgresImage, dbStorageClass                                      string
 	publicDomain, publicGateway, namespace                             string
+	registryBucket                                                     string
 	tokenExpires                                                       time.Time
 }
 
@@ -62,6 +64,9 @@ func configFromEnv() (config, error) {
 		c.region = "europe-1"
 	}
 	c.dbStorageClass = os.Getenv("MAXCLOUD_DB_STORAGE_CLASS")
+	if c.registryBucket = os.Getenv("MAXCLOUD_REGISTRY_BUCKET"); c.registryBucket == "" {
+		c.registryBucket = "maxcloud-registry"
+	}
 	c.publicDomain = os.Getenv("MAXCLOUD_PUBLIC_DOMAIN")
 	if c.publicGateway = os.Getenv("MAXCLOUD_PUBLIC_GATEWAY"); c.publicGateway == "" {
 		c.publicGateway = "traefik/public/https-public"
@@ -193,6 +198,12 @@ func run(metricsAddr, probeAddr string, leaderElect bool) error {
 	}
 	if err := (&controller.BranchReconciler{Client: mgr.GetClient(), DB: databases}).SetupWithManager(mgr); err != nil {
 		return fmt.Errorf("database branch controller: %w", err)
+	}
+
+	if err := (&controller.RegistryBackup{
+		Client: mgr.GetClient(), Storage: storage, Objects: s3c, Bucket: cfg.registryBucket,
+	}).SetupWithManager(mgr); err != nil {
+		return fmt.Errorf("registry backup: %w", err)
 	}
 
 	if !cfg.tokenExpires.IsZero() {

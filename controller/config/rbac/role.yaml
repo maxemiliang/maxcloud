@@ -35,6 +35,23 @@ rules:
   - update
   - watch
 - apiGroups:
+  - fluxcd.controlplane.io
+  resources:
+  - resourcesetinputproviders
+  verbs:
+  - create
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - fluxcd.controlplane.io
+  resources:
+  - resourcesetinputproviders/finalizers
+  verbs:
+  - update
+- apiGroups:
   - gateway.networking.k8s.io
   resources:
   - httproutes

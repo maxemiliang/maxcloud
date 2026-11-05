@@ -53,6 +53,14 @@ func (f *fakeObjects) PutObject(_ context.Context, bucket, key string, data []by
 	return nil
 }
 
+func (f *fakeObjects) DeleteObject(_ context.Context, bucket, key string) error {
+	if !f.exists(bucket) {
+		return objectstorage.ErrNoSuchBucket
+	}
+	delete(f.objects[bucket], key)
+	return nil
+}
+
 func (f *fakeObjects) Keys(_ context.Context, bucket, prefix string, max int32) ([]string, error) {
 	if !f.exists(bucket) {
 		return nil, objectstorage.ErrNoSuchBucket

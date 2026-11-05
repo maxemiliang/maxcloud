@@ -100,6 +100,18 @@ stops with a Blocked condition instead.
 `kubectl get maxcloud -A` shows the phase (Creating, Restoring, Ready,
 Blocked) and the backup generation.
 
+### The app registry's copy
+
+mcloud registers apps in the cluster (ResourceSetInputProviders in
+`flux-system`, labelled `app.kubernetes.io/managed-by: mcloud`), not in
+git. So that a rebuilt cluster gets them back, the controller copies each
+one to the bucket `maxcloud-registry` (`apps/<name>.yaml`) and, when it
+starts and every 15 minutes, creates any entry that has a copy but isn't in
+the cluster. The registry then recreates the app, and its database restores
+itself from its backups. A finalizer on each entry deletes the copy first
+when the app is deleted on purpose, so a deleted app doesn't come back.
+Entries that live in the homelab repo aren't copied: git has them.
+
 ## Running it
 
 From a tag, a cluster applies [`config/`](config/kustomization.yaml): the
