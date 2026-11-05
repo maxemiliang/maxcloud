@@ -122,7 +122,7 @@ func (p *PublicRoutes) Ensure(ctx context.Context, bucket, hostname string) erro
 			"backendRefs": []any{map[string]any{
 				"group": "traefik.io",
 				"kind":  "TraefikService",
-				"name": traefikServiceRef(p.Namespace, bucket),
+				"name":  traefikServiceRef(p.Namespace, bucket),
 			}},
 		}},
 	}
