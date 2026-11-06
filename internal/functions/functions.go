@@ -44,6 +44,20 @@ type Function struct {
 	MinInstances int  `json:"minInstances"`
 	MaxInstances int  `json:"maxInstances"`
 	Concurrency  int  `json:"concurrency"`
+	// Proxied: the public hostname's DNS record is proxied by Cloudflare.
+	Proxied bool `json:"proxied"`
+	// MemoryLimit above Memory (the request), for spikes.
+	MemoryLimit *string `json:"memoryLimit"`
+	// User the container runs as (and its group), for an image that
+	// doesn't set a non-root USER.
+	User *int64 `json:"user"`
+	// ReadOnlyRootFilesystem: write only to Volumes.
+	ReadOnlyRootFilesystem bool `json:"readOnlyRootFilesystem"`
+	// Volumes are scratch directories (emptyDir), gone with the instance.
+	Volumes []Volume `json:"volumes"`
+	// HealthPath answers 2xx when the instance can take requests: Knative's
+	// readiness probe, and a liveness probe that restarts it when it stops.
+	HealthPath string `json:"healthPath"`
 
 	// schedule
 	Schedule string `json:"schedule"`
@@ -56,6 +70,20 @@ type Function struct {
 	BackoffSeconds int    `json:"backoffSeconds"`
 	BacklogQuery   string `json:"backlogQuery"`
 }
+
+// Volume is a scratch directory for an HTTP function.
+type Volume struct {
+	Path      string `json:"path"`
+	SizeLimit string `json:"sizeLimit"`
+	// Memory: in RAM (tmpfs), counted against the container's memory; for
+	// /dev/shm.
+	Memory bool `json:"memory"`
+}
+
+// Paths Knative won't mount a volume on.
+var reservedPaths = map[string]bool{"/": true, "/dev": true, "/dev/log": true, "/tmp": true, "/var": true, "/var/log": true}
+
+var quantityRe = regexp.MustCompile(`^[0-9]+(\.[0-9]+)?(Ki|Mi|Gi|Ti|k|M|G|T)?$`)
 
 // Parse reads a description: plain JSON (--describe), or output with a
 // tagged line in it (MAXCLOUD_DESCRIBE=1).
@@ -101,6 +129,9 @@ func (d *Description) validate() error {
 			if f.TimeoutSeconds > maxHTTPTimeout {
 				return fmt.Errorf("function %s: timeoutSeconds %v is over Knative's limit of %d", f.Name, f.TimeoutSeconds, maxHTTPTimeout)
 			}
+			if err := f.validateHTTP(); err != nil {
+				return fmt.Errorf("function %s: %w", f.Name, err)
+			}
 		case "schedule":
 			if len(strings.Fields(f.Schedule)) != 5 {
 				return fmt.Errorf("function %s: schedule %q isn't a five-field cron schedule", f.Name, f.Schedule)
@@ -112,6 +143,42 @@ func (d *Description) validate() error {
 		default:
 			return fmt.Errorf("function %s: unknown kind %q (a newer SDK than this mcloud?)", f.Name, f.Kind)
 		}
+	}
+	return nil
+}
+
+func (f Function) validateHTTP() error {
+	if f.Proxied && !f.Public {
+		return errors.New("proxied needs public: a private function has no public hostname to proxy")
+	}
+	if f.MemoryLimit != nil && !quantityRe.MatchString(*f.MemoryLimit) {
+		return fmt.Errorf("memoryLimit %q: a quantity such as 1Gi", *f.MemoryLimit)
+	}
+	if f.User != nil && *f.User <= 0 {
+		return fmt.Errorf("user %d: a non-root user id", *f.User)
+	}
+	if f.HealthPath != "" && !strings.HasPrefix(f.HealthPath, "/") {
+		return fmt.Errorf("healthPath %q: a path starting with /", f.HealthPath)
+	}
+	seen := map[string]bool{}
+	for _, v := range f.Volumes {
+		p := filepath.Clean(v.Path)
+		if !filepath.IsAbs(v.Path) || p != v.Path {
+			return fmt.Errorf("volume %q: an absolute, clean path such as /scratch", v.Path)
+		}
+		if reservedPaths[p] {
+			return fmt.Errorf("volume %s: Knative doesn't allow a volume there (use another directory, and point TMPDIR at it for temporary files)", p)
+		}
+		if seen[p] {
+			return fmt.Errorf("volume %s listed twice", p)
+		}
+		seen[p] = true
+		if v.SizeLimit != "" && !quantityRe.MatchString(v.SizeLimit) {
+			return fmt.Errorf("volume %s: sizeLimit %q: a quantity such as 512Mi", p, v.SizeLimit)
+		}
+	}
+	if len(f.Volumes) > 8 {
+		return errors.New("at most 8 volumes")
 	}
 	return nil
 }
@@ -291,16 +358,68 @@ func knativeService(f Function, o Options) obj {
 	if f.Public {
 		meta["labels"].(obj)["run.gronblom.dev/expose"] = "public"
 	}
+	if f.Proxied {
+		// Knative copies the service's annotations to its HTTPRoute, where
+		// external-dns reads it.
+		meta["annotations"] = obj{"external-dns.kubernetes.io/cloudflare-proxied": "true"}
+	}
 	ann := obj{
 		"autoscaling.knative.dev/min-scale": fmt.Sprint(f.MinInstances),
 		"autoscaling.knative.dev/max-scale": fmt.Sprint(max(f.MaxInstances, 1)),
 	}
 	c := container(f, o, "")
 	c["ports"] = []any{obj{"containerPort": 8080}}
+	if f.MemoryLimit != nil {
+		r, _ := c["resources"].(obj)
+		if r == nil {
+			r = obj{}
+			c["resources"] = r
+		}
+		r["limits"] = obj{"memory": *f.MemoryLimit}
+	}
+	// Container-level: Knative refuses a pod securityContext with these.
+	// It adds runAsNonRoot, seccomp and no capabilities itself.
+	sc := obj{}
+	if f.User != nil {
+		sc["runAsUser"], sc["runAsGroup"] = *f.User, *f.User
+	}
+	if f.ReadOnlyRootFilesystem {
+		sc["readOnlyRootFilesystem"] = true
+	}
+	if len(sc) > 0 {
+		c["securityContext"] = sc
+	}
+	if f.HealthPath != "" {
+		// Knative probes the container's port itself; no port here.
+		c["readinessProbe"] = obj{"httpGet": obj{"path": f.HealthPath}, "periodSeconds": 10}
+		c["livenessProbe"] = obj{
+			"httpGet": obj{"path": f.HealthPath}, "initialDelaySeconds": 30,
+			"periodSeconds": 30, "timeoutSeconds": 5, "failureThreshold": 3,
+		}
+	}
+	var volumes, mounts []any
+	for i, v := range f.Volumes {
+		name := fmt.Sprintf("scratch-%d", i)
+		ed := obj{}
+		if v.Memory {
+			ed["medium"] = "Memory"
+		}
+		if v.SizeLimit != "" {
+			ed["sizeLimit"] = v.SizeLimit
+		}
+		volumes = append(volumes, obj{"name": name, "emptyDir": ed})
+		mounts = append(mounts, obj{"name": name, "mountPath": v.Path})
+	}
+	if len(mounts) > 0 {
+		c["volumeMounts"] = mounts
+	}
 	spec := obj{
 		"priorityClassName": "tenant",
 		"timeoutSeconds":    seconds(f.TimeoutSeconds, 300),
 		"containers":        []any{c},
+	}
+	if len(volumes) > 0 {
+		spec["volumes"] = volumes
 	}
 	if f.Concurrency > 0 {
 		spec["containerConcurrency"] = f.Concurrency

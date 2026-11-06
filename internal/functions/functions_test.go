@@ -232,3 +232,78 @@ func TestNoTriggerAuthenticationWithoutQueues(t *testing.T) {
 		}
 	}
 }
+
+// What a real app (a Nuxt app with Chromium for exports) needs from an HTTP
+// function: proxied, a memory limit above the request, a user for an image
+// without USER, a read-only root filesystem with scratch volumes, and a
+// health path.
+func TestHTTPOptions(t *testing.T) {
+	d, err := Parse([]byte(`{"functions":[{"name":"web","kind":"http","public":true,"proxied":true,"memory":"384Mi","memoryLimit":"1536Mi",
+		"user":1000,"readOnlyRootFilesystem":true,"healthPath":"/login",
+		"volumes":[{"path":"/scratch","sizeLimit":"1Gi"},{"path":"/dev/shm","sizeLimit":"512Mi","memory":true}]}]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := Manifests(d, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ksvc := docs(t, out)["Service/web"]
+	if get(ksvc, "metadata", "annotations", "external-dns.kubernetes.io/cloudflare-proxied") != "true" {
+		t.Errorf("annotations = %v", get(ksvc, "metadata", "annotations"))
+	}
+	spec := get(ksvc, "spec", "template", "spec")
+	c := get(spec, "containers", 0)
+	if get(c, "resources", "requests", "memory") != "384Mi" || get(c, "resources", "limits", "memory") != "1536Mi" {
+		t.Errorf("resources = %v", get(c, "resources"))
+	}
+	if get(c, "securityContext", "runAsUser") != float64(1000) || get(c, "securityContext", "runAsGroup") != float64(1000) || get(c, "securityContext", "readOnlyRootFilesystem") != true {
+		t.Errorf("securityContext = %v", get(c, "securityContext"))
+	}
+	if _, ok := spec.(map[string]any)["securityContext"]; ok {
+		t.Error("a pod securityContext: Knative refuses runAsUser there")
+	}
+	if get(c, "readinessProbe", "httpGet", "path") != "/login" || get(c, "livenessProbe", "httpGet", "path") != "/login" {
+		t.Errorf("probes = %v %v", get(c, "readinessProbe"), get(c, "livenessProbe"))
+	}
+	if _, ok := get(c, "readinessProbe", "httpGet").(map[string]any)["port"]; ok {
+		t.Error("probe port: Knative probes the container port itself")
+	}
+	if get(spec, "volumes", 1, "emptyDir", "medium") != "Memory" || get(spec, "volumes", 0, "emptyDir", "sizeLimit") != "1Gi" {
+		t.Errorf("volumes = %v", get(spec, "volumes"))
+	}
+	if get(c, "volumeMounts", 1, "mountPath") != "/dev/shm" || get(c, "volumeMounts", 1, "name") != get(spec, "volumes", 1, "name") {
+		t.Errorf("volumeMounts = %v", get(c, "volumeMounts"))
+	}
+
+	// The defaults add none of it.
+	d, _ = Parse([]byte(`{"functions":[{"name":"api","kind":"http","public":true}]}`))
+	out, _ = Manifests(d, Options{})
+	ksvc = docs(t, out)["Service/api"]
+	if _, ok := get(ksvc, "metadata").(map[string]any)["annotations"]; ok {
+		t.Error("annotations without proxied")
+	}
+	for _, k := range []string{"securityContext", "readinessProbe", "livenessProbe", "volumeMounts"} {
+		if _, ok := get(ksvc, "spec", "template", "spec", "containers", 0).(map[string]any)[k]; ok {
+			t.Errorf("%s without the option", k)
+		}
+	}
+}
+
+func TestHTTPOptionsRejected(t *testing.T) {
+	for _, bad := range []string{
+		`{"functions":[{"name":"x","kind":"http","proxied":true}]}`,
+		`{"functions":[{"name":"x","kind":"http","user":0}]}`,
+		`{"functions":[{"name":"x","kind":"http","healthPath":"login"}]}`,
+		`{"functions":[{"name":"x","kind":"http","memoryLimit":"lots"}]}`,
+		`{"functions":[{"name":"x","kind":"http","volumes":[{"path":"/tmp"}]}]}`,
+		`{"functions":[{"name":"x","kind":"http","volumes":[{"path":"scratch"}]}]}`,
+		`{"functions":[{"name":"x","kind":"http","volumes":[{"path":"/a/../b"}]}]}`,
+		`{"functions":[{"name":"x","kind":"http","volumes":[{"path":"/a"},{"path":"/a"}]}]}`,
+		`{"functions":[{"name":"x","kind":"http","volumes":[{"path":"/a","sizeLimit":"big"}]}]}`,
+	} {
+		if _, err := Parse([]byte(bad)); err == nil {
+			t.Errorf("%s: want an error", bad)
+		}
+	}
+}

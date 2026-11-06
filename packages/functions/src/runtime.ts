@@ -55,7 +55,20 @@ export function describe(found: Found[]) {
       switch (fn.kind) {
         case "http": {
           const o = fn.options;
-          return { ...base, public: o.public ?? false, minInstances: o.minInstances ?? 0, maxInstances: o.maxInstances ?? 3, concurrency: o.concurrency ?? 0, timeoutSeconds: o.timeoutSeconds ?? 300 };
+          return {
+            ...base,
+            public: o.public ?? false,
+            minInstances: o.minInstances ?? 0,
+            maxInstances: o.maxInstances ?? 3,
+            concurrency: o.concurrency ?? 0,
+            timeoutSeconds: o.timeoutSeconds ?? 300,
+            proxied: o.proxied ?? false,
+            memoryLimit: o.memoryLimit ?? null,
+            user: o.user ?? null,
+            readOnlyRootFilesystem: o.readOnlyRootFilesystem ?? false,
+            volumes: (o.volumes ?? []).map((v) => ({ path: v.path, sizeLimit: v.sizeLimit ?? "", memory: v.memory ?? false })),
+            healthPath: o.healthPath ?? "",
+          };
         }
         case "schedule": {
           const o = fn.options;

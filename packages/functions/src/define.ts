@@ -27,6 +27,38 @@ export interface HttpOptions extends CommonOptions {
   maxInstances?: number;
   /** Requests one instance handles at once before another starts. Default 0 (no limit; Knative scales on 100 in flight). */
   concurrency?: number;
+  /**
+   * Put the public hostname behind Cloudflare (its DNS record is proxied):
+   * WAF, caching, Cloudflare Access. Needs `public`. Default false.
+   */
+  proxied?: boolean;
+  /** Memory the container may use above `memory` (its request), for spikes, e.g. "1536Mi". */
+  memoryLimit?: string;
+  /** Run as this user id (and group), for an image whose Dockerfile has no non-root USER. */
+  user?: number;
+  /** Make the root filesystem read-only; write to `volumes` (and point TMPDIR at one). */
+  readOnlyRootFilesystem?: boolean;
+  /**
+   * Scratch directories, empty at every start. `memory: true` keeps one in
+   * RAM (counted against the container's memory): a bigger /dev/shm for
+   * Chromium, say. Knative doesn't allow /tmp.
+   */
+  volumes?: Volume[];
+  /**
+   * A path that answers 2xx when an instance can take requests: it gets
+   * traffic only after that, and is restarted when it stops answering.
+   * Default: the port accepting connections is enough.
+   */
+  healthPath?: string;
+}
+
+export interface Volume {
+  /** Where it's mounted, e.g. "/scratch" or "/dev/shm". */
+  path: string;
+  /** e.g. "1Gi". */
+  sizeLimit?: string;
+  /** In RAM (tmpfs) instead of on the node's disk. */
+  memory?: boolean;
 }
 
 export interface ScheduleOptions extends CommonOptions {
