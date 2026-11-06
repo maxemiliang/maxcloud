@@ -46,6 +46,12 @@ type function struct {
 
 type options struct {
 	public                bool
+	proxied               bool
+	memoryLimit           string
+	user                  *int64
+	readOnlyRoot          bool
+	volumes               []volume
+	healthPath            string
 	minInstances          int
 	maxInstances          int
 	concurrency           int
@@ -62,6 +68,48 @@ type Option func(*options)
 // Public makes an HTTP function reachable from the internet, at
 // https://<name>-<app>.gronblom.dev. Without it, it's cluster-local.
 func Public() Option { return func(o *options) { o.public = true } }
+
+// Proxied puts a public HTTP function's hostname behind Cloudflare (its
+// DNS record is proxied): WAF, caching, Cloudflare Access. Needs Public.
+func Proxied() Option { return func(o *options) { o.proxied = true } }
+
+// MemoryLimit lets a function's container use more memory than
+// Memory (its request), for spikes, e.g. "1536Mi".
+func MemoryLimit(q string) Option { return func(o *options) { o.memoryLimit = q } }
+
+// User runs a function's container as this user id (and group), for
+// an image whose Dockerfile has no non-root USER.
+func User(id int64) Option { return func(o *options) { o.user = &id } }
+
+// ReadOnlyRootFilesystem makes a function's root filesystem
+// read-only; write to a Volume (and point TMPDIR at one).
+func ReadOnlyRootFilesystem() Option { return func(o *options) { o.readOnlyRoot = true } }
+
+type volume struct {
+	Path      string `json:"path"`
+	SizeLimit string `json:"sizeLimit"`
+	Memory    bool   `json:"memory"`
+}
+
+// Volume mounts an empty scratch directory at path in a function's
+// container, at most sizeLimit ("1Gi"; "" for no limit). Knative doesn't
+// allow /tmp.
+func Volume(path, sizeLimit string) Option {
+	return func(o *options) { o.volumes = append(o.volumes, volume{Path: path, SizeLimit: sizeLimit}) }
+}
+
+// MemoryVolume is a Volume in RAM (tmpfs), counted against the container's
+// memory: a bigger /dev/shm for Chromium, say.
+func MemoryVolume(path, sizeLimit string) Option {
+	return func(o *options) {
+		o.volumes = append(o.volumes, volume{Path: path, SizeLimit: sizeLimit, Memory: true})
+	}
+}
+
+// HealthPath is a path that answers 2xx when an HTTP function's instance
+// can take requests: it gets traffic only after that, and is restarted
+// when it stops answering.
+func HealthPath(p string) Option { return func(o *options) { o.healthPath = p } }
 
 // MinInstances keeps n instances of an HTTP function running when idle
 // (default 0: scale to zero).
@@ -163,4 +211,5 @@ func reset() {
 	mu.Lock()
 	defer mu.Unlock()
 	registry = map[string]*function{}
+	migrationsFS = nil
 }

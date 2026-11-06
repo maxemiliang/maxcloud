@@ -11,8 +11,9 @@ import (
 )
 
 // sdkFallback is the @max-cloud/functions version a new app gets when npm
-// can't be asked for the newest one (offline). Bump it with each release.
-const sdkFallback = "0.4.0"
+// can't be asked for the newest one (offline). release-please bumps it with
+// each @max-cloud/functions release (release-please-config.json).
+const sdkFallback = "0.4.0" // x-release-please-version
 
 // latestSDK is the newest @max-cloud/functions on npm, else sdkFallback.
 func latestSDK(ctx context.Context) string {

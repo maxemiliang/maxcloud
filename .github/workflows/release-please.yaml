@@ -1,0 +1,99 @@
+# Releases, from conventional commits (release-please-config.json).
+#
+# Every push to main updates one release PR ("chore: release main"): the
+# next version of each part with changes (mcloud, controller, the Go SDK,
+# @max-cloud/functions, @max-cloud/nuxt), changelogs, and the versions in
+# files (package.json, the root package-lock.json, the controller's newTag,
+# mcloud's sdkFallback). Only commits under a part's directory count for it;
+# feat bumps the minor version, fix the patch (and while < 1.0.0, a
+# breaking change the minor).
+#
+# Merging that PR tags each part (v0.12.0, controller/v0.11.0,
+# functions/v0.5.0, functions-js/v0.5.0, nuxt-js/v0.1.0), makes their GitHub
+# releases, and runs the jobs below. Tags made with GITHUB_TOKEN don't start
+# other workflows, so this one calls the release workflows itself, in
+# order: the SDK on npm before @max-cloud/nuxt (which depends on it) and
+# before mcloud (whose new apps get the newest SDK). The Go SDK's release
+# is its tag.
+#
+# Needs: Settings, Actions, General, "Allow GitHub Actions to create and
+# approve pull requests". The release PR is made with GITHUB_TOKEN, so CI
+# doesn't run on it by itself.
+name: release-please
+
+on:
+  push:
+    branches: [main]
+
+permissions: {}
+
+concurrency:
+  group: release-please
+  cancel-in-progress: false
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # tags, releases, the release branch
+      pull-requests: write
+      issues: write # labels on the release PR
+    outputs:
+      mcloud: ${{ steps.rp.outputs.release_created }}
+      mcloud_tag: ${{ steps.rp.outputs.tag_name }}
+      controller: ${{ steps.rp.outputs['controller--release_created'] }}
+      controller_tag: ${{ steps.rp.outputs['controller--tag_name'] }}
+      functions_js: ${{ steps.rp.outputs['packages/functions--release_created'] }}
+      functions_js_tag: ${{ steps.rp.outputs['packages/functions--tag_name'] }}
+      nuxt_js: ${{ steps.rp.outputs['packages/nuxt--release_created'] }}
+      nuxt_js_tag: ${{ steps.rp.outputs['packages/nuxt--tag_name'] }}
+    steps:
+      - id: rp
+        uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
+
+  controller:
+    needs: release-please
+    if: needs.release-please.outputs.controller == 'true'
+    permissions:
+      contents: read
+      packages: write
+    uses: ./.github/workflows/release-controller.yaml
+    with:
+      tag: ${{ needs.release-please.outputs.controller_tag }}
+
+  functions-js:
+    needs: release-please
+    if: needs.release-please.outputs.functions_js == 'true'
+    permissions:
+      contents: read
+      id-token: write
+    uses: ./.github/workflows/release-npm.yaml
+    with:
+      tag: ${{ needs.release-please.outputs.functions_js_tag }}
+
+  # After the SDK, if it's released too (a skipped SDK job is fine; a failed
+  # one stops these).
+  nuxt-js:
+    needs: [release-please, functions-js]
+    if: >-
+      always() && needs.release-please.outputs.nuxt_js == 'true' &&
+      needs.release-please.result == 'success' && needs.functions-js.result != 'failure' &&
+      needs.functions-js.result != 'cancelled'
+    permissions:
+      contents: read
+      id-token: write
+    uses: ./.github/workflows/release-npm.yaml
+    with:
+      tag: ${{ needs.release-please.outputs.nuxt_js_tag }}
+
+  mcloud:
+    needs: [release-please, functions-js]
+    if: >-
+      always() && needs.release-please.outputs.mcloud == 'true' &&
+      needs.release-please.result == 'success' && needs.functions-js.result != 'failure' &&
+      needs.functions-js.result != 'cancelled'
+    permissions:
+      contents: write
+    uses: ./.github/workflows/release.yaml
+    with:
+      tag: ${{ needs.release-please.outputs.mcloud_tag }}

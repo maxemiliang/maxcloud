@@ -14,6 +14,8 @@
 //	MAXCLOUD_PUBLIC_DOMAIN       gives public buckets <bucket>--<app>.<domain> (off if unset)
 //	MAXCLOUD_PUBLIC_GATEWAY      namespace/gateway/listener for those (default traefik/public/https-public)
 //	POD_NAMESPACE                where their route objects go (default maxcloud-system)
+//	MAXCLOUD_DOMAINS_GATEWAY     namespace/gateway apps' custom domains attach to (default traefik/public)
+//	MAXCLOUD_DOMAINS_ALLOWLIST   ConfigMap in POD_NAMESPACE: the hostnames each app may have (default maxcloud-domains)
 //	MAXCLOUD_REGISTRY_BUCKET     where the app registry's in-cluster entries are copied (default maxcloud-registry)
 //	MAXCLOUD_SECRETS_AGE_KEY     age identity (AGE-SECRET-KEY-1...): turns on the apps' secrets backup (off if unset)
 //	MAXCLOUD_IMAGE_REGISTRY      the maxcloud registry's host: apps get pull credentials for it (off if unset)
@@ -61,6 +63,7 @@ type config struct {
 	token, serviceUUID, endpoint, region, accessKeyID, secretAccessKey string
 	postgresImage, dbStorageClass                                      string
 	publicDomain, publicGateway, namespace                             string
+	domainsGateway, domainsAllowlist                                   string
 	registryBucket                                                     string
 	secretsKey                                                         *age.X25519Identity
 	apiServer, discoveryAddr, oidcIssuer, oidcClientID, minMcloud      string
@@ -116,6 +119,12 @@ func configFromEnv() (config, error) {
 	}
 	if c.namespace = os.Getenv("POD_NAMESPACE"); c.namespace == "" {
 		c.namespace = "maxcloud-system"
+	}
+	if c.domainsGateway = os.Getenv("MAXCLOUD_DOMAINS_GATEWAY"); c.domainsGateway == "" {
+		c.domainsGateway = "traefik/public"
+	}
+	if c.domainsAllowlist = os.Getenv("MAXCLOUD_DOMAINS_ALLOWLIST"); c.domainsAllowlist == "" {
+		c.domainsAllowlist = "maxcloud-domains"
 	}
 	if c.postgresImage = os.Getenv("MAXCLOUD_POSTGRES_IMAGE"); c.postgresImage == "" {
 		c.postgresImage = controller.DefaultPostgresImage
@@ -248,6 +257,19 @@ func run(metricsAddr, probeAddr string, leaderElect bool) error {
 	}
 	if err := (&controller.BranchReconciler{Client: mgr.GetClient(), DB: databases}).SetupWithManager(mgr); err != nil {
 		return fmt.Errorf("database branch controller: %w", err)
+	}
+
+	// Apps' custom hostnames (Domains, from the registry's domains field).
+	gw := strings.Split(cfg.domainsGateway, "/")
+	if len(gw) != 2 {
+		return fmt.Errorf("MAXCLOUD_DOMAINS_GATEWAY %q: expected namespace/gateway", cfg.domainsGateway)
+	}
+	if err := (&controller.Domains{
+		Client: mgr.GetClient(), Reader: mgr.GetAPIReader(),
+		AllowlistNamespace: cfg.namespace, Allowlist: cfg.domainsAllowlist,
+		GatewayNamespace: gw[0], Gateway: gw[1],
+	}).SetupWithManager(mgr); err != nil {
+		return fmt.Errorf("domain controller: %w", err)
 	}
 
 	// Apps' secrets live only in the cluster: an encrypted copy of each goes

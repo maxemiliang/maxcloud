@@ -92,6 +92,38 @@ err = p.QueryRow(ctx, "SELECT name FROM users WHERE id = $1", id).Scan(&name)
 
 It returns an error if `$DATABASE_URL` isn't set.
 
+### Migrations
+
+Put SQL migrations in `migrations/` at the app's root, named
+`NUMBER_DESCRIPTION.sql` with numbers of one width: `0001_init.sql`,
+`0002_add_orders.sql`. Embed them, since the built image has the binary and
+not the source, and hand them to the runtime before `Start`:
+
+```go
+//go:embed migrations
+var migrations embed.FS
+
+func main() {
+	functions.Migrations(migrations)
+	functions.HTTPFunc("api", api)
+	functions.Start()
+}
+```
+
+Before `Start` runs a function, it applies the ones the database hasn't
+had: each once, in name order, in its own transaction, recorded in the
+table `maxcloud_migrations`. Only one process applies them at a time; the
+others wait, so no function starts on an older schema than its code
+expects. A migration that fails, a file edited after it was applied, or
+migrations without a `$DATABASE_URL` stop the process (exit 1).
+`MAXCLOUD_MIGRATE=0` in the environment turns it off. `--describe` lists
+the embedded files, and the deploy warns when `migrations/` has one the
+binary doesn't.
+
+Dev mode leaves them to `mcloud dev`, which applies them from
+`migrations/` before it starts the app; `mcloud db migrate` applies them by
+hand (maxcloud's README, "Migrations", has the rules).
+
 ## Buckets
 
 An app's S3 buckets are listed in its `maxcloud.yaml`
@@ -156,7 +188,8 @@ reads it, with an error that says how to set it when it's missing.
 - **Schedule:** one run, then it exits 0, or 1 on an error.
 - **Queue:** the worker loop.
 
-On SIGTERM it finishes what's in flight (up to 25 seconds) and exits 0.
+First it applies the app's pending migrations (see Migrations). On SIGTERM
+it finishes what's in flight (up to 25 seconds) and exits 0.
 
 With `--describe`, or `MAXCLOUD_DESCRIBE=1` in the environment, it prints
 the registered functions as JSON instead; that's what `mcloud` deploys from.

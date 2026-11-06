@@ -90,7 +90,12 @@ export async function startDev(found: Found[], opts: DevOptions): Promise<DevSer
     return notFound();
   };
 
-  const serving = await serveHttp({ handler }, opts.port, log, "127.0.0.1");
+  // <name>.localhost for a function made from a Node listener goes to it directly.
+  const nodeFor = (req: import("node:http").IncomingMessage) => {
+    const host = hostOnly(req.headers.host);
+    return host.endsWith(".localhost") ? http.get(host.slice(0, -".localhost".length))?.node : undefined;
+  };
+  const serving = await serveHttp({ handler, nodeFor }, opts.port, log, "127.0.0.1");
   port = serving.port;
 
   const hasDatabase = Boolean(process.env.DATABASE_URL);

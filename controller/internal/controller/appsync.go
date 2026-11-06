@@ -31,7 +31,7 @@ import (
 )
 
 // AppSync keeps a GitOps app's registry entry in line with the maxcloud.yaml
-// in its repo: a push that changes the app's quota, buckets or database
+// in its repo: a push that changes the app's quota, buckets, database or domains
 // reaches the cluster without anyone running mcloud, and without CI needing
 // access to the cluster. Flux already fetches the app's repo (the registry's
 // GitRepository for it, which includes maxcloud.yaml); this reads the file
@@ -235,8 +235,18 @@ type project struct {
 		Memory string `json:"memory"`
 		Pods   any    `json:"pods"`
 	} `json:"quota"`
-	Buckets []string   `json:"buckets"`
-	DB      *projectDB `json:"db"`
+	Buckets []string        `json:"buckets"`
+	DB      *projectDB      `json:"db"`
+	Domains []projectDomain `json:"domains"`
+}
+
+// projectDomain is one of domains: {host, service, proxied}. Which
+// hostnames the app may have is admission's call (the allowlist), checked
+// when the entry is written.
+type projectDomain struct {
+	Host    string `json:"host"`
+	Service string `json:"service"`
+	Proxied bool   `json:"proxied"`
 }
 
 type projectDB struct {
@@ -306,6 +316,17 @@ func (p *project) apply(values map[string]any) []string {
 		}
 		set("buckets", strings.Join(parts, ","))
 	}
+	if p.Domains != nil {
+		parts := make([]string, 0, len(p.Domains))
+		for _, d := range p.Domains {
+			v := strings.ToLower(strings.TrimSpace(d.Host)) + ":" + strings.TrimSpace(d.Service)
+			if d.Proxied {
+				v += ":proxied"
+			}
+			parts = append(parts, v)
+		}
+		set("domains", strings.Join(parts, ","))
+	}
 	if d := p.DB; d != nil {
 		if d.Enabled {
 			set("db", "true")
@@ -344,6 +365,9 @@ func (p *project) declares() []string {
 	}
 	if p.DB != nil {
 		keys = append(keys, "db", "dbSize", "dbInstances")
+	}
+	if p.Domains != nil {
+		keys = append(keys, "domains")
 	}
 	slices.Sort(keys)
 	return keys

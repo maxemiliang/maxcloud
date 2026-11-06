@@ -1,15 +1,21 @@
-# maxcloud-controller releases: a controller/v* tag builds the image and
+# maxcloud-controller releases: builds the image for a controller/v* tag and
 # pushes it to ghcr.io/maxemiliang/maxcloud-controller:<version>.
-#
-# Bump newTag in controller/config/kustomization.yaml first; clusters apply
-# that directory at the tag, so it must name the image the tag builds.
-#
-#   git tag controller/v0.2.0 && git push origin controller/v0.2.0
+# release-please (release-please.yaml) calls it when a release PR with the
+# controller in it is merged; that PR also bumps newTag in
+# controller/config/kustomization.yaml. Clusters apply that directory at the
+# tag, so it must name the image the tag builds. Pushing a tag by hand still
+# works (bump newTag first).
 name: release-controller
 
 on:
   push:
     tags: ["controller/v*"]
+  workflow_call:
+    inputs:
+      tag:
+        description: The controller/v* tag to release
+        type: string
+        required: true
 
 permissions: {}
 
@@ -24,10 +30,14 @@ jobs:
         working-directory: controller
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.tag || github.ref }}
       - name: Version from the tag, matching config/kustomization.yaml
+        env:
+          TAG: ${{ inputs.tag || github.ref_name }}
         run: |
-          version="${GITHUB_REF_NAME#controller/v}"
-          grep -qE "^\s+newTag: ${version}\$" config/kustomization.yaml || {
+          version="${TAG#controller/v}"
+          grep -qE "^\s+newTag: ${version}( |\$)" config/kustomization.yaml || {
             echo "::error::config/kustomization.yaml doesn't set newTag: ${version}"
             exit 1
           }

@@ -125,8 +125,18 @@ app: %[1]s
 # ":public" lets anyone read one, at https://<bucket>--<app>.gronblom.dev/:
 # buckets: [uploads, assets:public]
 # A Postgres database (DATABASE_URL), backed up and restorable to a point in
-# time; queue functions need it:
+# time; queue functions need it. SQL migrations go in migrations/
+# (0001_init.sql, ...): the app applies them when it starts, mcloud dev
+# before it runs the app, and mcloud db migrate by hand:
 # db: true            # or {size: 2Gi, instances: 2}
+# Hostnames of your own for a function or Knative service (it can stay
+# private). Only ones an admin allowed this app (homelab
+# infrastructure/configs/run/domains.yaml); proxied: behind Cloudflare.
+# domains:
+#   - {host: shop.gronblom.dev, service: web, proxied: true}
+# The folder the app is built from and mcloud dev runs in, if it isn't this
+# one (e.g. the web app in worker/ of a repo whose root is a Go CLI):
+# source: worker
 `,
 	".github/workflows/deploy.yaml": `# Every push to main deploys this app to maxcloud (maxemiliang/maxcloud,
 # .github/workflows/run-deploy.yaml): builds the image, writes the

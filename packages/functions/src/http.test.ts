@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { onRequest } from "./define.ts";
 import { serveHttp } from "./http.ts";
+import { request } from "node:http";
 
 const quiet = () => {};
 
@@ -62,4 +63,49 @@ test("close aborts what's still running after the grace period", async () => {
   await s.close(100);
   await pending;
   assert.equal(aborted, true);
+});
+
+// A Node listener (Express, Nitro's toNodeListener) gets the server's own
+// request and response: chunks reach the client as they're written.
+test("a Node listener streams, with the original Host", async (t) => {
+  let release!: () => void;
+  const gate = new Promise<void>((r) => (release = r));
+  const fn = onRequest({ node: async (req, res) => {
+    res.writeHead(200, { "content-type": "text/plain", "x-host": req.headers.host ?? "" });
+    res.write("first\n");
+    await gate;
+    res.end("second\n");
+  } });
+  const s = await serveHttp(fn, 0, quiet);
+  t.after(() => s.close(0));
+  // node:http, not fetch: fetch won't send a Host of our choosing.
+  const res = await new Promise<import("node:http").IncomingMessage>((resolve, reject) => {
+    request({ host: "127.0.0.1", port: s.port, path: "/", headers: { host: "paja.lankkupelit.fi" } }, resolve).on("error", reject).end();
+  });
+  assert.equal(res.headers["x-host"], "paja.lankkupelit.fi");
+  res.setEncoding("utf8");
+  const chunks = res[Symbol.asyncIterator]();
+  assert.equal((await chunks.next()).value, "first\n", "the first chunk arrives before the response ends");
+  release();
+  let rest = "";
+  for (let r = await chunks.next(); !r.done; r = await chunks.next()) rest += r.value;
+  assert.equal(rest, "second\n");
+});
+
+test("close waits for a Node listener's response to finish", async () => {
+  const fn = onRequest({ node: (_req, res) => { setTimeout(() => res.end("done"), 100); } });
+  const s = await serveHttp(fn, 0, quiet);
+  const pending = fetch(`http://127.0.0.1:${s.port}/`).then((r) => r.text());
+  await new Promise((r) => setTimeout(r, 20));
+  await s.close(5_000);
+  assert.equal(await pending, "done");
+});
+
+test("fetch() on a Node listener function", async () => {
+  const fn = onRequest({ public: true }, { node: (req, res) => { res.setHeader("set-cookie", ["a=1", "b=2"]); res.end(`${req.method} ${req.url} ${req.headers.host}`); } });
+  assert.equal(fn.options.public, true);
+  assert.equal(typeof fn.node, "function");
+  const res = await fn.fetch(new Request("http://web.example.com/x?y=1", { method: "POST", body: "b" }));
+  assert.equal(await res.text(), "POST /x?y=1 web.example.com");
+  assert.deepEqual(res.headers.getSetCookie(), ["a=1", "b=2"]);
 });

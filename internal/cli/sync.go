@@ -48,6 +48,9 @@ func (p *project) entry(base *registry.Entry) registry.Entry {
 	if p.Buckets != nil {
 		e.Buckets = strings.Join(p.Buckets, ",")
 	}
+	if p.Domains != nil {
+		e.Domains = registry.FormatDomains(p.Domains)
+	}
 	if d := p.DB; d != nil {
 		if d.Enabled {
 			e.DB = "true"
@@ -80,6 +83,9 @@ func (p *project) syncedFields() []string {
 	}
 	if p.DB != nil {
 		out = append(out, "db", "dbInstances", "dbSize")
+	}
+	if p.Domains != nil {
+		out = append(out, "domains")
 	}
 	sort.Strings(out)
 	return out

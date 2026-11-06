@@ -204,6 +204,18 @@ func TestAppSyncOtherCases(t *testing.T) {
 	})
 }
 
+func TestAppSyncDomains(t *testing.T) {
+	e := newSyncEnv(t, mcloudLabels, map[string]string{
+		"maxcloud.yaml": "app: shop\ndomains:\n  - {host: Shop.example.com, service: web, proxied: true}\n  - {host: api.example.com, service: api}\n",
+	})
+	if err := e.reconcile(); err != nil {
+		t.Fatal(err)
+	}
+	if got := values(e.entry())["domains"]; got != "shop.example.com:web:proxied,api.example.com:api" {
+		t.Errorf("domains = %v", got)
+	}
+}
+
 func TestAppSyncRecordsSyncedFields(t *testing.T) {
 	for _, tc := range []struct{ file, want string }{
 		{"app: shop\nquota: {cpu: 500m, pods: 30}\nbuckets: [uploads]\ndb: {size: 2Gi}\n", "buckets,cpu,db,dbInstances,dbSize,pods"},
@@ -211,6 +223,7 @@ func TestAppSyncRecordsSyncedFields(t *testing.T) {
 		{"quota: {memory: 1Gi}\ndb: true\n", "db,dbInstances,dbSize,memory"},
 		{"db: false\n", "db,dbInstances,dbSize"},
 		{"buckets: []\n", "buckets"},
+		{"domains: [{host: shop.example.com, service: web}]\n", "domains"},
 		{"app: shop\n", ""},
 	} {
 		e := newSyncEnv(t, mcloudLabels, map[string]string{"maxcloud.yaml": tc.file})

@@ -17,6 +17,7 @@ import (
 
 	"github.com/maxemiliang/maxcloud/internal/github"
 	"github.com/maxemiliang/maxcloud/internal/kube"
+	"github.com/maxemiliang/maxcloud/internal/registry"
 	"github.com/maxemiliang/maxcloud/internal/ui"
 )
 
@@ -118,6 +119,9 @@ type project struct {
 	App    string `json:"app"`
 	Deploy string `json:"deploy"` // "direct" for direct deploys
 	Image  string `json:"image"`  // image repository for direct deploys
+	// The folder the image is built from (and mcloud dev runs in),
+	// relative to maxcloud.yaml; default ".". See sourceDir.
+	Source string `json:"source"`
 
 	// GitOps source: the repo (default: the origin remote), manifests
 	// directory and branch.
@@ -128,6 +132,8 @@ type project struct {
 	Quota   *projectQuota `json:"quota"`
 	Buckets []string      `json:"buckets"` // "uploads", "assets:public"
 	DB      *projectDB    `json:"db"`      // db: true, or db: {size: 2Gi, instances: 2}
+	// Custom hostnames: [{host: shop.example.com, service: web, proxied: true}]
+	Domains []registry.Domain `json:"domains"`
 
 	Dir string `json:"-"` // where the file is: the repo's root
 }

@@ -36,6 +36,10 @@ func (g *globals) ciBuild(ctx context.Context, o ciOptions) error {
 		}
 		app = p.App
 	}
+	dir, err := ciContext(o.context)
+	if err != nil {
+		return err
+	}
 	sha, branch := os.Getenv("GITHUB_SHA"), os.Getenv("GITHUB_REF_NAME")
 	if sha == "" || branch == "" {
 		return errors.New("GITHUB_SHA and GITHUB_REF_NAME aren't set")
@@ -50,7 +54,7 @@ func (g *globals) ciBuild(ctx context.Context, o ciOptions) error {
 
 	ref := repo + ":" + sha
 	fmt.Fprintf(g.out, "Building %s ...\n", ref)
-	if err := g.buildImage(ctx, d, buildSpec{dir: o.context, ref: ref, cache: repo + ":build-cache", ci: true}); err != nil {
+	if err := g.buildImage(ctx, d, buildSpec{dir: dir, ref: ref, cache: repo + ":build-cache", ci: true}); err != nil {
 		return err
 	}
 	digest, err := g.imageDigest(ctx, d, ref)
@@ -89,6 +93,9 @@ func (g *globals) ciBuild(ctx context.Context, o ciOptions) error {
 			// Shown on the workflow run's summary page.
 			fmt.Fprintln(g.errOut, "::notice title=Queue functions need a database::"+functions.NeedsDatabaseHint(app))
 		}
+		if w := imageMigrationsWarning(desc); w != "" {
+			fmt.Fprintln(g.errOut, "::warning title=Migrations the image won't apply::"+w)
+		}
 	}
 
 	// Pin the image; kustomize is on GitHub's runners.
@@ -122,6 +129,32 @@ func (g *globals) ciBuild(ctx context.Context, o ciOptions) error {
 	return nil
 }
 
+// ciContext is the directory the deploy workflow builds, relative to the
+// current directory (the repo's root): --context if given, else source: in
+// maxcloud.yaml, else ".".
+func ciContext(flag string) (string, error) {
+	if flag != "" {
+		return flag, nil
+	}
+	p, err := loadProject()
+	if err != nil {
+		return ".", nil // no maxcloud.yaml (the app input names the app)
+	}
+	dir, err := p.sourceDir()
+	if err != nil {
+		return "", err
+	}
+	wd, err := os.Getwd()
+	if err != nil {
+		return "", err
+	}
+	rel, err := filepath.Rel(wd, dir)
+	if err != nil {
+		return dir, nil
+	}
+	return filepath.ToSlash(rel), nil
+}
+
 // buildPush builds the app here and pushes it: to the maxcloud registry
 // with an hour-long token of the app's push ServiceAccount (whoever may
 // manage the app's namespace may push its images), or to image: in
@@ -141,6 +174,10 @@ func (g *globals) buildPush(ctx context.Context, k *kube.Client, p *project, des
 		}
 		token = t
 	}
+	src, err := p.sourceDir()
+	if err != nil {
+		return "", nil, err
+	}
 	d, err := newDockerEnv(registry, token)
 	if err != nil {
 		return "", nil, err
@@ -149,7 +186,7 @@ func (g *globals) buildPush(ctx context.Context, k *kube.Client, p *project, des
 	u := g.UI()
 	ref := repo + ":direct-" + time.Now().UTC().Format("20060102-150405")
 	step := u.StepTail("Building "+ref, 6)
-	if err := g.buildImage(ctx, d, buildSpec{dir: p.Dir, ref: ref, cache: repo + ":build-cache", log: step.Writer()}); err != nil {
+	if err := g.buildImage(ctx, d, buildSpec{dir: src, ref: ref, cache: repo + ":build-cache", log: step.Writer()}); err != nil {
 		step.Fail("Build failed")
 		return "", nil, err
 	}

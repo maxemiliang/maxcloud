@@ -23,6 +23,9 @@ import (
 // runs once, a queue worker runs until SIGTERM. On SIGTERM it finishes what's
 // in flight and exits 0, so pods don't end in Error.
 //
+// Before it runs the function, it applies the app's pending SQL migrations
+// (see Migrations).
+//
 // With --describe, or MAXCLOUD_DESCRIBE=1 in the environment, it prints the
 // registered functions as JSON instead, which is how mcloud deploys them.
 //
@@ -52,13 +55,20 @@ func run(ctx context.Context, args []string, getenv func(string) string, stdout,
 	logger := log.New(stderr, "", log.LstdFlags)
 
 	switch {
-	case *describeFlag:
-		out, _ := json.MarshalIndent(describe(), "", "  ")
-		fmt.Fprintf(stdout, "%s\n", out)
-		return 0
-	case getenv("MAXCLOUD_DESCRIBE") == "1":
-		out, _ := json.Marshal(describe())
-		fmt.Fprintf(stdout, "%s%s\n", describeTag, out)
+	case *describeFlag || getenv("MAXCLOUD_DESCRIBE") == "1":
+		d := describe()
+		var err error
+		if d.Migrations, err = migrationNames(); err != nil {
+			fmt.Fprintf(stderr, "functions: %v\n", err)
+			return 1
+		}
+		if *describeFlag {
+			out, _ := json.MarshalIndent(d, "", "  ")
+			fmt.Fprintf(stdout, "%s\n", out)
+		} else {
+			out, _ := json.Marshal(d)
+			fmt.Fprintf(stdout, "%s%s\n", describeTag, out)
+		}
 		return 0
 	case *devFlag || getenv("MAXCLOUD_DEV") == "1":
 		os.Setenv("MAXCLOUD_DEV", "1")
@@ -80,6 +90,13 @@ func run(ctx context.Context, args []string, getenv func(string) string, stdout,
 			fmt.Fprintf(stderr, "functions: no function %s (found: %s)\n", *target, strings.Join(names, ", "))
 		}
 		return 2
+	}
+
+	// Before the function runs: an HTTP function isn't ready (and a new
+	// revision takes no traffic) until the schema is what its code expects.
+	if err := applyMigrations(ctx, getenv, logger); err != nil {
+		logger.Print(err)
+		return 1
 	}
 
 	switch f.kind {

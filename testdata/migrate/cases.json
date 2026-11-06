@@ -1,0 +1,64 @@
+{
+  "_": "Shared by every migration runner: mcloud and the Go SDK (internal/migrate), and the TypeScript SDK (packages/functions/src/migrate.ts). Each test loads the directories below and applies the steps in order to one empty database.",
+  "table": "public.maxcloud_migrations",
+  "lockKey": "7881713191291417956",
+  "load": [
+    {
+      "dir": "v1",
+      "files": [
+        { "name": "0001_init.sql", "checksum": "fc3e0154b988e28f08a2e1aa4f0d7d2ee4b76eccdbc5496d561507edf6bcc63f" },
+        { "name": "0002_items.sql", "checksum": "929dcc5e3114f52cbeb86ead2e4d936a4f5d455e4d028a8832718c93d0461f7f" }
+      ]
+    },
+    { "dir": "not-there", "files": [] },
+    { "dir": "badname", "error": "badname/init.sql: name a migration NUMBER_DESCRIPTION.sql" },
+    { "dir": "width", "error": "give the numbers the same width" }
+  ],
+  "apply": [
+    {
+      "dir": "v1",
+      "statusBefore": [
+        { "name": "0001_init.sql", "state": "pending" },
+        { "name": "0002_items.sql", "state": "pending" }
+      ],
+      "applied": ["0001_init.sql", "0002_items.sql"]
+    },
+    { "dir": "v1", "applied": [] },
+    { "dir": "v2", "applied": ["0003_more.sql"] },
+    {
+      "_": "An older version of the app, after a newer one migrated: fine.",
+      "dir": "v1",
+      "statusBefore": [
+        { "name": "0001_init.sql", "state": "applied" },
+        { "name": "0002_items.sql", "state": "applied" },
+        { "name": "0003_more.sql", "state": "missing" }
+      ],
+      "applied": []
+    },
+    {
+      "dir": "edited",
+      "statusBefore": [
+        { "name": "0001_init.sql", "state": "changed" },
+        { "name": "0002_items.sql", "state": "applied" },
+        { "name": "0003_more.sql", "state": "missing" }
+      ],
+      "error": "migrations/0001_init.sql changed after it was applied"
+    },
+    {
+      "dir": "broken",
+      "error": "migrations/0004_broken.sql, line 3: ",
+      "applied": [],
+      "tablesAbsent": ["broken_t"]
+    },
+    {
+      "dir": "broken",
+      "statusBefore": [
+        { "name": "0001_init.sql", "state": "applied" },
+        { "name": "0002_items.sql", "state": "applied" },
+        { "name": "0003_more.sql", "state": "applied" },
+        { "name": "0004_broken.sql", "state": "pending" }
+      ],
+      "error": "migrations/0004_broken.sql, line 3: "
+    }
+  ]
+}

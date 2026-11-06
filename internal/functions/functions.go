@@ -29,6 +29,9 @@ type Description struct {
 	SDK       string     `json:"sdk"`
 	Version   string     `json:"version"`
 	Functions []Function `json:"functions"`
+	// Migrations are the SQL migrations the image applies when it starts
+	// (their file names). nil: an SDK from before migrations.
+	Migrations []string `json:"migrations"`
 }
 
 type Function struct {
@@ -39,11 +42,27 @@ type Function struct {
 	CPU            *string `json:"cpu"`
 	TimeoutSeconds float64 `json:"timeoutSeconds"`
 
+	// The container, every kind:
+	// MemoryLimit above Memory (the request), for spikes.
+	MemoryLimit *string `json:"memoryLimit"`
+	// User the container runs as (and its group), for an image that
+	// doesn't set a non-root USER.
+	User *int64 `json:"user"`
+	// ReadOnlyRootFilesystem: write only to Volumes.
+	ReadOnlyRootFilesystem bool `json:"readOnlyRootFilesystem"`
+	// Volumes are scratch directories (emptyDir), gone with the pod.
+	Volumes []Volume `json:"volumes"`
+
 	// http
 	Public       bool `json:"public"`
 	MinInstances int  `json:"minInstances"`
 	MaxInstances int  `json:"maxInstances"`
 	Concurrency  int  `json:"concurrency"`
+	// Proxied: the public hostname's DNS record is proxied by Cloudflare.
+	Proxied bool `json:"proxied"`
+	// HealthPath answers 2xx when the instance can take requests: Knative's
+	// readiness probe, and a liveness probe that restarts it when it stops.
+	HealthPath string `json:"healthPath"`
 
 	// schedule
 	Schedule string `json:"schedule"`
@@ -56,6 +75,20 @@ type Function struct {
 	BackoffSeconds int    `json:"backoffSeconds"`
 	BacklogQuery   string `json:"backlogQuery"`
 }
+
+// Volume is a scratch directory for an HTTP function.
+type Volume struct {
+	Path      string `json:"path"`
+	SizeLimit string `json:"sizeLimit"`
+	// Memory: in RAM (tmpfs), counted against the container's memory; for
+	// /dev/shm.
+	Memory bool `json:"memory"`
+}
+
+// Paths Knative won't mount a volume on.
+var reservedPaths = map[string]bool{"/": true, "/dev": true, "/dev/log": true, "/tmp": true, "/var": true, "/var/log": true}
+
+var quantityRe = regexp.MustCompile(`^[0-9]+(\.[0-9]+)?(Ki|Mi|Gi|Ti|k|M|G|T)?$`)
 
 // Parse reads a description: plain JSON (--describe), or output with a
 // tagged line in it (MAXCLOUD_DESCRIBE=1).
@@ -101,6 +134,9 @@ func (d *Description) validate() error {
 			if f.TimeoutSeconds > maxHTTPTimeout {
 				return fmt.Errorf("function %s: timeoutSeconds %v is over Knative's limit of %d", f.Name, f.TimeoutSeconds, maxHTTPTimeout)
 			}
+			if err := f.validateHTTP(); err != nil {
+				return fmt.Errorf("function %s: %w", f.Name, err)
+			}
 		case "schedule":
 			if len(strings.Fields(f.Schedule)) != 5 {
 				return fmt.Errorf("function %s: schedule %q isn't a five-field cron schedule", f.Name, f.Schedule)
@@ -112,6 +148,49 @@ func (d *Description) validate() error {
 		default:
 			return fmt.Errorf("function %s: unknown kind %q (a newer SDK than this mcloud?)", f.Name, f.Kind)
 		}
+		if err := f.validateContainer(); err != nil {
+			return fmt.Errorf("function %s: %w", f.Name, err)
+		}
+	}
+	return nil
+}
+
+func (f Function) validateHTTP() error {
+	if f.Proxied && !f.Public {
+		return errors.New("proxied needs public: a private function has no public hostname to proxy")
+	}
+	if f.HealthPath != "" && !strings.HasPrefix(f.HealthPath, "/") {
+		return fmt.Errorf("healthPath %q: a path starting with /", f.HealthPath)
+	}
+	return nil
+}
+
+func (f Function) validateContainer() error {
+	if f.MemoryLimit != nil && !quantityRe.MatchString(*f.MemoryLimit) {
+		return fmt.Errorf("memoryLimit %q: a quantity such as 1Gi", *f.MemoryLimit)
+	}
+	if f.User != nil && *f.User <= 0 {
+		return fmt.Errorf("user %d: a non-root user id", *f.User)
+	}
+	seen := map[string]bool{}
+	for _, v := range f.Volumes {
+		p := filepath.Clean(v.Path)
+		if !filepath.IsAbs(v.Path) || p != v.Path {
+			return fmt.Errorf("volume %q: an absolute, clean path such as /scratch", v.Path)
+		}
+		if reservedPaths[p] {
+			return fmt.Errorf("volume %s: Knative doesn't allow a volume there (use another directory, and point TMPDIR at it for temporary files)", p)
+		}
+		if seen[p] {
+			return fmt.Errorf("volume %s listed twice", p)
+		}
+		seen[p] = true
+		if v.SizeLimit != "" && !quantityRe.MatchString(v.SizeLimit) {
+			return fmt.Errorf("volume %s: sizeLimit %q: a quantity such as 512Mi", p, v.SizeLimit)
+		}
+	}
+	if len(f.Volumes) > 8 {
+		return errors.New("at most 8 volumes")
 	}
 	return nil
 }
@@ -241,6 +320,9 @@ func resources(f Function) obj {
 		req["memory"] = *f.Memory
 		r["limits"] = obj{"memory": *f.Memory}
 	}
+	if f.MemoryLimit != nil {
+		r["limits"] = obj{"memory": *f.MemoryLimit}
+	}
 	if len(req) > 0 {
 		r["requests"] = req
 	}
@@ -265,18 +347,67 @@ func container(f Function, o Options, name string) obj {
 	if r := resources(f); len(r) > 0 {
 		c["resources"] = r
 	}
+	// Container-level: Knative refuses a pod securityContext with these.
+	sc := obj{}
+	if f.User != nil {
+		sc["runAsUser"], sc["runAsGroup"] = *f.User, *f.User
+	}
+	if f.ReadOnlyRootFilesystem {
+		sc["readOnlyRootFilesystem"] = true
+	}
+	if len(sc) > 0 {
+		c["securityContext"] = sc
+	}
+	var mounts []any
+	for i, v := range f.Volumes {
+		mounts = append(mounts, obj{"name": volumeName(i), "mountPath": v.Path})
+	}
+	if len(mounts) > 0 {
+		c["volumeMounts"] = mounts
+	}
 	return c
+}
+
+func volumeName(i int) string { return fmt.Sprintf("scratch-%d", i) }
+
+// podVolumes are the emptyDirs behind the container's volumeMounts.
+func podVolumes(f Function) []any {
+	var out []any
+	for i, v := range f.Volumes {
+		ed := obj{}
+		if v.Memory {
+			ed["medium"] = "Memory"
+		}
+		if v.SizeLimit != "" {
+			ed["sizeLimit"] = v.SizeLimit
+		}
+		out = append(out, obj{"name": volumeName(i), "emptyDir": ed})
+	}
+	return out
 }
 
 // hardened is the pod security a plain pod needs in a restricted namespace;
 // Knative adds the same to its pods by itself.
 func hardened(c obj) obj {
-	c["securityContext"] = obj{"allowPrivilegeEscalation": false, "capabilities": obj{"drop": []any{"ALL"}}}
+	sc, _ := c["securityContext"].(obj)
+	if sc == nil {
+		sc = obj{}
+	}
+	sc["allowPrivilegeEscalation"] = false
+	sc["capabilities"] = obj{"drop": []any{"ALL"}}
+	c["securityContext"] = sc
 	return c
 }
 
 func podSecurity() obj {
 	return obj{"runAsNonRoot": true, "seccompProfile": obj{"type": "RuntimeDefault"}}
+}
+
+func withVolumes(f Function, spec obj) obj {
+	if v := podVolumes(f); len(v) > 0 {
+		spec["volumes"] = v
+	}
+	return spec
 }
 
 func seconds(v float64, def int) int {
@@ -291,16 +422,33 @@ func knativeService(f Function, o Options) obj {
 	if f.Public {
 		meta["labels"].(obj)["run.gronblom.dev/expose"] = "public"
 	}
+	if f.Proxied {
+		// Knative copies the service's annotations to its HTTPRoute, where
+		// external-dns reads it.
+		meta["annotations"] = obj{"external-dns.kubernetes.io/cloudflare-proxied": "true"}
+	}
 	ann := obj{
 		"autoscaling.knative.dev/min-scale": fmt.Sprint(f.MinInstances),
 		"autoscaling.knative.dev/max-scale": fmt.Sprint(max(f.MaxInstances, 1)),
 	}
 	c := container(f, o, "")
 	c["ports"] = []any{obj{"containerPort": 8080}}
+	// Knative adds runAsNonRoot, seccomp and no capabilities itself.
+	if f.HealthPath != "" {
+		// Knative probes the container's port itself; no port here.
+		c["readinessProbe"] = obj{"httpGet": obj{"path": f.HealthPath}, "periodSeconds": 10}
+		c["livenessProbe"] = obj{
+			"httpGet": obj{"path": f.HealthPath}, "initialDelaySeconds": 30,
+			"periodSeconds": 30, "timeoutSeconds": 5, "failureThreshold": 3,
+		}
+	}
 	spec := obj{
 		"priorityClassName": "tenant",
 		"timeoutSeconds":    seconds(f.TimeoutSeconds, 300),
 		"containers":        []any{c},
+	}
+	if v := podVolumes(f); len(v) > 0 {
+		spec["volumes"] = v
 	}
 	if f.Concurrency > 0 {
 		spec["containerConcurrency"] = f.Concurrency
@@ -331,12 +479,12 @@ func cronJob(f Function, o Options) obj {
 			"ttlSecondsAfterFinished": 86400,
 			"template": obj{
 				"metadata": obj{"labels": labels(f)},
-				"spec": obj{
+				"spec": withVolumes(f, obj{
 					"priorityClassName": "tenant",
 					"restartPolicy":     "Never",
 					"securityContext":   podSecurity(),
 					"containers":        []any{hardened(container(f, o, "function"))},
-				},
+				}),
 			},
 		}},
 	}
@@ -357,13 +505,13 @@ func worker(f Function, o Options) obj {
 			"selector": obj{"matchLabels": obj{"app.kubernetes.io/name": f.Name}},
 			"template": obj{
 				"metadata": obj{"labels": labels(f)},
-				"spec": obj{
+				"spec": withVolumes(f, obj{
 					"priorityClassName": "tenant",
 					"securityContext":   podSecurity(),
 					// The worker finishes or puts back its jobs within 25 s.
 					"terminationGracePeriodSeconds": 40,
 					"containers":                    []any{hardened(container(f, o, "worker"))},
-				},
+				}),
 			},
 		},
 	}

@@ -1,6 +1,6 @@
 {
   "name": "@max-cloud/functions",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Write HTTP, scheduled and queue functions for maxcloud, the homelab's run platform",
   "keywords": ["functions", "serverless", "knative", "keda"],
   "license": "MIT",
@@ -17,6 +17,10 @@
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./testing": {
+      "types": "./dist/testing/index.d.ts",
+      "default": "./dist/testing/index.js"
     }
   },
   "bin": {

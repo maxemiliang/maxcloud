@@ -32,7 +32,7 @@ For it, the controller makes:
 | --- | --- | --- |
 | Bucket | `mc-shop--uploads` | in the `maxcloud-apps` Object Storage instance |
 | S3 user and policy | `mc-shop` | read/write objects in `mc-shop--*`; can't create, delete or reconfigure buckets |
-| Secret | `maxcloud-s3` in `shop` | `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_ENDPOINT_URL_S3`, `AWS_REGION` and UpCloud's checksum settings |
+| Secret | `maxcloud-s3` in `shop` | `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_ENDPOINT_URL_S3`, `AWS_REGION`, UpCloud's checksum settings, `MAXCLOUD_APP`, and each bucket's full name as `MAXCLOUD_BUCKET_<NAME>` (`MAXCLOUD_BUCKET_UPLOADS=mc-shop--uploads`) |
 
 The user and the Secret belong to the app, not to one bucket: the first
 `Bucket` creates them, the last one to go removes them. Since the Secret
@@ -71,6 +71,52 @@ namespace in `providers.kubernetesGateway.crossProviderNamespaces`. Apps can mak
 neither kind of object, nor routes in that namespace. `--` can't occur in
 app or bucket names, so the hostname can't collide with a Knative
 service's `<svc>-<app>`. The bucket is still public on the S3 endpoint too.
+
+### Custom domains
+
+The registry's `domains` field makes a `Domain` per hostname in the app's
+namespace, named after the hostname:
+
+```yaml
+apiVersion: maxcloud.gronblom.dev/v1alpha1
+kind: Domain
+metadata: {name: paja.lankkupelit.fi, namespace: paja}
+spec:
+  service: web     # a Knative service in the namespace (a function's name)
+  proxied: true    # external-dns's cloudflare-proxied annotation
+```
+
+The controller makes an HTTPRoute `domain-<hostname>` next to it, owned by
+it, on the Gateway `MAXCLOUD_DOMAINS_GATEWAY` (default `traefik/public`):
+
+- Its rules are a copy of the route net-gateway-api makes for the
+  service's cluster-local name (`<svc>.<app>.svc.cluster.local`), without
+  the prober's rule. Those send each request to a revision's Service with
+  the headers the activator needs, so the Domain works for private
+  services and from zero, in one hop, with the client's Host. When Knative
+  changes its route (a new revision), the controller copies it again.
+- The listener is the Gateway's HTTPS listener for the hostname: one for
+  exactly that name, else the longest wildcard that covers it one level
+  deep, as its certificate does.
+
+It routes a hostname only while:
+
+- the allowlist ConfigMap (`MAXCLOUD_DOMAINS_ALLOWLIST` in the
+  controller's namespace, default `maxcloud-domains`) has it under the
+  app's key: comma-separated hostnames, or `*.zone` for one level below
+  zone. Admission checks the same list when the entry is written; this
+  takes the route down when an admin removes a hostname later (within
+  the 5-minute resync);
+- a listener covers it (else `NoListener`);
+- the service has a route (else `ServiceNotFound`);
+- no other HTTPRoute on the Gateway has the hostname (else `HostInUse`,
+  looked at again every minute): the Gateway API gives a hostname to the
+  oldest route, so a second one would silently get nothing.
+
+`status.url`, `status.listener` and `status.revisions` show where it
+routes. Why not a Knative DomainMapping: it needs a cluster-scoped
+ClusterDomainClaim per hostname, and it rewrites the Host to the
+cluster-local name through a second Gateway hop.
 
 ### Databases
 
@@ -195,8 +241,8 @@ A GitOps app's `maxcloud.yaml` takes effect on push, with no credentials in
 CI: Flux already fetches the app's repo (the GitRepository its entry
 generates, which has to include `/maxcloud.yaml`). When its revision
 changes, the controller downloads the artifact from Flux's
-source-controller, checks its digest, and writes the file's quota, buckets
-and database into the app's entry. The rest of the entry (repo, path,
+source-controller, checks its digest, and writes the file's quota, buckets,
+database and domains into the app's entry. The rest of the entry (repo, path,
 deploy mode) stays what mcloud registered.
 
 It writes as the user `maxcloud:app-sync` (impersonated), not as itself,
@@ -207,8 +253,8 @@ in the annotation `maxcloud.gronblom.dev/sync-error` and a Warning event.
 Entries in the homelab repo are left alone.
 
 `maxcloud.gronblom.dev/synced-fields` lists the entry's keys the file
-declares, sorted: from `cpu`, `memory`, `pods`, `buckets`, `db`, `dbSize`
-and `dbInstances`. `quota: {cpu: 1}` declares `cpu`; `buckets: [...]`
+declares, sorted: from `cpu`, `memory`, `pods`, `buckets`, `db`, `dbSize`,
+`dbInstances` and `domains`. `quota: {cpu: 1}` declares `cpu`; `buckets: [...]`
 (an empty list too) declares `buckets`; `db` in any form (`true`, `false`
 or a map) declares all three database keys, since the file then owns the
 database setting. mcloud refuses to set these by hand: the next push would
@@ -265,6 +311,11 @@ CRDs, RBAC and the Deployment. The cluster provides the namespace
   that deletes its disks: a restore throws the old disk away (the bucket is
   what keeps the data), and a retaining class leaves one behind each time.
 
+For [custom domains](#custom-domains): the ConfigMap `maxcloud-domains`
+(without it no Domain is routed), and optionally
+`MAXCLOUD_DOMAINS_GATEWAY` and `MAXCLOUD_DOMAINS_ALLOWLIST` in the
+ConfigMap above.
+
 `MAXCLOUD_IMAGE_REGISTRY` (optional) turns on the pull credentials above.
 `MAXCLOUD_API_SERVER`, `MAXCLOUD_OIDC_ISSUER`, `MAXCLOUD_OIDC_CLIENT_ID`
 and `MAXCLOUD_MIN_MCLOUD_VERSION` (all optional) make the
@@ -300,15 +351,14 @@ on the cluster like the deployed one would, so scale that one to 0 first.
 
 ## Releasing
 
-Bump `newTag` in `config/kustomization.yaml`, commit, then:
+release-please does it (the root README, Releasing): its release PR bumps
+`newTag` in `config/kustomization.yaml`, and merging it tags
+`controller/v0.11.0` and runs `release-controller.yaml`, which builds and
+pushes `ghcr.io/maxemiliang/maxcloud-controller:0.11.0` (and refuses if
+`newTag` doesn't match). Clusters pick the tag in their `GitRepository`.
 
-```fish
-git tag controller/v0.2.0 && git push origin controller/v0.2.0
-```
-
-`release-controller.yaml` builds and pushes
-`ghcr.io/maxemiliang/maxcloud-controller:0.2.0` (and refuses if `newTag`
-doesn't match). Clusters pick the tag in their `GitRepository`.
+By hand: bump `newTag`, commit, then
+`git tag controller/v0.11.0 && git push origin controller/v0.11.0`.
 
 ## How a database comes back
 

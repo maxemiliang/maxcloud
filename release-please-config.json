@@ -1,0 +1,39 @@
+{
+  "$schema": "https://raw.githubusercontent.com/googleapis/release-please/v17.6.0/schemas/config.json",
+  "bootstrap-sha": "faed359e9135feb31a5edc62868a20f166aa37c4",
+  "tag-separator": "/",
+  "include-v-in-tag": true,
+  "bump-minor-pre-major": true,
+  "packages": {
+    ".": {
+      "release-type": "go",
+      "component": "mcloud",
+      "include-component-in-tag": false,
+      "exclude-paths": ["controller", "functions", "packages"]
+    },
+    "controller": {
+      "release-type": "go",
+      "component": "controller",
+      "extra-files": [{ "type": "generic", "path": "config/kustomization.yaml" }]
+    },
+    "functions": {
+      "release-type": "go",
+      "component": "functions"
+    },
+    "packages/functions": {
+      "release-type": "node",
+      "component": "functions-js",
+      "extra-files": [
+        { "type": "json", "path": "/package-lock.json", "jsonpath": "$.packages['packages/functions'].version" },
+        { "type": "generic", "path": "/internal/cli/sdkversion.go" }
+      ]
+    },
+    "packages/nuxt": {
+      "release-type": "node",
+      "component": "nuxt-js",
+      "extra-files": [
+        { "type": "json", "path": "/package-lock.json", "jsonpath": "$.packages['packages/nuxt'].version" }
+      ]
+    }
+  }
+}

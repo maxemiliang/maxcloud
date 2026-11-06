@@ -3,8 +3,8 @@
 
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { Readable } from "node:stream";
-import { pipeline } from "node:stream/promises";
-import type { HttpHandler } from "./define.ts";
+import { finished, pipeline } from "node:stream/promises";
+import type { HttpHandler, NodeListener } from "./define.ts";
 
 function toRequest(req: IncomingMessage, signal: AbortSignal): Request {
   // Traefik and Knative's queue-proxy set these for the original request.
@@ -50,11 +50,20 @@ export interface Serving {
   close(graceMs?: number): Promise<void>;
 }
 
+/** What serveHttp serves: a fetch-style handler, and optionally Node listeners that take over some requests. */
+export interface Servable {
+  handler: HttpHandler;
+  /** A Node listener for every request (an HttpFunction made with `{ node }`). */
+  node?: NodeListener;
+  /** A Node listener for this request, or undefined for the fetch handler (dev mode's routing). */
+  nodeFor?: (req: IncomingMessage) => NodeListener | undefined;
+}
+
 /**
- * Serves `fn.handler` (an HttpFunction, or anything else with a fetch-style
+ * Serves `fn` (an HttpFunction, or anything else with a fetch-style
  * handler) on `port`, on every interface unless `hostname` says otherwise.
  */
-export async function serveHttp(fn: { handler: HttpHandler }, port: number, log: (msg: string) => void = console.log, hostname?: string): Promise<Serving> {
+export async function serveHttp(fn: Servable, port: number, log: (msg: string) => void = console.log, hostname?: string): Promise<Serving> {
   const shutdown = new AbortController();
   let inFlight = 0;
   let idle: (() => void) | undefined;
@@ -67,6 +76,13 @@ export async function serveHttp(fn: { handler: HttpHandler }, port: number, log:
     });
     const signal = AbortSignal.any([client.signal, shutdown.signal]);
     try {
+      const node = fn.node ?? fn.nodeFor?.(req);
+      if (node) {
+        // The listener answers on res itself; in flight until it's done.
+        await node(req, res);
+        if (!res.writableFinished) await finished(res).catch(() => {});
+        return;
+      }
       const response = await fn.handler(toRequest(req, signal), { signal });
       if (!(response instanceof Response)) throw new TypeError("handler didn't return a Response");
       await writeResponse(res, response, req.method === "HEAD");

@@ -41,6 +41,75 @@ type Entry struct {
 	DB          string `json:"db,omitempty"`
 	DBInstances string `json:"dbInstances,omitempty"`
 	DBSize      string `json:"dbSize,omitempty"`
+	// Domains are custom hostnames for the app's Knative services,
+	// comma-separated, each <host>:<service>, optionally :proxied:
+	// "paja.lankkupelit.fi:web:proxied". Admission only lets an app have
+	// the hostnames an admin allowed it (the ConfigMap maxcloud-domains).
+	Domains string `json:"domains,omitempty"`
+}
+
+// Domain is one entry of Entry.Domains.
+type Domain struct {
+	Host    string `json:"host"`
+	Service string `json:"service"`
+	Proxied bool   `json:"proxied,omitempty"`
+}
+
+// hostRe: lowercase DNS labels, at least two.
+var hostRe = regexp.MustCompile(`^([a-z0-9]([-a-z0-9]*[a-z0-9])?\.)+[a-z]([-a-z0-9]*[a-z0-9])?$`)
+
+// ParseDomains reads an Entry.Domains value.
+func ParseDomains(s string) ([]Domain, error) {
+	var out []Domain
+	seen := map[string]bool{}
+	for _, item := range strings.Split(s, ",") {
+		item = strings.TrimSpace(item)
+		if item == "" {
+			continue
+		}
+		parts := strings.Split(item, ":")
+		if len(parts) < 2 || len(parts) > 3 {
+			return nil, fmt.Errorf("domain %q: expected <host>:<service>, optionally :proxied", item)
+		}
+		d := Domain{Host: strings.ToLower(parts[0]), Service: parts[1]}
+		if len(parts) == 3 {
+			if parts[2] != "proxied" {
+				return nil, fmt.Errorf("domain %q: the only option is :proxied", item)
+			}
+			d.Proxied = true
+		}
+		if err := d.validate(); err != nil {
+			return nil, err
+		}
+		if seen[d.Host] {
+			return nil, fmt.Errorf("domain %s is listed twice", d.Host)
+		}
+		seen[d.Host] = true
+		out = append(out, d)
+	}
+	return out, nil
+}
+
+func (d Domain) validate() error {
+	if len(d.Host) > 253 || !hostRe.MatchString(d.Host) {
+		return fmt.Errorf("domain %q: not a hostname (lowercase, e.g. shop.example.com; no wildcards)", d.Host)
+	}
+	if !dnsLabel.MatchString(d.Service) || len(d.Service) > 63 {
+		return fmt.Errorf("domain %s: service %q isn't a Knative service name", d.Host, d.Service)
+	}
+	return nil
+}
+
+// FormatDomains is the canonical Entry.Domains value.
+func FormatDomains(ds []Domain) string {
+	parts := make([]string, len(ds))
+	for i, d := range ds {
+		parts[i] = d.Host + ":" + d.Service
+		if d.Proxied {
+			parts[i] += ":proxied"
+		}
+	}
+	return strings.Join(parts, ",")
 }
 
 // Bucket is one entry of Entry.Buckets.
@@ -137,6 +206,9 @@ var reserved = map[string]bool{
 	"knative-serving": true, "knative-operator": true, "keda": true,
 	"monitoring": true, "cnpg-system": true, "cert-manager": true,
 	"external-dns": true, "authelia": true, "kured": true,
+	// Their <name>.lab.gronblom.dev is Authelia's and Grafana's (an app may
+	// route its own <name>.lab.gronblom.dev).
+	"auth": true, "grafana": true,
 }
 
 // Validate checks e and normalises its path.
@@ -186,6 +258,13 @@ func (e *Entry) Validate() error {
 			}
 		}
 		e.Buckets = FormatBuckets(bs)
+	}
+	if e.Domains != "" {
+		ds, err := ParseDomains(e.Domains)
+		if err != nil {
+			return err
+		}
+		e.Domains = FormatDomains(ds)
 	}
 	if e.Repo != "" && !repoRe.MatchString(e.Repo) {
 		return fmt.Errorf("repo %q: expected <owner>/<repo>", e.Repo)
@@ -263,6 +342,7 @@ func (e *Entry) fields() []field {
 		{"cpu", e.CPU}, {"memory", e.Memory}, {"pods", e.Pods}, {"deploy", e.Deploy},
 		{"buckets", e.Buckets},
 		{"db", e.DB}, {"dbInstances", e.DBInstances}, {"dbSize", e.DBSize},
+		{"domains", e.Domains},
 	} {
 		if f.value != "" {
 			fs = append(fs, f)
@@ -297,6 +377,7 @@ func Parse(data []byte) (*Entry, error) {
 		CPU: s("cpu"), Memory: s("memory"), Pods: s("pods"), Deploy: s("deploy"),
 		Buckets: s("buckets"),
 		DB:      s("db"), DBInstances: s("dbInstances"), DBSize: s("dbSize"),
+		Domains: s("domains"),
 	}
 	if e.Name == "" {
 		return nil, fmt.Errorf("entry has no name")

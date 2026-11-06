@@ -31,7 +31,7 @@ const devSDKMin = "0.4.0"
 func devCmd(g *globals) *cobra.Command {
 	var db, secrets, entry string
 	var port int
-	var remoteBuckets bool
+	var remoteBuckets, migrations bool
 	c := &cobra.Command{
 		Use:   "dev",
 		Short: "Run the app here, all its functions in one process",
@@ -43,20 +43,30 @@ maxcloud:
     functions run with POST http://localhost:8080/_run/<name>;
   - DATABASE_URL: a local Postgres in Docker (--db local, the default when
     maxcloud.yaml has db:), a branch of the app's database through a
-    port-forward (--db branch:NAME, see mcloud db branch), or none;
+    port-forward (--db branch:NAME, see mcloud db branch), or none; the
+    pending migrations in migrations/ are applied to it first (see mcloud
+    db migrate);
   - MAXCLOUD_APP, so bucketName() works;
-  - secrets from .env in the repo (keep it out of git), or the app's own
-    from the cluster (--secrets remote);
+  - secrets from .env in the repo and in source: (keep them out of git),
+    or the app's own from the cluster (--secrets remote);
   - the app's real buckets with --buckets remote (careful: real data).
 
-TypeScript runs your source with Node's type stripping and restarts on
-changes (node --watch); Go apps run with go run (restart it yourself).`,
+It runs in the app's folder: source: in maxcloud.yaml, else the folder
+maxcloud.yaml is in. TypeScript runs your source with Node's type
+stripping and restarts on changes (node --watch); Go apps run with go run
+(restart it yourself). A Nuxt app (a nuxt.config) runs nuxt dev on the
+port instead, at http://localhost:8080/; @max-cloud/nuxt fills its
+runtimeConfig from the same environment.`,
 		Example: `  mcloud dev
   mcloud dev --db branch:try-migration
   mcloud dev --secrets remote --buckets remote`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			p, err := loadProject()
+			if err != nil {
+				return err
+			}
+			src, err := p.sourceDir()
 			if err != nil {
 				return err
 			}
@@ -69,10 +79,23 @@ changes (node --watch); Go apps run with go run (restart it yourself).`,
 				"MAXCLOUD_DEV": "1",
 				"PORT":         strconv.Itoa(port),
 			}
-			// Secrets: .env, then (if asked) the cluster's.
+			// Secrets: .env (the repo's, then the source folder's), then (if
+			// asked) the cluster's.
 			dotenv, err := readDotenv(filepath.Join(p.Dir, ".env"))
 			if err != nil {
 				return err
+			}
+			if src != p.Dir {
+				more, err := readDotenv(filepath.Join(src, ".env"))
+				if err != nil {
+					return err
+				}
+				if dotenv == nil {
+					dotenv = map[string]string{}
+				}
+				for k, v := range more {
+					dotenv[k] = v
+				}
 			}
 			for k, v := range dotenv {
 				env[k] = v
@@ -138,7 +161,13 @@ changes (node --watch); Go apps run with go run (restart it yourself).`,
 				return fmt.Errorf("--db %q: local, branch:NAME or none", db)
 			}
 
-			run, err := devCommand(ctx, p.Dir, entry, port)
+			if migrations {
+				if err := g.devMigrate(ctx, p, src, env["DATABASE_URL"]); err != nil {
+					return err
+				}
+			}
+
+			run, err := devCommand(ctx, src, entry, port)
 			if err != nil {
 				return err
 			}
@@ -163,6 +192,7 @@ changes (node --watch); Go apps run with go run (restart it yourself).`,
 	f.StringVar(&db, "db", "", "local, branch:NAME or none (default: local if maxcloud.yaml has db:, else none)")
 	f.StringVar(&secrets, "secrets", "local", "local (.env) or remote (the app's secrets on the cluster, and .env)")
 	f.BoolVar(&remoteBuckets, "buckets", false, "use the app's real buckets (its S3 credentials from the cluster)")
+	f.BoolVar(&migrations, "migrate", true, "apply the pending migrations in migrations/ to the database first")
 	f.IntVar(&port, "port", 8080, "port to serve the HTTP functions on")
 	f.StringVar(&entry, "entry", "", "TypeScript: the module exporting the functions (default src/index.ts, else package.json main)")
 	return c
@@ -176,7 +206,18 @@ func devCommand(ctx context.Context, dir, entry string, port int) (*exec.Cmd, er
 		return cmd, nil
 	}
 	if _, err := os.Stat(filepath.Join(dir, "package.json")); err != nil {
-		return nil, errors.New("no package.json or go.mod here: which app is this?")
+		return nil, fmt.Errorf("no package.json or go.mod in %s: which app is this? (source: in maxcloud.yaml names the app's folder)", dir)
+	}
+	if isNuxt(dir) {
+		// Nuxt's own dev server (Vite, hot reload); @max-cloud/nuxt turns
+		// the environment into runtimeConfig there.
+		bin := findBin(dir, "nuxt")
+		if bin == "" {
+			return nil, errors.New("this is a Nuxt app, but nuxt isn't installed: npm install")
+		}
+		cmd := exec.CommandContext(ctx, bin, "dev", "--port", strconv.Itoa(port), "--host", "127.0.0.1")
+		cmd.Dir = dir
+		return cmd, nil
 	}
 	sdk := filepath.Join(dir, "node_modules", "@max-cloud", "functions")
 	b, err := os.ReadFile(filepath.Join(sdk, "package.json"))
@@ -197,6 +238,30 @@ func devCommand(ctx context.Context, dir, entry string, port int) (*exec.Cmd, er
 	cmd := exec.CommandContext(ctx, "node", args...)
 	cmd.Dir = dir
 	return cmd, nil
+}
+
+// isNuxt reports whether dir is a Nuxt app (a nuxt.config next to package.json).
+func isNuxt(dir string) bool {
+	for _, ext := range []string{"ts", "mts", "js", "mjs"} {
+		if _, err := os.Stat(filepath.Join(dir, "nuxt.config."+ext)); err == nil {
+			return true
+		}
+	}
+	return false
+}
+
+// findBin finds node_modules/.bin/name in dir or a parent (npm
+// workspaces hoist them), or "".
+func findBin(dir, name string) string {
+	for d := dir; ; d = filepath.Dir(d) {
+		p := filepath.Join(d, "node_modules", ".bin", name)
+		if _, err := os.Stat(p); err == nil {
+			return p
+		}
+		if filepath.Dir(d) == d {
+			return ""
+		}
+	}
 }
 
 // devPostgres runs (or reuses) a Postgres container for the app, keeping

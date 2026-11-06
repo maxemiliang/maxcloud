@@ -36,6 +36,27 @@ test("findFunctions ignores other exports and rejects a default", () => {
   assert.throws(() => findFunctions({ fooBar: hello, foo_bar: hello }), /two exports/);
 });
 
+test("describe passes an HTTP function's container options on", () => {
+  const d = describe(
+    findFunctions({
+      web: onRequest(
+        {
+          public: true, proxied: true, memory: "384Mi", memoryLimit: "1536Mi", user: 1000, readOnlyRootFilesystem: true,
+          volumes: [{ path: "/scratch", sizeLimit: "1Gi" }, { path: "/dev/shm", memory: true }], healthPath: "/login",
+        },
+        () => new Response(),
+      ),
+    }),
+  );
+  assert.deepEqual(d.functions[0], {
+    name: "web", export: "web", kind: "http", memory: "384Mi", cpu: null,
+    public: true, minInstances: 0, maxInstances: 3, concurrency: 0, timeoutSeconds: 300,
+    proxied: true, memoryLimit: "1536Mi", user: 1000, readOnlyRootFilesystem: true,
+    volumes: [{ path: "/scratch", sizeLimit: "1Gi", memory: false }, { path: "/dev/shm", sizeLimit: "", memory: true }],
+    healthPath: "/login",
+  });
+});
+
 test("describe fills in the defaults", () => {
   const d = describe(
     findFunctions({
@@ -49,10 +70,12 @@ test("describe fills in the defaults", () => {
   assert.deepEqual(d.functions[0], {
     name: "api", export: "api", kind: "http", memory: "256Mi", cpu: null,
     public: true, minInstances: 0, maxInstances: 3, concurrency: 0, timeoutSeconds: 300,
+    proxied: false, memoryLimit: null, user: null, readOnlyRootFilesystem: false, volumes: [], healthPath: "",
   });
   assert.deepEqual(d.functions[1], {
     name: "nightly", export: "nightly", kind: "schedule", memory: null, cpu: null,
     schedule: "0 3 * * *", timeZone: "UTC", retries: 0, timeoutSeconds: 3600,
+    memoryLimit: null, user: null, readOnlyRootFilesystem: false, volumes: [],
   });
   const q = d.functions[2]!;
   assert.equal(q.name, "resize-image");

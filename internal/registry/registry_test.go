@@ -142,3 +142,35 @@ func TestObjectRoundTrip(t *testing.T) {
 		t.Errorf("round trip: %+v, %v", back, err)
 	}
 }
+
+func TestDomains(t *testing.T) {
+	e := &Entry{Name: "paja", Repo: "a/b", Domains: " Paja.lankkupelit.fi:web:proxied , api.example.com:api"}
+	if err := e.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	if e.Domains != "paja.lankkupelit.fi:web:proxied,api.example.com:api" {
+		t.Errorf("normalised to %q", e.Domains)
+	}
+	ds, _ := ParseDomains(e.Domains)
+	if len(ds) != 2 || !ds[0].Proxied || ds[1].Proxied || ds[1].Service != "api" {
+		t.Errorf("parsed %+v", ds)
+	}
+	back, err := Parse(e.Render())
+	if err != nil || back.Domains != e.Domains {
+		t.Errorf("round trip: %q, %v", back.Domains, err)
+	}
+	for _, bad := range []string{
+		"paja.lankkupelit.fi",                 // no service
+		"paja.lankkupelit.fi:web:cached",      // unknown option
+		"*.lankkupelit.fi:web",                // wildcard
+		"localhost:web",                       // one label
+		"paja.lankkupelit.fi:Web",             // not a service name
+		"a.example.com:web,a.example.com:api", // twice
+		"paja.lankkupelit.fi:web:proxied:x",
+	} {
+		e := &Entry{Name: "paja", Repo: "a/b", Domains: bad}
+		if err := e.Validate(); err == nil {
+			t.Errorf("domains %q: want an error", bad)
+		}
+	}
+}

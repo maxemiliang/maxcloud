@@ -9,6 +9,9 @@ This repo holds:
 - `mcloud`, the command line (Go, `cmd/mcloud`).
 - `@max-cloud/functions`, the Node.js/TypeScript SDK for writing HTTP,
   scheduled and queue functions (`packages/functions`, see its README).
+- `@max-cloud/nuxt`, a Nuxt module: runtimeConfig from what the platform
+  gives the app, and the Nuxt server as a maxcloud function
+  (`packages/nuxt`, see its README).
 - `github.com/maxemiliang/maxcloud/functions`, the same for Go (`functions/`,
   see its README).
 - `maxcloud-controller` (`controller/`), which gives apps their S3
@@ -75,6 +78,10 @@ The homelab README's "Run an app" covers the platform side, and its
 `templates/run-app` is the starting point for apps that aren't functions;
 they use the same workflow without `functions: true`.
 
+A Nuxt app can be a function too: `@max-cloud/nuxt` builds its server as
+one HTTP function (and its scheduled tasks as scheduled ones), so the
+deploy workflow writes its manifests (`packages/nuxt/README.md`).
+
 ## maxcloud.yaml
 
 ```yaml
@@ -82,6 +89,9 @@ app: shop
 quota: {cpu: 500m, memory: 2Gi}
 buckets: [uploads, assets:public]
 db: {size: 2Gi}          # or db: true
+domains:                 # hostnames of your own, within what an admin allowed
+  - {host: shop.gronblom.dev, service: web, proxied: true}
+# source: worker         # build the app from this folder, not the repo's root
 # deploy: direct         # mcloud deploy builds and applies from here, no git
 ```
 
@@ -90,6 +100,17 @@ It owns what it declares: a push (or `mcloud deploy`) applies it, and
 undo them. What it leaves out stays as it is. Changing `deploy:` switches
 the app between GitOps and direct on the next `mcloud deploy`, which asks
 first.
+
+`source:` is the folder the app lives in, relative to `maxcloud.yaml`
+(default: the folder `maxcloud.yaml` is in). Use it when the repo's root is
+something else, e.g. a Go CLI at the root with the web app in `worker/`:
+buildpacks would otherwise detect Go. Everything that builds or runs the
+app uses it: `mcloud build`, direct deploys (local and `--build cluster`,
+which streams only that folder), the deploy workflow (unless its `context`
+input says otherwise), `mcloud generate` and `mcloud dev`. A Dockerfile and
+`project.toml` are looked for there. It has to be a directory inside the
+repo, without `..`. The manifests stay where they are (`deploy/k8s` at the
+root).
 
 ## Local development
 
@@ -101,12 +122,14 @@ maxcloud:
   `POST http://localhost:8080/_run/<name>`;
 - `DATABASE_URL`: a local Postgres in Docker (kept between runs; the
   default when `maxcloud.yaml` has `db:`), or a branch of the app's
-  database through a port-forward (`--db branch:NAME`);
+  database through a port-forward (`--db branch:NAME`), with the pending
+  migrations applied;
 - `MAXCLOUD_APP`, and secrets from `.env` (keep it out of git), or the
   app's own (`--secrets remote`); the app's real buckets only with
   `--buckets`.
 
-TypeScript runs from source and restarts on changes. To poke the deployed
+TypeScript runs from source and restarts on changes; a Nuxt app (a
+`nuxt.config`) runs `nuxt dev` on the port instead. To poke the deployed
 app: `mcloud call api /health` sends a request to any function, private
 ones too, and `mcloud run nightly` runs a scheduled function now.
 
@@ -147,7 +170,9 @@ Worker gets R2) from `buckets:` in `maxcloud.yaml`. The
 [controller](controller/README.md) turns each into a bucket
 `mc-shop--uploads` and puts the app's credentials in the Secret
 `maxcloud-s3`, which every function gets as environment variables. The
-SDKs' `bucketName("uploads")` gives the full name. Removing a bucket from
+SDKs' `bucketName("uploads")` gives the full name; so does the variable
+`MAXCLOUD_BUCKET_UPLOADS` (for frameworks configured by environment; a pod
+started before the bucket existed doesn't have it). Removing a bucket from
 the list keeps it and its objects.
 
 ### Public buckets
@@ -176,6 +201,34 @@ https://assets--shop.gronblom.dev/logo.png      # object logo.png in mc-shop--as
 - Removing `:public` makes the bucket private again: its hostname and the
   public read go, its objects stay.
 
+## Custom domains
+
+A function (or any Knative service of the app) can have hostnames besides
+`<service>-<app>.gronblom.dev`, from `domains:` in `maxcloud.yaml`:
+
+```yaml
+domains:
+  - {host: paja.lankkupelit.fi, service: web, proxied: true}
+```
+
+- **An admin allows them first:** the homelab repo's
+  `infrastructure/configs/run/domains.yaml` lists the hostnames each app
+  may have. Admission refuses a registry entry (from `mcloud deploy`, or a
+  pushed `maxcloud.yaml`) with any other, and refuses any route in the
+  app's namespace with a hostname that isn't the app's.
+- **Zones the cluster has certificates for:** one level below
+  `gronblom.dev`, `lab.gronblom.dev` or `lankkupelit.fi`. external-dns
+  makes the DNS record. `proxied: true` puts it behind Cloudflare (WAF,
+  caching, Cloudflare Access), not for `*.lab.gronblom.dev`.
+- **The service can stay private.** The hostname reaches its revisions
+  directly, scale-to-zero included, and the app sees the `Host` the
+  client sent (`paja.lankkupelit.fi`, not a cluster-local name).
+- `kubectl get maxcloud -n <app>` shows each Domain. One that isn't Ready
+  says why: not on the admin's list, no certificate covers it, the
+  service isn't deployed yet, or another route already has the hostname
+  (it takes over once that one is gone).
+- Removing a domain from the list removes its route and DNS record.
+
 ## Databases
 
 An app gets a Postgres database (the way a Worker gets D1, but Postgres)
@@ -188,6 +241,7 @@ working, but the controller won't take it over. Moving it is a dump and
 restore (homelab `docs/runbooks/move-database-to-registry.md`).
 
 ```fish
+mcloud db migrate                   # apply migrations/*.sql (see Migrations)
 mcloud db psql                      # psql in it (--branch NAME for a branch)
 mcloud db proxy                     # on localhost, with a DATABASE_URL to use
 mcloud db restore --at 15m          # as it was 15 minutes ago, in place
@@ -196,6 +250,55 @@ mcloud db branch create try         # a throwaway copy (--at for a point in time
 
 `restore` and `branch` restore from the backups, so they reach back as far
 as the retention (7 days by default).
+
+### Migrations
+
+SQL migrations go in `migrations/` in the app's folder (next to
+`maxcloud.yaml`, or in `source:`), one file per
+change, named `NUMBER_DESCRIPTION.sql` with numbers of one width:
+
+```
+migrations/0001_init.sql
+migrations/0002_add_orders.sql
+```
+
+Each file is applied once, in name order, in its own transaction together
+with its row in the table `maxcloud_migrations` (name, SHA-256 checksum,
+time applied). A file that fails leaves nothing behind. Don't put `BEGIN`
+or `COMMIT` in them, and statements that can't run in a transaction
+(`CREATE INDEX CONCURRENTLY`) can't be migrations. A file edited after it
+was applied stops every run until you put the change in a new file
+instead. A file that sorts before one already applied (from a merged
+branch) is still applied. Only one run applies at a time (a Postgres
+advisory lock); the others wait.
+
+They're applied in three places, all the same way and to the same table:
+
+- **On deploy, by the app itself.** Before it runs a function, the SDK's
+  runtime applies the pending migrations to `DATABASE_URL`. A new Knative
+  revision takes no traffic until it has, so new code never serves an old
+  schema, and a migration that fails stops the pod while the old revision
+  keeps serving. TypeScript apps read `./migrations` (buildpacks keep it
+  in the image; with a Dockerfile, copy it in next to `package.json`); Go
+  apps embed it (`//go:embed migrations`, `functions.Migrations(...)`).
+  When the image doesn't have every file in `migrations/`, the deploy
+  warns. Keep them quick: every starting pod waits for them.
+- **`mcloud dev`** applies them to its database before it starts the app
+  (`--migrate=false` doesn't).
+- **`mcloud db migrate`**, by hand: to the deployed database through a
+  port-forward as the app's user (it asks first), a branch (`--branch`),
+  or any Postgres (`--database-url`). `--dry-run` lists what's applied and
+  what's pending.
+
+```fish
+mcloud db migrate --dry-run             # applied, pending, changed
+mcloud db migrate --branch try          # try them on a branch first
+```
+
+Coming from D1: the files `wrangler d1 migrations create` writes
+(`0000_init.sql`) keep their names, but their SQL has to become Postgres
+(`INTEGER PRIMARY KEY AUTOINCREMENT` is `bigserial PRIMARY KEY`, and so
+on).
 
 ## Secrets and key-value storage
 
@@ -254,12 +357,14 @@ mcloud secrets set STRIPE_KEY       # asks for the value; restarts the functions
 mcloud secrets list                 # names only
 mcloud secrets unset STRIPE_KEY
 
+mcloud db migrate                   # apply migrations/*.sql (--dry-run lists them)
 mcloud db psql                      # and db proxy, restore, recover, branch
 mcloud queue ls                     # jobs per queue and state, latest failed ones
 mcloud queue retry 41 42            # run failed jobs again (or --failed)
 
 mcloud apps list                    # registered apps, did the last deploy apply
 mcloud apps set shop --deploy direct  # by hand: what maxcloud.yaml leaves out
+mcloud apps set shop --domains shop.gronblom.dev:web:proxied
 mcloud apps delete shop             # remove it, namespace and data included
 
 mcloud build                        # build and push the image (what deploys run)
@@ -280,20 +385,42 @@ asks you to type the app's name. Apps registered in the homelab repo itself
 
 ## Releasing
 
-Each part has its own tags; pushing one releases it.
+release-please (`.github/workflows/release-please.yaml`) keeps one release
+PR open on `main`. It holds the next version of each part that has
+changes, worked out from the conventional commits under that part's
+directory (`feat` a minor version, `fix` a patch; while below 1.0.0 a
+breaking change is a minor too), with changelogs and the versions in files.
+Merging the PR releases those parts:
 
-| Tag | Releases | How |
-| --- | --- | --- |
-| `v0.2.0` | `mcloud` binaries on GitHub Releases | `release.yaml` (GoReleaser) |
-| `controller/v0.2.0` | the controller image | `release-controller.yaml` (see `controller/README.md`) |
-| `functions-js/v0.2.0` | `@max-cloud/functions` on npm, after bumping `packages/functions/package.json` | `release-npm.yaml` (trusted publishing, no token) |
-| `functions/v0.2.0` | the Go SDK | the tag is the release (Go modules) |
+| Part | Directory | Tag | Released by |
+| --- | --- | --- | --- |
+| mcloud | everything else | `v0.12.0` | `release.yaml`: GoReleaser adds the binaries to the GitHub release |
+| controller | `controller/` | `controller/v0.11.0` | `release-controller.yaml`: the image (the PR bumps `newTag` in `config/kustomization.yaml`) |
+| Go SDK | `functions/` | `functions/v0.5.0` | the tag (Go modules) |
+| `@max-cloud/functions` | `packages/functions/` | `functions-js/v0.5.0` | `release-npm.yaml` (trusted publishing, no token) |
+| `@max-cloud/nuxt` | `packages/nuxt/` | `nuxt-js/v0.1.0` | `release-npm.yaml`, after `@max-cloud/functions` |
 
-`run-deploy.yaml` installs the newest `mcloud` release (`v*`) when it runs,
-so a workflow change that needs a new mcloud goes out after that release.
-`mcloud init` writes the newest `@max-cloud/functions` from npm into a new
-app; bump `sdkFallback` in `internal/cli/sdkversion.go` with each SDK
-release for when npm can't be asked.
+- **Order:** the npm SDK goes before `@max-cloud/nuxt` (it depends on it)
+  and before mcloud: `run-deploy.yaml` installs the newest mcloud, and
+  `mcloud init` writes the newest SDK into new apps. The PR also bumps
+  `sdkFallback` (`internal/cli/sdkversion.go`, for when npm can't be
+  asked) with each `@max-cloud/functions` release.
+- **Merge the release PR as it is,** and other PRs with a merge commit or a
+  squash whose message is a conventional commit: the message decides the
+  versions and the changelog.
+- **A version of your choice:** `Release-As: 1.0.0` in a commit message's
+  footer, for the parts that commit touches.
+- **Settings it needs:** "Allow GitHub Actions to create and approve pull
+  requests" (Settings, Actions, General). On npmjs.com, each package's
+  trusted publisher is the workflow `release-please.yaml` (npm checks the
+  calling workflow). The release PR is opened with `GITHUB_TOKEN`, so CI
+  doesn't run on it by itself.
+- **By hand,** if release-please is stuck: pushing a `v*` or
+  `controller/v*` tag still runs its workflow. npm packages only publish
+  through release-please.
+
+Config: `release-please-config.json`, and `.release-please-manifest.json`
+with the last released versions.
 
 ## Development
 
@@ -302,6 +429,7 @@ go test ./...
 go run ./cmd/mcloud --help
 
 npm ci
+npm run build --workspaces   # @max-cloud/nuxt uses the functions SDK's build
 # The queue tests need a Postgres; without TEST_DATABASE_URL they're skipped.
 docker run -d --rm --name pg -p 127.0.0.1:55432:5432 -e POSTGRES_PASSWORD=test postgres:18
 set -x TEST_DATABASE_URL postgres://postgres:test@127.0.0.1:55432/postgres

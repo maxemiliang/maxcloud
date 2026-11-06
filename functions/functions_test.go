@@ -76,6 +76,33 @@ func TestDescribe(t *testing.T) {
 	}
 }
 
+func TestDescribeHTTPOptions(t *testing.T) {
+	t.Cleanup(reset)
+	HTTPFunc("web", func(http.ResponseWriter, *http.Request) {}, Public(), Proxied(), Memory("384Mi"), MemoryLimit("1536Mi"),
+		User(1000), ReadOnlyRootFilesystem(), Volume("/scratch", "1Gi"), MemoryVolume("/dev/shm", "512Mi"), HealthPath("/healthz"))
+	HTTPFunc("plain", func(http.ResponseWriter, *http.Request) {})
+
+	var out bytes.Buffer
+	if code := run(context.Background(), nil, env(map[string]string{"MAXCLOUD_DESCRIBE": "1"}), &out, io.Discard); code != 0 {
+		t.Fatalf("exit %d", code)
+	}
+	var d struct {
+		Functions []map[string]any `json:"functions"`
+	}
+	if err := json.Unmarshal([]byte(strings.TrimPrefix(strings.TrimSpace(out.String()), describeTag)), &d); err != nil {
+		t.Fatal(err)
+	}
+	plain, web := d.Functions[0], d.Functions[1]
+	vols, _ := json.Marshal(web["volumes"])
+	if web["proxied"] != true || web["memoryLimit"] != "1536Mi" || web["user"] != 1000.0 || web["readOnlyRootFilesystem"] != true ||
+		web["healthPath"] != "/healthz" || string(vols) != `[{"memory":false,"path":"/scratch","sizeLimit":"1Gi"},{"memory":true,"path":"/dev/shm","sizeLimit":"512Mi"}]` {
+		t.Errorf("web %v (volumes %s)", web, vols)
+	}
+	if plain["proxied"] != false || plain["memoryLimit"] != nil || plain["user"] != nil || len(plain["volumes"].([]any)) != 0 || plain["healthPath"] != "" {
+		t.Errorf("plain %v", plain)
+	}
+}
+
 func TestUnknownTarget(t *testing.T) {
 	t.Cleanup(reset)
 	HTTPFunc("hello", func(http.ResponseWriter, *http.Request) {})

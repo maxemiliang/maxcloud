@@ -5,9 +5,10 @@
 #
 # The work is `mcloud build --ci`, the same build mcloud's direct deploys
 # run:
-#   1. Builds the repo into an image, with its Dockerfile if it has one,
-#      otherwise with Cloud Native Buildpacks (Paketo: Go, Node.js, Python,
-#      Java, .NET, Ruby, PHP, ...).
+#   1. Builds the repo (or the folder `source:` in maxcloud.yaml names) into
+#      an image, with its Dockerfile if it has one, otherwise with Cloud
+#      Native Buildpacks (Paketo: Go, Node.js, Python, Java, .NET, Ruby,
+#      PHP, ...).
 #   2. Pushes it to the maxcloud registry, registry.gronblom.dev/<app>/<app>
 #      (app: from maxcloud.yaml), tagged with the commit SHA. mcloud is
 #      docker's credential helper, logging in with a fresh GitHub Actions
@@ -26,9 +27,11 @@ on:
   workflow_call:
     inputs:
       context:
-        description: Directory to build, relative to the repo root.
+        description: >-
+          Directory to build, relative to the repo root; default, `source:` in
+          maxcloud.yaml, else the root.
         type: string
-        default: .
+        default: ""
       manifests:
         description: Kustomize directory that Flux applies.
         type: string
@@ -76,22 +79,6 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Builder
-        id: builder
-        run: |
-          if [ -f "${{ inputs.context }}/Dockerfile" ]; then
-            echo "kind=dockerfile" >>"$GITHUB_OUTPUT"
-          else
-            echo "kind=buildpacks" >>"$GITHUB_OUTPUT"
-          fi
-
-      # A container builder, so mcloud can keep the build cache in the
-      # registry.
-      - if: steps.builder.outputs.kind == 'dockerfile'
-        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
-      - if: steps.builder.outputs.kind == 'buildpacks'
-        uses: buildpacks/github-actions/setup-pack@91cb4574e7b781941b4e3fa950e541e4b8754b3a # v6.2.2
-
       - name: Install mcloud
         env:
           GH_TOKEN: ${{ github.token }}
@@ -111,11 +98,42 @@ jobs:
             tar -xzf "$file" -C "$RUNNER_TEMP/bin" mcloud)
           echo "$RUNNER_TEMP/bin" >>"$GITHUB_PATH"
 
+      # The build context: the context input, else source: in maxcloud.yaml
+      # (mcloud reads and checks it; an mcloud older than source: builds the
+      # root).
+      - name: Builder
+        id: builder
+        env:
+          CONTEXT: ${{ inputs.context }}
+        run: |
+          if dir=$(mcloud build --print-context --context "$CONTEXT" 2>"$RUNNER_TEMP/context.err"); then
+            :
+          elif grep -q "unknown flag" "$RUNNER_TEMP/context.err"; then
+            dir=${CONTEXT:-.}
+          else
+            cat "$RUNNER_TEMP/context.err" >&2
+            exit 1
+          fi
+          echo "Building ${dir}"
+          echo "context=${dir}" >>"$GITHUB_OUTPUT"
+          if [ -f "${dir}/Dockerfile" ]; then
+            echo "kind=dockerfile" >>"$GITHUB_OUTPUT"
+          else
+            echo "kind=buildpacks" >>"$GITHUB_OUTPUT"
+          fi
+
+      # A container builder, so mcloud can keep the build cache in the
+      # registry.
+      - if: steps.builder.outputs.kind == 'dockerfile'
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - if: steps.builder.outputs.kind == 'buildpacks'
+        uses: buildpacks/github-actions/setup-pack@91cb4574e7b781941b4e3fa950e541e4b8754b3a # v6.2.2
+
       # kustomize (for pinning the image) is on GitHub's Ubuntu runners.
       - name: Build, push and commit the deploy
         env:
           MCLOUD_IMAGE_REGISTRY: ${{ inputs.registry }}
-          CONTEXT: ${{ inputs.context }}
+          CONTEXT: ${{ steps.builder.outputs.context }}
           MANIFESTS: ${{ inputs.manifests }}
           IMAGE: ${{ inputs.image }}
           APP: ${{ inputs.app }}

@@ -43,6 +43,32 @@ as they are: `onRequest(app.fetch)` with Hono, for example.
 | `timeoutSeconds` | `300` | Per request. |
 | `memory` | the namespace's default | Memory the container requests and is limited to, e.g. `"256Mi"`. |
 | `cpu` | the namespace's default | CPU the container requests, e.g. `"100m"`. |
+| `proxied` | `false` | Put the public hostname behind Cloudflare (WAF, caching, Cloudflare Access). Needs `public`. |
+| `healthPath` | none | A path that answers 2xx when an instance can take requests: Knative's readiness probe, and a liveness probe that restarts a stuck instance. |
+
+The container options below apply to scheduled and queue functions too:
+
+| Option | Default | |
+| --- | --- | --- |
+| `memoryLimit` | `memory` | Memory the container may use above its request, for spikes: `{ memory: "384Mi", memoryLimit: "1536Mi" }`. |
+| `user` | the image's | Run as this user id and group, for an image whose Dockerfile has no non-root `USER`. |
+| `readOnlyRootFilesystem` | `false` | Write only to `volumes`. |
+| `volumes` | none | Scratch directories, empty at each start: `[{ path: "/scratch", sizeLimit: "1Gi" }, { path: "/dev/shm", sizeLimit: "512Mi", memory: true }]`. `memory: true` keeps one in RAM (it counts against the memory limit). Knative doesn't allow `/tmp`: point `TMPDIR` at a volume. |
+
+### Node.js request listeners
+
+A framework that's a Node.js request listener (Express, h3's
+`toNodeListener`, Nitro) is served as it is with `{ node: listener }`:
+
+```ts
+import express from "express";
+const app = express();
+export const api = onRequest({ public: true }, { node: app });
+```
+
+It gets the server's own request and response, so responses stream and
+headers arrive as the client sent them. `api.fetch(request)` still works
+in tests (through a local server).
 
 ## Scheduled functions
 
@@ -88,6 +114,34 @@ const { rows } = await db().query("SELECT id, name FROM users WHERE id = $1", [i
 ```
 
 It throws if `DATABASE_URL` isn't set.
+
+### Migrations
+
+Put SQL migrations in `migrations/` at the app's root (next to
+`package.json`), named `NUMBER_DESCRIPTION.sql` with numbers of one width:
+`0001_init.sql`, `0002_add_orders.sql`. Before `maxcloud-functions` runs a
+function, it applies the ones the database hasn't had: each once, in name
+order, in its own transaction, recorded in the table
+`maxcloud_migrations`. Only one process applies them at a time; the others
+wait, so no function starts on an older schema than its code expects. A
+migration that fails, a file edited after it was applied, or migrations
+without a `DATABASE_URL` stop the process (exit 1). `MAXCLOUD_MIGRATE=0`
+in the environment turns it off.
+
+It reads `./migrations` from the working directory. Buildpacks keep the
+whole app in the image; with your own Dockerfile, copy `migrations/` in
+next to `package.json`. `--describe` lists the files, and the deploy warns
+when the image is missing any.
+
+Dev mode leaves them to `mcloud dev`, which applies them before it starts
+the app; `mcloud db migrate` applies them by hand (the root README's
+"Migrations" has the rules). For a script or a test:
+
+```ts
+import { migrate } from "@max-cloud/functions";
+
+await migrate({ url: process.env.TEST_DATABASE_URL }); // ./migrations; resolves to the names applied
+```
 
 ## Buckets
 
@@ -170,7 +224,8 @@ The container runs `maxcloud-functions`, which starts the function named in
 - **Schedule:** one run, then it exits.
 - **Queue:** the worker loop.
 
-On SIGTERM it finishes what's in flight and exits 0, so pods don't end in
+First it applies the app's pending migrations (see Migrations). On SIGTERM
+it finishes what's in flight and exits 0, so pods don't end in
 `Error`. Your app's `package.json` needs:
 
 ```json
@@ -185,6 +240,19 @@ On SIGTERM it finishes what's in flight and exits 0, so pods don't end in
 settings as JSON; `mcloud` deploys from that. While it runs,
 `MAXCLOUD_DESCRIBE=1` is set, so module-level code can skip connecting to
 things.
+
+`onShutdown(fn)` runs `fn` after SIGTERM, once the requests or jobs in
+flight are done and before the process exits: close a pool, flush logs.
+
+A bundled server can be its own entrypoint instead of package.json's
+`main` (`@max-cloud/nuxt` builds Nuxt this way): `start(exports)` does what
+`maxcloud-functions` does for those exports, and `isEntrypoint` tells
+whether the module is the one `node` was started with:
+
+```ts
+export const web = onRequest({ public: true }, { node: listener });
+if (await isEntrypoint(import.meta.url)) start({ web });
+```
 
 ## Local development
 
@@ -223,3 +291,83 @@ build first):
 ```fish
 FUNCTION_TARGET=api npx maxcloud-functions
 ```
+
+## Testing
+
+`@max-cloud/functions/testing` has two helpers for tests (any runner:
+`node:test`, Vitest, ...). It's a separate entry point, so it stays out of
+the app's production bundle.
+
+### A throwaway database
+
+`testDatabase()` creates a uniquely named schema (`maxcloud_test_...`) in
+the Postgres at `TEST_DATABASE_URL` and points the SDK at it until
+`drop()`: `db()`, `kv` and `enqueue` use it, and `DATABASE_URL` is set to a
+URL whose connections start with `search_path` set to the schema, so queue
+workers and child processes land there too. `drop()` closes its pool,
+drops the schema with everything in it and puts back the previous
+`DATABASE_URL` and `db()` pool.
+
+```ts
+import { after, before, test } from "node:test";
+import assert from "node:assert/strict";
+import { db, kv } from "@max-cloud/functions";
+import { testDatabase, type TestDatabase } from "@max-cloud/functions/testing";
+
+const skip = process.env.TEST_DATABASE_URL ? false : "set TEST_DATABASE_URL";
+let t: TestDatabase;
+before(async () => { if (!skip) t = await testDatabase(); });
+after(() => t?.drop());
+
+test("signup", { skip }, async () => {
+  await db().query("CREATE TABLE users (email text PRIMARY KEY)"); // or run your migrations
+  await kv.set("welcome", true);
+  assert.equal(await kv.get("welcome"), true);
+});
+```
+
+Any Postgres you can create schemas in will do:
+
+```fish
+docker run -d --rm --name pg-test -p 127.0.0.1:5433:5432 -e POSTGRES_PASSWORD=test postgres:18
+set -x TEST_DATABASE_URL postgres://postgres:test@127.0.0.1:5433/postgres
+```
+
+Only the schema is on the search path, not `public`: a table your test
+didn't create there doesn't exist, and an extension installed in `public`
+is only reachable as `public.<name>`. `t.url`, `t.pool` and `t.schema` are
+there for your own connections. `testDatabase({ use: false })` makes the
+schema without touching `db()` or `DATABASE_URL`. A schema left behind by a
+crashed run can be dropped by hand; they all start with `maxcloud_test_`.
+
+### In-memory buckets
+
+`testBuckets()` starts an S3 server in the test process, on
+`127.0.0.1` with a random port, and sets the `AWS_*` variables a function
+gets on maxcloud to point at it (and `MAXCLOUD_APP` to `test` if it isn't
+set). The app's own S3 client then talks to it unchanged: the AWS SDK,
+aws4fetch, unstorage's `s3` driver. Objects live in memory; signatures
+aren't checked.
+
+```ts
+import { bucketName } from "@max-cloud/functions";
+import { testBuckets } from "@max-cloud/functions/testing";
+
+const s3 = await testBuckets({ buckets: ["uploads"] }); // bucketName("uploads") exists
+s3.put(bucketName("uploads"), "in/cat.png", png, "image/png"); // a starting point
+await resizeImage({ key: "in/cat.png" });                       // your code, using the AWS SDK
+assert.ok(s3.get(bucketName("uploads"), "out/cat.png"));        // a Buffer, or undefined
+await s3.close();                                               // puts the environment back
+```
+
+It answers PutObject, GetObject (with `Range`), HeadObject, DeleteObject,
+DeleteObjects, CopyObject, ListObjectsV2 and ListObjects, and creating,
+listing and deleting buckets, with S3's XML and error codes (`NoSuchKey`,
+`NoSuchBucket`). Multipart uploads (`@aws-sdk/lib-storage`'s `Upload` for
+bodies over 5 MB) answer 501. Requests are path-style
+(`http://127.0.0.1:PORT/<bucket>/<key>`); the AWS SDK uses that for an IP
+endpoint by itself. The helper's own methods take a bucket's full name:
+`createBucket`, `get`, `object` (body and headers), `put`, `keys(bucket,
+prefix)`, `clear()` (empties every bucket); `s3.env` is the `AWS_*`
+variables, for a child process. `testBuckets({ use: false })` leaves the
+environment alone.

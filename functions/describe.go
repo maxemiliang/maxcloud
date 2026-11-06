@@ -17,6 +17,8 @@ type description struct {
 	SDK       string `json:"sdk"`
 	Version   string `json:"version"`
 	Functions []any  `json:"functions"`
+	// The SQL migrations Start applies (file names).
+	Migrations []string `json:"migrations"`
 }
 
 type describedBase struct {
@@ -26,14 +28,21 @@ type describedBase struct {
 	Memory         *string `json:"memory"`
 	CPU            *string `json:"cpu"`
 	TimeoutSeconds float64 `json:"timeoutSeconds"`
+
+	MemoryLimit            *string  `json:"memoryLimit"`
+	User                   *int64   `json:"user"`
+	ReadOnlyRootFilesystem bool     `json:"readOnlyRootFilesystem"`
+	Volumes                []volume `json:"volumes"`
 }
 
 type describedHTTP struct {
 	describedBase
-	Public       bool `json:"public"`
-	MinInstances int  `json:"minInstances"`
-	MaxInstances int  `json:"maxInstances"`
-	Concurrency  int  `json:"concurrency"`
+	Public       bool   `json:"public"`
+	MinInstances int    `json:"minInstances"`
+	MaxInstances int    `json:"maxInstances"`
+	Concurrency  int    `json:"concurrency"`
+	Proxied      bool   `json:"proxied"`
+	HealthPath   string `json:"healthPath"`
 }
 
 type describedSchedule struct {
@@ -96,11 +105,19 @@ func describe() description {
 	for _, n := range names {
 		f := registry[n]
 		o := f.opts
-		base := describedBase{Name: f.name, Export: f.name, Kind: f.kind, Memory: strPtr(o.memory), CPU: strPtr(o.cpu)}
+		vols := o.volumes
+		if vols == nil {
+			vols = []volume{}
+		}
+		base := describedBase{Name: f.name, Export: f.name, Kind: f.kind, Memory: strPtr(o.memory), CPU: strPtr(o.cpu),
+			MemoryLimit: strPtr(o.memoryLimit), User: o.user, ReadOnlyRootFilesystem: o.readOnlyRoot, Volumes: vols}
 		switch f.kind {
 		case kindHTTP:
 			base.TimeoutSeconds = f.timeoutSeconds(defaultHTTPTimeout)
-			d.Functions = append(d.Functions, describedHTTP{base, o.public, o.minInstances, or(o.maxInstances, 3), o.concurrency})
+			d.Functions = append(d.Functions, describedHTTP{
+				describedBase: base, Public: o.public, MinInstances: o.minInstances, MaxInstances: or(o.maxInstances, 3), Concurrency: o.concurrency,
+				Proxied: o.proxied, HealthPath: o.healthPath,
+			})
 		case kindSchedule:
 			base.TimeoutSeconds = f.timeoutSeconds(defaultScheduleTimeout)
 			d.Functions = append(d.Functions, describedSchedule{base, f.schedule, or(o.timeZone, "UTC"), o.retries})
