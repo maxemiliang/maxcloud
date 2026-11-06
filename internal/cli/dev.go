@@ -50,7 +50,10 @@ maxcloud:
   - the app's real buckets with --buckets remote (careful: real data).
 
 TypeScript runs your source with Node's type stripping and restarts on
-changes (node --watch); Go apps run with go run (restart it yourself).`,
+changes (node --watch); Go apps run with go run (restart it yourself). A
+Nuxt app (a nuxt.config) runs nuxt dev on the port instead, at
+http://localhost:8080/; @max-cloud/nuxt fills its runtimeConfig from the
+same environment.`,
 		Example: `  mcloud dev
   mcloud dev --db branch:try-migration
   mcloud dev --secrets remote --buckets remote`,
@@ -178,6 +181,17 @@ func devCommand(ctx context.Context, dir, entry string, port int) (*exec.Cmd, er
 	if _, err := os.Stat(filepath.Join(dir, "package.json")); err != nil {
 		return nil, errors.New("no package.json or go.mod here: which app is this?")
 	}
+	if isNuxt(dir) {
+		// Nuxt's own dev server (Vite, hot reload); @max-cloud/nuxt turns
+		// the environment into runtimeConfig there.
+		bin := findBin(dir, "nuxt")
+		if bin == "" {
+			return nil, errors.New("this is a Nuxt app, but nuxt isn't installed: npm install")
+		}
+		cmd := exec.CommandContext(ctx, bin, "dev", "--port", strconv.Itoa(port), "--host", "127.0.0.1")
+		cmd.Dir = dir
+		return cmd, nil
+	}
 	sdk := filepath.Join(dir, "node_modules", "@max-cloud", "functions")
 	b, err := os.ReadFile(filepath.Join(sdk, "package.json"))
 	if err != nil {
@@ -197,6 +211,30 @@ func devCommand(ctx context.Context, dir, entry string, port int) (*exec.Cmd, er
 	cmd := exec.CommandContext(ctx, "node", args...)
 	cmd.Dir = dir
 	return cmd, nil
+}
+
+// isNuxt reports whether dir is a Nuxt app (a nuxt.config next to package.json).
+func isNuxt(dir string) bool {
+	for _, ext := range []string{"ts", "mts", "js", "mjs"} {
+		if _, err := os.Stat(filepath.Join(dir, "nuxt.config."+ext)); err == nil {
+			return true
+		}
+	}
+	return false
+}
+
+// findBin finds node_modules/.bin/name in dir or a parent (npm
+// workspaces hoist them), or "".
+func findBin(dir, name string) string {
+	for d := dir; ; d = filepath.Dir(d) {
+		p := filepath.Join(d, "node_modules", ".bin", name)
+		if _, err := os.Stat(p); err == nil {
+			return p
+		}
+		if filepath.Dir(d) == d {
+			return ""
+		}
+	}
 }
 
 // devPostgres runs (or reuses) a Postgres container for the app, keeping

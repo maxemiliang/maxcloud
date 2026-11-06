@@ -1,7 +1,11 @@
-# @max-cloud/functions releases: a functions-js/v* tag, matching the version
-# in packages/functions/package.json, publishes it to npm.
+# npm releases: a tag matching the version in the package's package.json
+# publishes it.
 #
-#   git tag functions-js/v0.2.0 && git push origin functions-js/v0.2.0
+#   git tag functions-js/v0.2.0 && git push origin functions-js/v0.2.0   # @max-cloud/functions
+#   git tag nuxt-js/v0.1.0 && git push origin nuxt-js/v0.1.0             # @max-cloud/nuxt
+#
+# @max-cloud/nuxt depends on @max-cloud/functions: release that first when
+# it needs a newer one.
 #
 # No npm token: npm trusts this workflow (trusted publishing, OIDC), set up
 # on npmjs.com under the package's Settings, Trusted publisher: GitHub
@@ -11,7 +15,7 @@ name: release-npm
 
 on:
   push:
-    tags: ["functions-js/v*"]
+    tags: ["functions-js/v*", "nuxt-js/v*"]
 
 permissions: {}
 
@@ -27,19 +31,25 @@ jobs:
         with:
           node-version: 24
           registry-url: https://registry.npmjs.org
-      - name: Tag matches package.json
-        working-directory: packages/functions
+      - name: Which package
         run: |
-          want="${GITHUB_REF_NAME#functions-js/v}"
+          case "$GITHUB_REF_NAME" in
+            functions-js/v*) echo "PKG=packages/functions" >> "$GITHUB_ENV" ;;
+            nuxt-js/v*) echo "PKG=packages/nuxt" >> "$GITHUB_ENV" ;;
+            *) echo "::error::unknown tag $GITHUB_REF_NAME"; exit 1 ;;
+          esac
+      - name: Tag matches package.json
+        run: |
+          cd "$PKG"
+          want="${GITHUB_REF_NAME#*-js/v}"
           have=$(node -p 'require("./package.json").version')
           if [ "$want" != "$have" ]; then
             echo "::error::tag says $want, package.json says $have"
             exit 1
           fi
       - run: npm ci
-      - run: npm run typecheck --workspace packages/functions
-      - run: npm test --workspace packages/functions
-      - run: npm run build --workspace packages/functions
+      - run: npm run build --workspaces
+      - run: npm run typecheck --workspace "$PKG"
+      - run: npm test --workspace "$PKG"
       - name: Publish
-        working-directory: packages/functions
-        run: npm publish --access public
+        run: cd "$PKG" && npm publish --access public

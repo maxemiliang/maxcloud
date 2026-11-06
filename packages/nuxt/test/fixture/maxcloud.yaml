@@ -1,0 +1,4 @@
+# A Nuxt app on maxcloud, for @max-cloud/nuxt's tests (shaped like lankkupaja).
+app: nuxt-demo
+buckets: [uploads]
+db: true

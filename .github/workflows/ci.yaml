@@ -77,7 +77,10 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
+      # Built first: @max-cloud/nuxt imports @max-cloud/functions' dist (npm
+      # runs the workspaces in folder order, functions before nuxt), and its
+      # fixture test loads its own.
+      - run: npm run build --workspaces
       - run: npm run typecheck --workspaces
       - run: npm test --workspaces
-      - run: npm run build --workspaces
       - run: npm pack --dry-run --workspaces

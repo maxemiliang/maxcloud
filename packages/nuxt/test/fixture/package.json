@@ -1,0 +1,11 @@
+{
+  "name": "nuxt-fixture",
+  "private": true,
+  "type": "module",
+  "main": ".output/server/index.mjs",
+  "scripts": {
+    "build": "nuxt build",
+    "dev": "nuxt dev",
+    "start": "maxcloud-functions"
+  }
+}
