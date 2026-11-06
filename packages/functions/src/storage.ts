@@ -1,8 +1,9 @@
-// Buckets an app gets from the registry (`mcloud apps set <app> --buckets
-// uploads`). The maxcloud controller names them mc-<app>--<bucket> and puts
-// the app's credentials in the Secret maxcloud-s3, which every function
-// gets as environment variables: the AWS_* ones any S3 client reads
-// (endpoint, region, keys, UpCloud's checksum settings) and MAXCLOUD_APP.
+// Buckets an app asks for in its maxcloud.yaml (`buckets: [uploads]`). The
+// maxcloud controller names them mc-<app>--<bucket> and puts the app's
+// credentials in the Secret maxcloud-s3, which every function gets as the
+// AWS_* environment variables any S3 client reads (endpoint, region, keys,
+// UpCloud's checksum settings). MAXCLOUD_APP, the app's name, is set on
+// every function.
 
 /**
  * The full name of one of the app's buckets: `bucketName("uploads")` is
@@ -19,8 +20,8 @@ export function bucketName(name: string, env: Record<string, string | undefined>
   const app = env.MAXCLOUD_APP;
   if (!app) {
     throw new Error(
-      `bucketName(${JSON.stringify(name)}): MAXCLOUD_APP isn't set. The app has no buckets yet ` +
-        "(mcloud apps set <app> --buckets ...), or this isn't running on maxcloud.",
+      `bucketName(${JSON.stringify(name)}): MAXCLOUD_APP isn't set, so this isn't running on maxcloud ` +
+        "(mcloud dev sets it locally)",
     );
   }
   if (!/^[a-z0-9]([a-z0-9]|-[a-z0-9])*$/.test(name)) {

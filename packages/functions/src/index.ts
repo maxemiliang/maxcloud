@@ -21,3 +21,4 @@ export { enqueue, type EnqueueOptions, type Queryable } from "./queue.ts";
 export { bucketName } from "./storage.ts";
 export { kv, type KVSetOptions, type KVListOptions, type KVList } from "./kv.ts";
 export { secret } from "./secrets.ts";
+export { db } from "./db.ts";

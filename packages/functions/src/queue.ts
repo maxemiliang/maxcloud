@@ -5,6 +5,7 @@
 
 import pg from "pg";
 import { checkQueueName, type Job, type QueueFunction } from "./define.ts";
+import { databaseUrl, db as sharedPool } from "./db.ts";
 
 export const TABLE = "maxcloud_jobs";
 const CHANNEL = "maxcloud_jobs";
@@ -39,19 +40,8 @@ export interface Queryable {
   query: pg.Pool["query"];
 }
 
-let pool: pg.Pool | undefined;
-
-function databaseUrl(): string {
-  const url = process.env.DATABASE_URL;
-  if (!url) throw new Error("DATABASE_URL isn't set: queues need the app's Postgres database");
-  return url;
-}
-
-/** The pool `enqueue` uses unless given a client. */
-export function defaultPool(): pg.Pool {
-  pool ??= new pg.Pool({ connectionString: databaseUrl(), max: 4 });
-  return pool;
-}
+/** The pool `enqueue` uses unless given a client: the app's shared `db()`. */
+export const defaultPool = sharedPool;
 
 const ready = new WeakMap<object, Promise<void>>();
 

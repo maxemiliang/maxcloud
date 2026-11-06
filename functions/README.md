@@ -67,7 +67,7 @@ worker. Use at most 40 lowercase letters, digits and dashes.
 ## Queues
 
 Jobs live in the app's Postgres database (`$DATABASE_URL`; the app gets
-one with `mcloud apps set <app> --db`), in a table the SDK creates
+one with `db: true` in its `maxcloud.yaml`), in a table the SDK creates
 (`maxcloud_jobs`).
 
 - **Retries:** a job whose handler returns an error, panics, or passes its
@@ -79,13 +79,27 @@ one with `mcloud apps set <app> --db`), in a table the SDK creates
   exists only if the transaction commits.
 - **Delay a job** with `functions.Delay(d)`.
 
+## Database
+
+With `db: true` in the app's `maxcloud.yaml`, every function gets
+`$DATABASE_URL`. `functions.Pool(ctx)` is a pgx pool on it, made on first
+use and shared with `Enqueue` and the KV functions:
+
+```go
+p, err := functions.Pool(ctx)
+err = p.QueryRow(ctx, "SELECT name FROM users WHERE id = $1", id).Scan(&name)
+```
+
+It returns an error if `$DATABASE_URL` isn't set.
+
 ## Buckets
 
-An app's S3 buckets come from the registry
-(`mcloud apps set shop --buckets uploads,assets:public`); the maxcloud
-controller creates them as `mc-<app>--<bucket>` and gives every function
-the app's credentials as `AWS_*` environment variables, which the AWS SDK
-reads by itself. `functions.BucketName("uploads")` returns the full name:
+An app's S3 buckets are listed in its `maxcloud.yaml`
+(`buckets: [uploads, assets:public]`); the maxcloud controller creates
+them as `mc-<app>--<bucket>` and gives every function the app's
+credentials as `AWS_*` environment variables, which the AWS SDK reads by
+itself. `MAXCLOUD_APP`, the app's name, is set on every function.
+`functions.BucketName("uploads")` returns the full name:
 
 ```go
 cfg, err := config.LoadDefaultConfig(ctx)
@@ -98,7 +112,7 @@ _, err = s3c.PutObject(ctx, &s3.PutObjectInput{Bucket: &bucket, Key: aws.String(
 
 `KVGet`, `KVSet`, `KVDelete` and `KVList` are a key-value store (like
 Workers KV) in the app's Postgres database (`DATABASE_URL`; the app needs
-one: `mcloud apps set <app> --db`). Values are JSON.
+`db: true` in its `maxcloud.yaml`). Values are JSON.
 
 ```go
 err := functions.KVSet(ctx, "session:42", session, time.Hour) // 0: no expiry
@@ -128,7 +142,30 @@ the registered functions as JSON instead; that's what `mcloud` deploys from.
 Register functions in `main` before `Start`, and don't connect to anything
 before that, so describing stays fast.
 
-To try a function locally:
+## Local development
+
+Run `mcloud dev` in the app's repo. It starts a local Postgres (in Docker)
+or port-forwards to a database branch, sets `DATABASE_URL`, `MAXCLOUD_APP`
+and the secrets in the gitignored `.env`, and runs the app in dev mode.
+
+Dev mode is `go run . --dev`, or `MAXCLOUD_DEV=1` in the environment. It
+runs the whole app in one process, with `MAXCLOUD_DEV=1` set:
+
+- One server on 127.0.0.1, on `--port`, `$PORT` or 8080.
+- `http://<name>.localhost:<port>/` reaches the HTTP function registered as
+  `<name>`. The request goes through as it is (path, method, headers,
+  body), so a router mounted at `/` works.
+- `GET http://localhost:<port>/` lists the functions as JSON.
+- `POST http://localhost:<port>/_run/<name>` runs a scheduled function once.
+  It answers 200 `ok`, or 500 with the error. Schedules never run on their
+  cron in dev mode.
+- Queue workers run in the same process when `DATABASE_URL` is set. Without
+  it they don't, and `Enqueue` fails as it would anywhere else.
+
+At startup it prints each function and where to reach it. Ctrl-C finishes
+the requests and jobs in flight, then exits.
+
+To run a single function, the way its container does:
 
 ```fish
 FUNCTION_TARGET=api go run .

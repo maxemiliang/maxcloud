@@ -76,12 +76,13 @@ var (
 	poolErr  error
 )
 
-// Pool is the connection pool on $DATABASE_URL that Enqueue uses by default.
+// Pool is the app's database: the connection pool on $DATABASE_URL, made on
+// first use and shared with Enqueue and the KV functions.
 func Pool(ctx context.Context) (*pgxpool.Pool, error) {
 	poolOnce.Do(func() {
 		url := os.Getenv("DATABASE_URL")
 		if url == "" {
-			poolErr = errors.New("functions: DATABASE_URL isn't set: queues need the app's Postgres database")
+			poolErr = errors.New("functions: DATABASE_URL isn't set: the app has no Postgres database (add db: true to its maxcloud.yaml), or this isn't running on maxcloud (mcloud dev sets it locally)")
 			return
 		}
 		pool, poolErr = pgxpool.New(ctx, url)

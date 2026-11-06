@@ -41,21 +41,22 @@ as they are: `onRequest(app.fetch)` with Hono, for example.
 | `maxInstances` | `3` | |
 | `concurrency` | `0` | Requests one instance handles before another starts (0: no limit). |
 | `timeoutSeconds` | `300` | Per request. |
+| `memory` | the namespace's default | Memory the container requests and is limited to, e.g. `"256Mi"`. |
+| `cpu` | the namespace's default | CPU the container requests, e.g. `"100m"`. |
 
 ## Scheduled functions
 
 `onSchedule("0 3 * * *", handler)`, or `onSchedule(options, handler)` with
-`schedule`, `timeZone` (default UTC), `retries` (default 0) and
-`timeoutSeconds` (default 3600). A run that throws exits 1, and Kubernetes
-retries it `retries` times.
+`schedule`, `timeZone` (default UTC), `retries` (default 0),
+`timeoutSeconds` (default 3600), `memory` and `cpu`. A run that throws
+exits 1, and Kubernetes retries it `retries` times.
 
 ## Queues
 
 `onQueue(queue, handler)` or `onQueue(options, handler)`. `enqueue(queue,
 payload)` adds a job from anywhere in the app. Jobs live in the app's
-Postgres database (`DATABASE_URL`; the app gets one with `mcloud apps set
-<app> --db`), in a table the SDK creates
-(`maxcloud_jobs`).
+Postgres database (`DATABASE_URL`; the app gets one with `db: true` in its
+`maxcloud.yaml`), in a table the SDK creates (`maxcloud_jobs`).
 
 | Option | Default | |
 | --- | --- | --- |
@@ -64,6 +65,7 @@ Postgres database (`DATABASE_URL`; the app gets one with `mcloud apps set
 | `maxAttempts` | `5` | Tries before a job is marked `failed`. |
 | `backoffSeconds` | `10` | Delay before the first retry, doubled each time. |
 | `timeoutSeconds` | `300` | Per job. A job past it is aborted and retried. |
+| `memory`, `cpu` | the namespace's defaults | As for HTTP functions. |
 
 - **Retries:** a job that throws is retried, and so is one whose worker
   died, once its lease runs out. A job can run more than once, so make
@@ -73,14 +75,28 @@ Postgres database (`DATABASE_URL`; the app gets one with `mcloud apps set
   `await enqueue("mail", msg, { client: tx })`.
 - **Delay a job** with `{ delaySeconds }`.
 
+## Database
+
+With `db: true` in the app's `maxcloud.yaml`, every function gets
+`DATABASE_URL`. `db()` is a `pg.Pool` on it, made on first use and shared
+with `enqueue` and `kv`, so the app doesn't need a second pool:
+
+```ts
+import { db } from "@max-cloud/functions";
+
+const { rows } = await db().query("SELECT id, name FROM users WHERE id = $1", [id]);
+```
+
+It throws if `DATABASE_URL` isn't set.
+
 ## Buckets
 
-An app's S3 buckets come from the registry:
-`mcloud apps set shop --buckets uploads,assets:public`. The maxcloud
-controller creates them in UpCloud Object Storage as `mc-<app>--<bucket>`,
-and every function gets the app's credentials as environment variables
-(the `AWS_*` ones any S3 client reads, and `MAXCLOUD_APP`). So the AWS SDK
-needs no configuration, only the bucket's full name:
+An app's S3 buckets are listed in its `maxcloud.yaml`:
+`buckets: [uploads, assets:public]`. The maxcloud controller creates them
+in UpCloud Object Storage as `mc-<app>--<bucket>`, and every function gets
+the app's credentials as the `AWS_*` environment variables any S3 client
+reads. `MAXCLOUD_APP`, the app's name, is set on every function. So the AWS
+SDK needs no configuration, only the bucket's full name:
 
 ```ts
 import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
@@ -102,8 +118,8 @@ themselves (presigned URL, then a queue job).
 ## Key-value storage
 
 `kv` is a key-value store (like Workers KV) in the app's Postgres
-database (`DATABASE_URL`, so the app needs one: `mcloud apps set <app>
---db`). Values are JSON; reads see writes right away.
+database (`DATABASE_URL`, so the app needs `db: true` in its
+`maxcloud.yaml`). Values are JSON; reads see writes right away.
 
 ```ts
 import { kv } from "@max-cloud/functions";
@@ -144,13 +160,45 @@ On SIGTERM it finishes what's in flight and exits 0, so pods don't end in
 }
 ```
 
-To try a function locally:
-
-```fish
-FUNCTION_TARGET=api npx maxcloud-functions
-```
-
 `maxcloud-functions --describe` prints the app's functions and their
 settings as JSON; `mcloud` deploys from that. While it runs,
 `MAXCLOUD_DESCRIBE=1` is set, so module-level code can skip connecting to
 things.
+
+## Local development
+
+Run `mcloud dev` in the app's repo. It starts a local Postgres (in Docker)
+or port-forwards to a database branch, sets `DATABASE_URL`, `MAXCLOUD_APP`
+and the secrets in the gitignored `.env`, and runs the app in dev mode
+under `node --watch`, so edits reload.
+
+Dev mode is `maxcloud-functions dev [--entry FILE] [--port N]`. It runs the
+whole app in one process, with `MAXCLOUD_DEV=1` set:
+
+- One server on 127.0.0.1, on `--port`, `$PORT` or 8080.
+- `http://<name>.localhost:<port>/` reaches the HTTP function deployed as
+  `<name>`. The request goes through as it is (path, method, headers,
+  body), so a framework mounted at `/` works.
+- `GET http://localhost:<port>/` lists the functions as JSON.
+- `POST http://localhost:<port>/_run/<name>` runs a scheduled function once.
+  It answers 200 `ok`, or 500 with the error. Schedules never run on their
+  cron in dev mode.
+- Queue workers run in the same process when `DATABASE_URL` is set. Without
+  it they don't, and `enqueue` fails as it would anywhere else.
+
+At startup it prints each function and where to reach it. Ctrl-C finishes
+the requests and jobs in flight, then exits.
+
+`FILE` defaults to `src/index.ts` if there is one, else `package.json`'s
+`main`. Node runs a `.ts` file by stripping its types (Node 22.18 or newer;
+no build step), so relative imports in it need their `.ts` extensions:
+`import { app } from "./app.ts"`. Set `allowImportingTsExtensions` (or
+`rewriteRelativeImportExtensions`) in `tsconfig.json` to make `tsc` accept
+them. Type stripping also can't run TypeScript-only syntax such as `enum`.
+
+To run a single function the way its container does (it loads `main`, so
+build first):
+
+```fish
+FUNCTION_TARGET=api npx maxcloud-functions
+```

@@ -4,7 +4,7 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
-import type { HttpFunction } from "./define.ts";
+import type { HttpHandler } from "./define.ts";
 
 function toRequest(req: IncomingMessage, signal: AbortSignal): Request {
   // Traefik and Knative's queue-proxy set these for the original request.
@@ -50,7 +50,11 @@ export interface Serving {
   close(graceMs?: number): Promise<void>;
 }
 
-export async function serveHttp(fn: HttpFunction, port: number, log: (msg: string) => void = console.log): Promise<Serving> {
+/**
+ * Serves `fn.handler` (an HttpFunction, or anything else with a fetch-style
+ * handler) on `port`, on every interface unless `hostname` says otherwise.
+ */
+export async function serveHttp(fn: { handler: HttpHandler }, port: number, log: (msg: string) => void = console.log, hostname?: string): Promise<Serving> {
   const shutdown = new AbortController();
   let inFlight = 0;
   let idle: (() => void) | undefined;
@@ -87,7 +91,7 @@ export async function serveHttp(fn: HttpFunction, port: number, log: (msg: strin
 
   await new Promise<void>((resolve, reject) => {
     server.once("error", reject);
-    server.listen(port, () => resolve());
+    server.listen(port, hostname, () => resolve());
   });
   const addr = server.address();
   const actual = typeof addr === "object" && addr ? addr.port : port;

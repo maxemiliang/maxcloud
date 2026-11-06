@@ -4,7 +4,7 @@
 import { readFileSync, existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
-import { isFunction, type MaxcloudFunction } from "./define.ts";
+import { isFunction, type MaxcloudFunction, type ScheduleFunction } from "./define.ts";
 import { serveHttp } from "./http.ts";
 import { backlogQuery, runWorker } from "./queue.ts";
 
@@ -90,6 +90,17 @@ export function sourcePath(source?: string, cwd = process.cwd()): string {
   return resolve(cwd, "index.js");
 }
 
+/**
+ * The entry module dev mode loads: --entry, src/index.ts if there is one
+ * (Node strips its types), or else what sourcePath picks.
+ */
+export function devEntryPath(entry?: string, cwd = process.cwd()): string {
+  if (entry) return resolve(cwd, entry);
+  const ts = resolve(cwd, "src/index.ts");
+  if (existsSync(ts)) return ts;
+  return sourcePath(undefined, cwd);
+}
+
 export async function load(path: string): Promise<Found[]> {
   const mod = await import(pathToFileURL(path).href);
   return findFunctions(mod);
@@ -100,6 +111,36 @@ export interface RunOptions {
   /** Ends the run: HTTP drains, a worker stops, a schedule is aborted. */
   signal: AbortSignal;
   log?: (msg: string) => void;
+}
+
+/**
+ * Runs a scheduled function once, within its timeout. Rejects with the
+ * handler's error, or the abort reason when `signal` aborts or it times out.
+ */
+export async function runSchedule(fn: ScheduleFunction, signal: AbortSignal): Promise<void> {
+  const timeout = (fn.options.timeoutSeconds ?? 3600) * 1000;
+  const runSignal = AbortSignal.any([signal, AbortSignal.timeout(timeout)]);
+  await Promise.race([
+    fn.handler({ signal: runSignal, startedAt: new Date() }),
+    new Promise((_, reject) => runSignal.addEventListener("abort", () => reject(runSignal.reason), { once: true })),
+  ]);
+}
+
+/** runSchedule, logging how it went. Resolves to the error, or undefined if it succeeded. */
+export async function runScheduleLogged(name: string, fn: ScheduleFunction, signal: AbortSignal, log: (msg: string) => void): Promise<unknown> {
+  const startedAt = Date.now();
+  try {
+    await runSchedule(fn, signal);
+    log(`${name}: done in ${((Date.now() - startedAt) / 1000).toFixed(1)}s`);
+    return undefined;
+  } catch (err) {
+    log(`${name}: failed: ${errorText(err)}`);
+    return err ?? new Error("failed");
+  }
+}
+
+export function errorText(err: unknown): string {
+  return err instanceof Error ? (err.stack ?? err.message) : String(err);
 }
 
 /** Runs one function until it's done (schedule) or `signal` aborts. Resolves to the exit code. */
@@ -115,22 +156,8 @@ export async function run(f: Found, opts: RunOptions): Promise<number> {
       await serving.close();
       return 0;
     }
-    case "schedule": {
-      const timeout = (fn.options.timeoutSeconds ?? 3600) * 1000;
-      const signal = AbortSignal.any([opts.signal, AbortSignal.timeout(timeout)]);
-      const startedAt = new Date();
-      try {
-        await Promise.race([
-          fn.handler({ signal, startedAt }),
-          new Promise((_, reject) => signal.addEventListener("abort", () => reject(signal.reason), { once: true })),
-        ]);
-        log(`${f.name}: done in ${((Date.now() - startedAt.getTime()) / 1000).toFixed(1)}s`);
-        return 0;
-      } catch (err) {
-        log(`${f.name}: failed: ${err instanceof Error ? (err.stack ?? err.message) : String(err)}`);
-        return 1;
-      }
-    }
+    case "schedule":
+      return (await runScheduleLogged(f.name, fn, opts.signal, log)) === undefined ? 0 : 1;
     case "queue":
       await runWorker(fn, { signal: opts.signal, log });
       return 0;
