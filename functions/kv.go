@@ -132,13 +132,20 @@ func KVDelete(ctx context.Context, key string) (bool, error) {
 	return tag.RowsAffected() > 0, err
 }
 
-// KVList returns up to limit keys (default 100, max 1000) in order that
-// start with prefix and come after cursor (""), and the cursor for the next
-// page ("" when there are no more).
-func KVList(ctx context.Context, prefix, cursor string, limit int) (keys []string, next string, err error) {
-	if limit <= 0 || limit > 1000 {
-		limit = min(max(limit, 100), 1000)
+// kvListLimit is KVList's page size: 0 or less is the default 100 (as in
+// the TS SDK's kv.list), at most 1000.
+func kvListLimit(limit int) int {
+	if limit <= 0 {
+		return 100
 	}
+	return min(limit, 1000)
+}
+
+// KVList returns up to limit keys (default 100, also for 0; max 1000) in
+// order that start with prefix and come after cursor (""), and the cursor
+// for the next page ("" when there are no more).
+func KVList(ctx context.Context, prefix, cursor string, limit int) (keys []string, next string, err error) {
+	limit = kvListLimit(limit)
 	p, err := kvPool(ctx)
 	if err != nil {
 		return nil, "", err

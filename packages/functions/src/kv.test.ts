@@ -2,7 +2,7 @@
 import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { kv } from "./kv.ts";
+import { kv, listLimit } from "./kv.ts";
 
 const url = process.env.TEST_DATABASE_URL;
 const skip = url ? false : "set TEST_DATABASE_URL to run the kv tests";
@@ -57,4 +57,10 @@ test("bad input is refused", { skip }, async () => {
   await assert.rejects(kv.get(""), /1 to 512/);
   await assert.rejects(kv.set("k", undefined), /undefined/);
   await assert.rejects(kv.set("k", 1, { ttlSeconds: 0 }), /positive/);
+});
+
+test("list's limit: 0 or less is the default 100, as in the Go SDK; at most 1000", () => {
+  for (const [asked, want] of [[undefined, 100], [0, 100], [-5, 100], [1, 1], [250, 250], [5000, 1000]] as const) {
+    assert.equal(listLimit(asked), want, `limit ${asked}`);
+  }
 });

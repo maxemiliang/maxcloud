@@ -240,7 +240,7 @@ const { keys, cursor } = await kv.list({ prefix: "session:", limit: 100 });
 ```
 
 `delete` resolves to whether the key was there. `list` gives keys in
-order, `limit` at a time (default 100, at most 1000), with a `cursor` to
+order, `limit` at a time (default 100, also for 0; at most 1000), with a `cursor` to
 pass back while there are more. `set` with `undefined` throws; use
 `delete`.
 
