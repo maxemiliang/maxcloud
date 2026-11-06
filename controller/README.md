@@ -480,6 +480,12 @@ is removed, the `Restore` condition (reason `Refused`) says why, and
 nothing is touched. A restore that goes ahead sets `Restore` to True
 (reason `Restored`) and `status.restoredTo`.
 
+If the `Cluster` is already gone when the annotation is set, the restore
+stops at that time too: the plan is written and the restore runs without
+the take-down. A time it can't reach is refused the same way (also when
+`recover-from` is set too, which wins), and the database then comes back
+as it would without it: its latest state.
+
 One gap: a time in the minute or two after an earlier restore, before the
 new generation's first base backup, can't be reached. The old
 generation's WAL ends where the new one starts, so the recovery won't

@@ -145,7 +145,7 @@ func (r *DatabaseReconciler) reconcile(ctx context.Context, db *v1.Database, app
 func (r *DatabaseReconciler) restoreTo(ctx context.Context, db *v1.Database, bucket string, c *unstructured.Unstructured) (ctrl.Result, error) {
 	t, err := restoreToAnnotation(db, r.now())
 	if err != nil {
-		return r.refuseRestore(ctx, db, err.Error())
+		return r.refuseRestore(ctx, db, err.Error(), leftAsItWas)
 	}
 	data, found, err := r.Objects.GetObject(ctx, bucket, markerKey)
 	if err != nil {
@@ -166,20 +166,11 @@ func (r *DatabaseReconciler) restoreTo(ctx context.Context, db *v1.Database, buc
 		if m != nil {
 			current = max(current, m.Generation)
 		}
-		src, ok, err := r.sourceFor(ctx, bucket, current, t)
-		if err != nil {
+		if why, err := r.planRestore(ctx, db, bucket, t, current); err != nil {
 			return ctrl.Result{}, err
+		} else if why != "" {
+			return r.refuseRestore(ctx, db, why, leftAsItWas)
 		}
-		if !ok {
-			return r.refuseRestore(ctx, db, fmt.Sprintf(
-				"can't restore to %s: no finished base backup from before then (backups are kept for %s)",
-				t.UTC().Format(time.RFC3339), db.Spec.Backup.Retention))
-		}
-		next := Marker{Generation: current + 1, State: StateRestoring, RestoredFrom: src, TargetTime: &t, Updated: r.now()}
-		if err := r.Objects.PutObject(ctx, bucket, markerKey, next.json()); err != nil {
-			return ctrl.Result{}, err
-		}
-		log.FromContext(ctx).Info("restore to a point in time planned", "target", t, "from", src, "generation", next.Generation)
 	}
 	if c.GetDeletionTimestamp() == nil {
 		if err := r.Delete(ctx, c); client.IgnoreNotFound(err) != nil {
@@ -190,10 +181,36 @@ func (r *DatabaseReconciler) restoreTo(ctx context.Context, db *v1.Database, buc
 		fmt.Sprintf("taking Cluster %s down to restore it to %s", db.Name, t.UTC().Format(time.RFC3339)))
 }
 
+// planRestore plans a restore to t in the marker: from the newest
+// generation up to current with a base backup from before t, into
+// generation current+1. It returns why it can't, if it can't.
+func (r *DatabaseReconciler) planRestore(ctx context.Context, db *v1.Database, bucket string, t time.Time, current int64) (string, error) {
+	src, ok, err := r.sourceFor(ctx, bucket, current, t)
+	if err != nil {
+		return "", err
+	}
+	if !ok {
+		return fmt.Sprintf("can't restore to %s: no finished base backup from before then (backups are kept for %s)",
+			t.UTC().Format(time.RFC3339), db.Spec.Backup.Retention), nil
+	}
+	next := Marker{Generation: current + 1, State: StateRestoring, RestoredFrom: src, TargetTime: &t, Updated: r.now()}
+	if err := r.Objects.PutObject(ctx, bucket, markerKey, next.json()); err != nil {
+		return "", err
+	}
+	log.FromContext(ctx).Info("restore to a point in time planned", "target", t, "from", src, "generation", next.Generation)
+	return "", nil
+}
+
+// What refuseRestore says happens to the database instead.
+const (
+	leftAsItWas    = "the database was left as it was"
+	restoredLatest = "the database is restored to its latest state instead"
+)
+
 // refuseRestore drops a restore-to it can't do, and says why in the
-// Restore condition (its own, so the next reconcile doesn't overwrite it).
-// The database is left as it was.
-func (r *DatabaseReconciler) refuseRestore(ctx context.Context, db *v1.Database, why string) (ctrl.Result, error) {
+// Restore condition (its own, so the next reconcile doesn't overwrite it),
+// with what happens instead (then).
+func (r *DatabaseReconciler) refuseRestore(ctx context.Context, db *v1.Database, why, then string) (ctrl.Result, error) {
 	log.FromContext(ctx).Info("restore refused", "reason", why)
 	patch := client.MergeFrom(db.DeepCopy())
 	delete(db.Annotations, v1.RestoreToAnnotation)
@@ -203,7 +220,7 @@ func (r *DatabaseReconciler) refuseRestore(ctx context.Context, db *v1.Database,
 	setDefaults(db)
 	meta.SetStatusCondition(&db.Status.Conditions, metav1.Condition{
 		Type: "Restore", Status: metav1.ConditionFalse, Reason: "Refused",
-		Message: why + "; the database was left as it was", ObservedGeneration: db.Generation,
+		Message: why + "; " + then, ObservedGeneration: db.Generation,
 	})
 	return ctrl.Result{Requeue: true}, r.Status().Update(ctx, db)
 }
@@ -230,6 +247,11 @@ func (r *DatabaseReconciler) create(ctx context.Context, db *v1.Database, bucket
 	recoverFrom, err := recoverFromAnnotation(db)
 	if err != nil {
 		return r.block(ctx, db, err.Error())
+	}
+	if db.Annotations[v1.RestoreToAnnotation] != "" {
+		if res, refused, err := r.restoreToGone(ctx, db, bucket, recoverFrom); refused || err != nil {
+			return res, err
+		}
 	}
 	view, err := r.look(ctx, bucket, recoverFrom)
 	if err != nil {
@@ -296,6 +318,48 @@ func (r *DatabaseReconciler) create(ctx context.Context, db *v1.Database, bucket
 	}
 	meta.RemoveStatusCondition(&db.Status.Conditions, "Blocked")
 	return ctrl.Result{RequeueAfter: time.Minute}, r.setStatus(ctx, db, phase, metav1.ConditionFalse, ReasonInProgress, p.Reason)
+}
+
+// restoreToGone handles a restore-to when the Cluster is already gone:
+// unless restoreTo planned it (and took the Cluster down), it plans it
+// here, so decide restores to that time and not to the latest state. One
+// it can't do is refused (refused true); the next reconcile then brings the
+// database back as it would without it.
+func (r *DatabaseReconciler) restoreToGone(ctx context.Context, db *v1.Database, bucket string, recoverFrom int64) (ctrl.Result, bool, error) {
+	refuse := func(why string) (ctrl.Result, bool, error) {
+		res, err := r.refuseRestore(ctx, db, why, restoredLatest)
+		return res, true, err
+	}
+	t, err := restoreToAnnotation(db, r.now())
+	if err != nil {
+		return refuse(err.Error())
+	}
+	if recoverFrom > 0 {
+		return refuse(fmt.Sprintf("%s is set too: recovering that generation instead", v1.RecoverFromAnnotation))
+	}
+	data, found, err := r.Objects.GetObject(ctx, bucket, markerKey)
+	if err != nil {
+		return ctrl.Result{}, false, err
+	}
+	if !found {
+		return refuse(fmt.Sprintf("can't restore to %s: there are no backups", t.UTC().Format(time.RFC3339)))
+	}
+	m, err := parseMarker(data)
+	if err != nil {
+		res, err := r.block(ctx, db, fmt.Sprintf("%s in %s: %v", markerKey, bucket, err))
+		return res, true, err
+	}
+	if m.State == StateRestoring && m.TargetTime != nil && m.TargetTime.Equal(t) {
+		return ctrl.Result{}, false, nil // planned already
+	}
+	why, err := r.planRestore(ctx, db, bucket, t, m.Generation)
+	if err != nil {
+		return ctrl.Result{}, false, err
+	}
+	if why != "" {
+		return refuse(why)
+	}
+	return ctrl.Result{}, false, nil
 }
 
 // update keeps an existing Cluster in line with the spec, and marks its
