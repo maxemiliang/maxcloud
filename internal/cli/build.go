@@ -195,19 +195,24 @@ func (d *dockerEnv) command(ctx context.Context, dir, name string, args ...strin
 
 // buildSpec is one image build.
 type buildSpec struct {
-	dir   string // the build context
-	ref   string // repo:tag to push
-	cache string // repo:tag of the build cache ("" for none)
-	ci    bool   // in CI: buildx has a container builder, so the cache can be exported
+	dir   string    // the build context
+	ref   string    // repo:tag to push
+	cache string    // repo:tag of the build cache ("" for none)
+	ci    bool      // in CI: buildx has a container builder, so the cache can be exported
+	log   io.Writer // the build's output (default: the error stream)
 }
 
 // buildImage builds the context into an image and pushes it: with its
 // Dockerfile if it has one, else with buildpacks (pack, or pack in a
 // container if pack isn't installed).
 func (g *globals) buildImage(ctx context.Context, d *dockerEnv, s buildSpec) error {
+	log := s.log
+	if log == nil {
+		log = g.errOut
+	}
 	run := func(name string, args ...string) error {
 		cmd := d.command(ctx, s.dir, name, args...)
-		cmd.Stdout, cmd.Stderr = g.errOut, g.errOut
+		cmd.Stdout, cmd.Stderr = log, log
 		if err := cmd.Run(); err != nil {
 			return fmt.Errorf("%s %s: %w", name, args[0], err)
 		}
@@ -255,7 +260,7 @@ func (g *globals) buildImage(ctx context.Context, d *dockerEnv, s buildSpec) err
 	if h := os.Getenv("DOCKER_HOST"); strings.HasPrefix(h, "unix://") {
 		sock = strings.TrimPrefix(h, "unix://")
 	}
-	fmt.Fprintln(g.errOut, "(pack isn't installed: running it in a container)")
+	fmt.Fprintln(log, "(pack isn't installed: running it in a container)")
 	args := []string{"run", "--rm", "-v", sock + ":/var/run/docker.sock", "-v", abs + ":/workspace", "-v", cfg + ":/docker-config:ro",
 		"-e", "DOCKER_CONFIG=/docker-config", "buildpacksio/pack:" + packImageVersion}
 	return run("docker", append(args, packArgs("/workspace")...)...)

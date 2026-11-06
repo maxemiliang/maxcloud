@@ -71,8 +71,9 @@ func (g *globals) clusterBuildPush(ctx context.Context, k *kube.Client, p *proje
 	if err != nil {
 		return "", nil, err
 	}
+	u := g.UI()
 	ref := repo + ":direct-" + time.Now().UTC().Format("20060102-150405")
-	fmt.Fprintf(g.out, "Building %s in the cluster ...\n", ref)
+	step := u.StepTail("Building "+ref+" in the cluster", 6)
 	digest, err := k.Build(ctx, p.App, kube.ClusterBuild{
 		Builder:  "paketobuildpacks/ubuntu-noble-builder:" + paketoBuilderVersion,
 		Image:    ref,
@@ -80,18 +81,26 @@ func (g *globals) clusterBuildPush(ctx context.Context, k *kube.Client, p *proje
 		Registry: registry,
 		Token:    token,
 		Env:      env,
-	}, bytes.NewReader(src), g.errOut)
+	}, bytes.NewReader(src), step.Writer())
 	if err != nil {
+		step.Fail("Build failed")
 		return "", nil, err
 	}
 	image := repo + "@" + digest
-	fmt.Fprintln(g.out, "Asking the image for its functions ...")
+	step.Done("Built %s in the cluster", u.Accent(repo)+u.Dim("@"+shortDigest(digest)))
+	step = u.Step("Asking the image for its functions")
 	out, err := k.Describe(ctx, p.App, image)
 	if err != nil {
+		step.Fail("")
 		return "", nil, err
 	}
 	d, err := functions.Parse(out)
-	return image, d, err
+	if err != nil {
+		step.Fail("")
+		return "", nil, err
+	}
+	step.Done("Found %d functions", len(d.Functions))
+	return image, d, nil
 }
 
 // sourceTar is the app's files as a tar: what git tracks or would (not

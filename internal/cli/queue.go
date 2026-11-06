@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
-	"text/tabwriter"
 
 	"github.com/spf13/cobra"
 )
@@ -79,31 +78,47 @@ ORDER BY id DESC LIMIT :lim;
 				return err
 			}
 			counts, jobs, _ := strings.Cut(out, "---\n")
-			w := tabwriter.NewWriter(g.out, 0, 0, 2, ' ', 0)
-			fmt.Fprintln(w, "QUEUE\tPENDING\tRUNNING\tFAILED\tDONE")
-			rows := 0
+			u := g.UI()
+			var rows [][]string
 			for _, line := range lines(counts) {
-				fmt.Fprintln(w, line)
-				rows++
+				c := strings.Split(line, "\t")
+				if len(c) == 5 {
+					c[0] = u.Accent(c[0])
+					if c[3] != "0" {
+						c[3] = u.Red(c[3])
+					}
+				}
+				rows = append(rows, c)
 			}
-			w.Flush()
-			if rows == 0 {
-				fmt.Fprintln(g.out, "(no jobs)")
+			if len(rows) == 0 {
+				u.Note("no jobs")
 				return nil
 			}
-			fmt.Fprintf(g.out, "\nLatest %s jobs:\n", state)
-			w = tabwriter.NewWriter(g.out, 0, 0, 2, ' ', 0)
-			fmt.Fprintln(w, "ID\tQUEUE\tSTATE\tATTEMPTS\tCREATED\tLAST ERROR")
-			n := 0
+			u.Table([]string{"Queue", "Pending", "Running", "Failed", "Done"}, rows)
+			u.Heading("Latest " + state + " jobs")
+			rows = nil
 			for _, line := range lines(jobs) {
-				fmt.Fprintln(w, line)
-				n++
+				c := strings.Split(line, "\t")
+				if len(c) == 6 {
+					switch c[2] {
+					case "failed":
+						c[2] = u.Red(c[2])
+					case "done":
+						c[2] = u.Green(c[2])
+					default:
+						c[2] = u.Amber(c[2])
+					}
+					c[4] = u.Dim(c[4])
+				}
+				rows = append(rows, c)
 			}
-			w.Flush()
-			if n == 0 {
-				fmt.Fprintln(g.out, "(none)")
-			} else if state == "failed" {
-				fmt.Fprintf(g.out, "\nRetry: mcloud queue retry %s <id>... (or --failed)\n", name)
+			if len(rows) == 0 {
+				u.Note("none")
+			} else {
+				u.Table([]string{"ID", "Queue", "State", "Attempts", "Created", "Last error"}, rows)
+				if state == "failed" {
+					u.Hint("Retry: mcloud queue retry %s <id>... (or --failed)", name)
+				}
 			}
 			return nil
 		},
@@ -173,9 +188,9 @@ SELECT count(*) FROM retried;
 				return err
 			}
 			n := strings.TrimSpace(out)
-			fmt.Fprintf(g.out, "%s failed job(s) back in the queue.\n", n)
+			g.UI().Success("%s failed job(s) back in the queue", n)
 			if len(ids) > 0 && n != strconv.Itoa(len(ids)) {
-				fmt.Fprintln(g.out, "Some of those IDs aren't failed jobs (or don't exist): see mcloud queue ls --state all.")
+				g.UI().Warn("some of those IDs aren't failed jobs (or don't exist): see mcloud queue ls --state all")
 			}
 			return nil
 		},

@@ -2,13 +2,12 @@ package cli
 
 import (
 	"fmt"
-	"io"
 	"strings"
-	"text/tabwriter"
 
 	"github.com/spf13/cobra"
 
 	"github.com/maxemiliang/maxcloud/internal/kube"
+	"github.com/maxemiliang/maxcloud/internal/ui"
 )
 
 func statusCmd(g *globals) *cobra.Command {
@@ -32,73 +31,78 @@ func statusCmd(g *globals) *cobra.Command {
 			if st.Entry == nil && !st.Applied && st.Services == nil && st.Workloads == nil {
 				return fmt.Errorf("no app %s on the cluster; `mcloud apps list` shows the registered ones", name)
 			}
-			printStatus(g.out, st)
+			printStatus(g.UI(), st)
 			return nil
 		},
 	}
 }
 
-func printStatus(w io.Writer, st *kube.Status) {
-	tw := tabwriter.NewWriter(w, 0, 4, 2, ' ', 0)
-	defer tw.Flush()
-
-	fmt.Fprintf(tw, "App\t%s\n", st.Name)
+func printStatus(u *ui.UI, st *kube.Status) {
+	kv := [][2]string{{"App", u.Bold(st.Name)}}
 	if st.Entry != nil {
-		fmt.Fprintf(tw, "Source\t%s\n", source(st.Entry))
+		kv = append(kv, [2]string{"Source", source(st.Entry)})
 	} else {
-		fmt.Fprintf(tw, "Source\tnot in the registry\n")
+		kv = append(kv, [2]string{"Source", u.Amber("not in the registry")})
 	}
 	if st.Source != nil && !st.Source.Ready() {
-		fmt.Fprintf(tw, "Fetch\t%s %s\n", mark(st.Source.Status, true), st.Source.Message)
+		kv = append(kv, [2]string{"Fetch", u.Mark(st.Source.Status, true) + " " + firstLine(st.Source.Message)})
 		if st.Source.NoRepoAccess() {
-			fmt.Fprintf(tw, "\tgive Flux's GitHub App access to the repo: %s\n", repoAccessURL(st))
+			kv = append(kv, [2]string{"", "give Flux's GitHub App access to the repo: " + u.Link(repoAccessURL(st))})
 		}
 	}
-	if st.Entry != nil && st.Entry.Direct() {
-		fmt.Fprintf(tw, "Deploy\tdirect: applied by mcloud deploy, nothing from git\n")
-	} else if st.Applied {
-		fmt.Fprintf(tw, "Deploy\t%s %s\n", mark(st.Deploy.Status, true), firstLine(st.Deploy.Message))
-	} else {
-		fmt.Fprintf(tw, "Deploy\t%s\n", "not created yet (Flux picks up a new entry within a minute)")
+	switch {
+	case st.Entry != nil && st.Entry.Direct():
+		kv = append(kv, [2]string{"Deploy", "direct: applied by mcloud deploy, nothing from git"})
+	case st.Applied:
+		kv = append(kv, [2]string{"Deploy", u.Mark(st.Deploy.Status, true) + " " + firstLine(st.Deploy.Message)})
+	default:
+		kv = append(kv, [2]string{"Deploy", u.Amber("not created yet") + " (Flux picks up a new entry within a minute)"})
 	}
 	if len(st.Quota) > 0 {
 		var q []string
 		for _, l := range st.Quota {
 			q = append(q, fmt.Sprintf("%s %s/%s", strings.TrimPrefix(l.Resource, "requests."), l.Used, l.Hard))
 		}
-		fmt.Fprintf(tw, "Quota\t%s\n", strings.Join(q, ", "))
+		kv = append(kv, [2]string{"Quota", strings.Join(q, ", ")})
 	}
+	u.KV(kv)
 
 	if len(st.Services) > 0 {
-		fmt.Fprintf(tw, "\nSERVICE\tURL\tREADY\tREVISION\tPODS\n")
+		var rows [][]string
 		for _, s := range st.Services {
-			url := s.URL
+			url := u.Link(s.URL)
 			if !s.Public {
-				url += " (private)"
+				url += u.Dim(" (private)")
 			}
-			ready := mark(s.Ready.Status, true)
+			ready := u.Mark(s.Ready.Status, true)
 			if !s.Ready.Ready() && s.Ready.Message != "" {
 				ready += " " + truncate(s.Ready.Message, 60)
 			}
-			fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%d\n", s.Name, url, ready, s.Revision, s.Pods)
+			rows = append(rows, []string{u.Accent(s.Name), url, ready, u.Dim(s.Revision), fmt.Sprint(s.Pods)})
 		}
+		u.Println()
+		u.Table([]string{"Service", "URL", "Ready", "Revision", "Pods"}, rows)
 	}
 	if len(st.Workloads) > 0 {
-		fmt.Fprintf(tw, "\nWORKLOAD\tKIND\tSTATE\n")
+		var rows [][]string
 		for _, wl := range st.Workloads {
-			fmt.Fprintf(tw, "%s\t%s\t%s %s\n", wl.Name, wl.Kind, mark(boolStatus(wl.Ready), true), wl.State)
+			rows = append(rows, []string{u.Accent(wl.Name), wl.Kind, u.Mark(boolStatus(wl.Ready), true) + " " + wl.State})
 		}
+		u.Println()
+		u.Table([]string{"Workload", "Kind", "State"}, rows)
 	}
 	if len(st.Databases) > 0 {
-		fmt.Fprintf(tw, "\nDATABASE\tINSTANCES\tSTATE\n")
+		var rows [][]string
 		for _, d := range st.Databases {
-			fmt.Fprintf(tw, "%s\t%s\t%s %s\n", d.Name, d.Ready, mark(boolStatus(d.Healthy), true), d.Phase)
+			rows = append(rows, []string{u.Accent(d.Name), d.Ready, u.Mark(boolStatus(d.Healthy), true) + " " + d.Phase})
 		}
+		u.Println()
+		u.Table([]string{"Database", "Instances", "State"}, rows)
 	}
 	if len(st.Problems) > 0 {
-		fmt.Fprintf(tw, "\nPROBLEMS\n")
+		u.Heading("Problems")
 		for _, p := range st.Problems {
-			fmt.Fprintf(tw, "  %s\n", p)
+			u.Printf("  %s %s", u.Red("•"), p)
 		}
 	}
 }
@@ -108,19 +112,6 @@ func boolStatus(b bool) string {
 		return "True"
 	}
 	return "False"
-}
-
-// mark is a one-character summary of a Ready condition.
-func mark(status string, exists bool) string {
-	switch {
-	case !exists:
-		return "-"
-	case status == "True":
-		return "✓"
-	case status == "False":
-		return "✗"
-	}
-	return "…"
 }
 
 // shortRev turns "refs/heads/main@sha1:2495009b8..." into "main@2495009".

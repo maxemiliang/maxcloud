@@ -13,6 +13,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/maxemiliang/maxcloud/internal/registry"
+	"github.com/maxemiliang/maxcloud/internal/ui"
 )
 
 // The files a new functions app starts with. Each is written only if it
@@ -187,9 +188,50 @@ its URLs. The first mcloud deploy registers the app from maxcloud.yaml.`,
 			if len(args) > 0 {
 				name = args[0]
 			}
-			e := registry.Entry{Name: name, Repo: "placeholder/x"}
-			if err := e.Validate(); err != nil {
+			validName := func(n string) error {
+				e := registry.Entry{Name: n, Repo: "placeholder/x"}
+				return e.Validate()
+			}
+			u := g.UI()
+			// On a terminal, ask for what wasn't passed.
+			if len(args) == 0 {
+				def := name
+				if validName(def) != nil {
+					def = ""
+				}
+				if name, err = u.Input("App name (its namespace, and part of its URLs)", def, validName); err != nil {
+					return err
+				}
+			}
+			_, hasGo := os.Stat("go.mod")
+			_, hasNode := os.Stat("package.json")
+			if !cmd.Flags().Changed("lang") && hasGo != nil && hasNode != nil {
+				if lang, err = u.Select("Language", []ui.Option{
+					{Label: "TypeScript  (@max-cloud/functions)", Value: "node"},
+					{Label: "Go          (github.com/maxemiliang/maxcloud/functions)", Value: "go"},
+				}, lang); err != nil {
+					return err
+				}
+			}
+			if !cmd.Flags().Changed("deploy") {
+				if deploy, err = u.Select("How it deploys", []ui.Option{
+					{Label: "GitOps  push to main; GitHub builds, Flux deploys (for anything that matters)", Value: "gitops"},
+					{Label: "Direct  mcloud deploy builds and applies from here, no git (experiments)", Value: "direct"},
+				}, deploy); err != nil {
+					return err
+				}
+			}
+			if err := validName(name); err != nil {
 				return fmt.Errorf("%w (pass a name: mcloud init NAME)", err)
+			}
+			if u.Fancy() && len(args) == 0 {
+				langName := map[string]string{"node": "TypeScript", "go": "Go"}[lang]
+				if hasGo == nil {
+					langName = "Go (go.mod)"
+				} else if hasNode == nil {
+					langName = "TypeScript (package.json)"
+				}
+				u.Success("%s %s", u.Bold(name), u.Dim("· "+langName+" · "+map[string]string{"gitops": "GitOps", "direct": "direct deploys"}[deploy]))
 			}
 
 			files := map[string]string{}
@@ -199,11 +241,11 @@ its URLs. The first mcloud deploy registers the app from maxcloud.yaml.`,
 			repo := originRepo()
 			if _, err := os.Stat("go.mod"); err == nil {
 				lang = "go"
-				fmt.Fprintln(g.errOut, "go.mod: register your functions in main and call functions.Start() (go get github.com/maxemiliang/maxcloud/functions)")
+				u.Note("go.mod: register your functions in main and call functions.Start() (go get github.com/maxemiliang/maxcloud/functions)")
 			} else if pkg, err := os.ReadFile("package.json"); err == nil {
 				lang = "node"
 				for _, w := range checkPackageJSON(pkg, latestSDK(cmd.Context())) {
-					fmt.Fprintf(g.errOut, "package.json: %s\n", w)
+					u.Warn("package.json: %s", w)
 				}
 				if strings.Contains(string(pkg), `"build"`) {
 					files["project.toml"] = starter["project.toml"]
@@ -241,45 +283,59 @@ its URLs. The first mcloud deploy registers the app from maxcloud.yaml.`,
 			if lang == "node" {
 				sdk = latestSDK(cmd.Context())
 			}
-			verb := "wrote  "
+			verb := "wrote"
 			if dryRun {
-				verb = "writes "
+				verb = "writes"
 			}
 			for _, p := range sortedKeys(files) {
 				if _, err := os.Stat(p); err == nil {
-					fmt.Fprintf(g.out, "  exists  %s\n", p)
+					u.Printf("  %s %s", u.Dim("·"), u.Dim(p+" (exists)"))
 					continue
 				}
-				if dryRun {
-					fmt.Fprintf(g.out, "  %s %s\n", verb, p)
-					continue
+				if !dryRun {
+					if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+						return err
+					}
+					content := strings.NewReplacer("%[1]s", name, "%[2]s", module, "%[3]s", sdk).Replace(files[p])
+					if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
+						return err
+					}
 				}
-				if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
-					return err
+				if u.Fancy() {
+					u.Printf("  %s %s", u.Green("+"), p)
+				} else {
+					u.Printf("  %s %s", verb, p)
 				}
-				content := strings.NewReplacer("%[1]s", name, "%[2]s", module, "%[3]s", sdk).Replace(files[p])
-				if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
-					return err
-				}
-				fmt.Fprintf(g.out, "  %s %s\n", verb, p)
 			}
 
-			fmt.Fprintf(g.out, "\nNext:\n")
+			var next [][2]string
 			if lang == "go" {
-				fmt.Fprintf(g.out, "  go get github.com/maxemiliang/maxcloud/functions@latest && go mod tidy\n")
+				next = append(next, [2]string{"go get github.com/maxemiliang/maxcloud/functions@latest && go mod tidy", ""})
 			} else {
-				fmt.Fprintf(g.out, "  npm install          # creates package-lock.json, which the build needs\n")
-			}
-			if deploy != "direct" {
-				fmt.Fprintf(g.out, "  git add -A && git commit -m \"maxcloud app\"\n")
+				next = append(next, [2]string{"npm install", "creates package-lock.json, which the build needs"})
+				next = append(next, [2]string{"mcloud dev", "run it here"})
 			}
 			if deploy == "direct" {
-				fmt.Fprintf(g.out, "  mcloud deploy        # registers the app the first time, builds here, applies, waits until it's ready\n")
+				next = append(next, [2]string{"mcloud deploy", "registers the app, builds here, applies"})
 			} else {
+				next = append(next, [2]string{`git add -A && git commit -m "maxcloud app"`, ""})
 				if repo == "" {
-					fmt.Fprintf(g.out, "  create its GitHub repo and push (gh repo create --source . --push)\n")
+					next = append(next, [2]string{"gh repo create --source . --push", "its GitHub repo"})
 				}
-				fmt.Fprintf(g.out, "  mcloud deploy        # registers the app the first time, pushes, follows the build and the rollout\n")
+				next = append(next, [2]string{"mcloud deploy", "registers the app, pushes, follows the build and rollout"})
+			}
+			u.Println()
+			u.Printf("%s %s %s", u.Green("●"), u.Bold(name), u.Dim("is ready to go. Next:"))
+			w := 0
+			for _, n := range next {
+				w = max(w, len(n[0]))
+			}
+			for _, n := range next {
+				line := "  " + u.Accent(n[0])
+				if n[1] != "" {
+					line += strings.Repeat(" ", w-len(n[0])+2) + u.Dim("# "+n[1])
+				}
+				u.Printf("%s", line)
 			}
 			return nil
 		},

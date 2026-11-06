@@ -60,6 +60,7 @@ namespace, with the source streamed to it.`,
 			}
 			ctx, cancel := context.WithTimeout(ctx, timeout)
 			defer cancel()
+			started := time.Now()
 			// The app's registry entry comes from maxcloud.yaml: registered on
 			// the first deploy, kept in line after that. No homelab commit.
 			created, err := g.syncApp(ctx, k, p, yes)
@@ -72,7 +73,7 @@ namespace, with the source streamed to it.`,
 						return err
 					}
 				}
-				return g.deployDirect(ctx, k, p)
+				return g.deployDirect(ctx, k, p, started)
 			}
 			repo := originRepo()
 			if repo == "" {
@@ -82,8 +83,9 @@ namespace, with the source streamed to it.`,
 			if err != nil {
 				return err
 			}
+			u := g.UI()
 			if dirty, _ := git("status", "--porcelain"); dirty != "" {
-				fmt.Fprintln(g.errOut, "warning: uncommitted changes aren't part of this deploy")
+				u.Warn("uncommitted changes aren't part of this deploy")
 			}
 			gh, err := g.github()
 			if err != nil {
@@ -91,12 +93,14 @@ namespace, with the source streamed to it.`,
 			}
 
 			if !noPush {
-				fmt.Fprintf(g.out, "Pushing %s to %s ...\n", branch, repo)
+				step := u.StepTail(fmt.Sprintf("Pushing %s to %s", branch, repo), 3)
 				push := exec.CommandContext(ctx, "git", "push", "origin", "HEAD:"+branch)
-				push.Stdout, push.Stderr = g.errOut, g.errOut
+				push.Stdout, push.Stderr = step.Writer(), step.Writer()
 				if err := push.Run(); err != nil {
+					step.Fail("git push failed")
 					return fmt.Errorf("git push: %w", err)
 				}
+				step.Done("Pushed %s to %s", branch, u.Accent(repo))
 			}
 			sha, err := git("rev-parse", "HEAD")
 			if err != nil {
@@ -113,7 +117,7 @@ namespace, with the source streamed to it.`,
 				return err
 			}
 			if run == nil {
-				fmt.Fprintln(g.out, "No deploy workflow ran for this commit (only deploy/ changed?); following Flux.")
+				u.Note("no deploy workflow ran for this commit (only deploy/ changed?); following Flux")
 			}
 
 			target, err := gh.Head(ctx, github.Repo(repo), branch)
@@ -123,7 +127,7 @@ namespace, with the source streamed to it.`,
 			if err := g.followFlux(ctx, k, name, target); err != nil {
 				return err
 			}
-			return g.followServices(ctx, k, name)
+			return g.followServices(ctx, k, name, started)
 		},
 	}
 	f := c.Flags()
@@ -151,11 +155,14 @@ func git(args ...string) (string, error) {
 // followRun waits for the deploy workflow run of sha to finish. Returns nil
 // if none starts within a minute (a push that only changed deploy/).
 func (g *globals) followRun(ctx context.Context, gh *github.Client, repo github.Repo, sha string, dispatched bool) (*github.Run, error) {
+	u := g.UI()
+	step := u.Step("Waiting for the deploy workflow")
 	var run *github.Run
 	appeared := time.Now()
 	for run == nil {
 		runs, err := gh.RunsFor(ctx, repo, sha)
 		if err != nil {
+			step.Fail("")
 			return nil, err
 		}
 		for i := range runs {
@@ -169,30 +176,34 @@ func (g *globals) followRun(ctx context.Context, gh *github.Client, repo github.
 			break
 		}
 		if time.Since(appeared) > time.Minute {
+			step.Skip("No deploy workflow ran")
 			return nil, nil
 		}
 		if err := sleep(ctx, 3*time.Second); err != nil {
+			step.Fail("")
 			return nil, err
 		}
 	}
-	fmt.Fprintf(g.out, "Build: %s\n", run.HTMLURL)
-	last := ""
+	step.Skip("Deploy workflow started")
+	u.Hint("%s", u.Link(run.HTMLURL))
+	step = u.Step("Building")
 	for {
-		if run.Status != last {
-			fmt.Fprintf(g.out, "  %s\n", strings.ReplaceAll(run.Status, "_", " "))
-			last = run.Status
-		}
+		step.Status("%s", strings.ReplaceAll(run.Status, "_", " "))
 		if run.Status == "completed" {
 			if run.Conclusion != "success" {
+				step.Fail("The deploy workflow ended %s", run.Conclusion)
 				return nil, fmt.Errorf("the deploy workflow ended %s: %s", run.Conclusion, run.HTMLURL)
 			}
+			step.Done("Built and committed the deploy")
 			return run, nil
 		}
 		if err := sleep(ctx, 5*time.Second); err != nil {
+			step.Fail("")
 			return nil, err
 		}
 		r, err := gh.Run(ctx, repo, run.ID)
 		if err != nil {
+			step.Fail("")
 			return nil, err
 		}
 		run = r
@@ -201,15 +212,16 @@ func (g *globals) followRun(ctx context.Context, gh *github.Client, repo github.
 
 // followFlux waits until the app's Kustomization has applied target.
 func (g *globals) followFlux(ctx context.Context, k *kube.Client, name, target string) error {
-	fmt.Fprintf(g.out, "Flux: applying %s ...\n", target[:7])
+	u := g.UI()
 	if err := k.RequestReconcile(ctx, name); err != nil {
-		fmt.Fprintf(g.errOut, "warning: can't ask Flux to fetch now (%v); it will within a minute\n", err)
+		u.Warn("can't ask Flux to fetch now (%v); it will within a minute", err)
 	}
-	last := ""
+	step := u.Step("Flux applying " + target[:7])
 	askedForAccess := false
 	for {
 		st, err := k.AppStatus(ctx, name)
 		if err != nil {
+			step.Fail("")
 			return err
 		}
 		// Flux can't read the repo: usually its GitHub App hasn't been given
@@ -217,23 +229,26 @@ func (g *globals) followFlux(ctx context.Context, k *kube.Client, name, target s
 		// again every minute.
 		if st.Source != nil && st.Source.NoRepoAccess() && !askedForAccess {
 			askedForAccess = true
-			u := repoAccessURL(st)
-			fmt.Fprintf(g.out, "  Flux can't read %s: %s\n", st.Entry.Repo, firstLine(st.Source.Message))
-			fmt.Fprintf(g.out, "  Give the homelab's Flux GitHub App access to it (Repository access, add %s):\n    %s\n  Waiting for Flux to fetch it ...\n", st.Entry.Repo, u)
-			openBrowser(u)
+			url := repoAccessURL(st)
+			u.Warn("Flux can't read %s: %s", st.Entry.Repo, firstLine(st.Source.Message))
+			u.Hint("Give the homelab's Flux GitHub App access to it (Repository access, add %s):", st.Entry.Repo)
+			u.Hint("%s", u.Link(url))
+			step.Status("waiting for Flux to fetch it")
+			openBrowser(url)
 		}
 		if !st.Applied {
+			step.Fail("")
 			return fmt.Errorf("%s has no Flux deploy on the cluster; register it with `mcloud apps create`", name)
 		}
 		if strings.HasSuffix(st.Revision, target) && st.Deploy.Ready() {
-			fmt.Fprintln(g.out, "  applied")
+			step.Done("Flux applied %s", target[:7])
 			return nil
 		}
-		if msg := firstLine(st.Deploy.Message); msg != last && !strings.Contains(msg, target) {
-			fmt.Fprintf(g.out, "  %s\n", msg)
-			last = msg
+		if msg := firstLine(st.Deploy.Message); !strings.Contains(msg, target) {
+			step.Status("%s", msg)
 		}
 		if err := sleep(ctx, 3*time.Second); err != nil {
+			step.Fail("Flux hasn't applied %s yet", target[:7])
 			return fmt.Errorf("Flux hasn't applied %s yet: %s", target[:7], st.Deploy.Message)
 		}
 	}
@@ -250,29 +265,41 @@ func repoAccessURL(st *kube.Status) string {
 
 // followServices waits for every Knative service to have its newest revision
 // ready, then prints the status.
-func (g *globals) followServices(ctx context.Context, k *kube.Client, name string) error {
+func (g *globals) followServices(ctx context.Context, k *kube.Client, name string, started time.Time) error {
+	u := g.UI()
+	step := u.Step("Rolling out")
 	for {
 		st, err := k.AppStatus(ctx, name)
 		if err != nil {
+			step.Fail("")
 			return err
 		}
-		pending := false
+		ready := 0
 		for _, s := range st.Services {
-			if !s.Ready.Ready() {
-				pending = true
-				if s.Ready.Status == "False" {
-					printStatus(g.out, st)
-					return fmt.Errorf("service %s isn't ready: %s%s", s.Name, s.Ready.Message, pullHint(st))
-				}
+			if s.Ready.Ready() {
+				ready++
+				continue
+			}
+			if s.Ready.Status == "False" {
+				step.Fail("Service %s isn't ready", s.Name)
+				u.Println()
+				printStatus(u, st)
+				return fmt.Errorf("service %s isn't ready: %s%s", s.Name, s.Ready.Message, pullHint(st))
 			}
 		}
-		if !pending {
-			fmt.Fprintln(g.out)
-			printStatus(g.out, st)
+		if ready == len(st.Services) {
+			step.Done("Rolled out")
+			u.Println()
+			u.Printf("%s %s %s", u.Green("●"), u.Bold(name), u.Dim("deployed in "+time.Since(started).Round(time.Second).String()))
+			u.Println()
+			printStatus(u, st)
 			return nil
 		}
+		step.Status("%d/%d services ready", ready, len(st.Services))
 		if err := sleep(ctx, 2*time.Second); err != nil {
-			printStatus(g.out, st)
+			step.Fail("Services not ready in time")
+			u.Println()
+			printStatus(u, st)
 			return errors.New("services not ready in time" + pullHint(st))
 		}
 	}

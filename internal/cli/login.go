@@ -21,6 +21,7 @@ import (
 
 	"github.com/maxemiliang/maxcloud/internal/auth"
 	"github.com/maxemiliang/maxcloud/internal/kube"
+	"github.com/maxemiliang/maxcloud/internal/ui"
 )
 
 type authFlags struct {
@@ -57,23 +58,25 @@ refreshed by itself; logging in again is needed when the refresh token
 expires (12 hours) or with mcloud logout.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			t, err := g.login(cmd.Context(), f.config(), browser, g.out)
+			u := g.UI()
+			t, err := g.loginUI(cmd.Context(), f.config(), browser, u)
 			if err != nil {
 				return err
 			}
-			fmt.Fprintf(g.out, "Logged in as %s (groups: %s) until %s.\n", t.User, strings.Join(t.Groups, ", "), t.Expiry.Local().Format("15:04"))
+			u.Success("Logged in as %s %s", u.Bold(t.User), u.Dim("(groups: "+strings.Join(t.Groups, ", ")+"; until "+t.Expiry.Local().Format("15:04")+")"))
 			own := kube.OwnKubeconfig()
 			_, existed := os.Stat(own)
 			path, err := g.writeKubeconfig(cmd.Context(), f, own, "homelab", false)
 			if err != nil {
-				fmt.Fprintf(g.errOut, "warning: no kubeconfig written: %v\n", err)
+				g.UI().Warn("no kubeconfig written: %v", err)
 				return nil
 			}
 			if existed != nil {
-				fmt.Fprintf(g.out, "Wrote %s; mcloud uses it from now on.\nFor kubectl: set -gx KUBECONFIG %s\n", path, path)
+				u.Success("Wrote %s; mcloud uses it from now on", u.Accent(path))
+				u.Hint("For kubectl: set -gx KUBECONFIG %s", path)
 			}
 			if used, why := kube.KubeconfigSource(g.kubeconfig); used != path {
-				fmt.Fprintf(g.errOut, "note: mcloud uses %s instead (%s)\n", firstNonEmpty(used, "the default kubeconfig"), why)
+				g.UI().Note("mcloud uses %s instead (%s)", firstNonEmpty(used, "the default kubeconfig"), why)
 			}
 			return nil
 		},
@@ -81,6 +84,45 @@ expires (12 hours) or with mcloud logout.`,
 	f.bind(c)
 	c.Flags().BoolVar(&browser, "browser", false, "log in in this machine's browser instead of with a device code")
 	return c
+}
+
+// loginUI is login for people: on a terminal, the code in a box and a
+// spinner while it waits for you.
+func (g *globals) loginUI(ctx context.Context, cfg auth.Config, browser bool, u *ui.UI) (*auth.Tokens, error) {
+	if !u.Fancy() {
+		return g.login(ctx, cfg, browser, g.out)
+	}
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
+	defer cancel()
+	var step *ui.Step
+	var t *auth.Tokens
+	var err error
+	if browser {
+		t, err = auth.BrowserLogin(ctx, cfg, func(url string) {
+			u.Box("Log in to the cluster", [][2]string{{"Open", u.Link(url)}})
+			openBrowser(url)
+			step = u.Step("Waiting for the login in your browser")
+		})
+	} else {
+		t, err = auth.DeviceLogin(ctx, cfg, func(url, code string) {
+			u.Box("Log in to the cluster", [][2]string{{"Open", u.Link(url)}, {"Code", u.Bold(code)}})
+			openBrowser(url)
+			step = u.Step("Waiting for you to approve it")
+		})
+	}
+	if err != nil {
+		if step != nil {
+			step.Fail("Not logged in")
+		}
+		return nil, err
+	}
+	if step != nil {
+		step.Done("Approved")
+	}
+	if err := auth.Save(cfg, t); err != nil {
+		return nil, err
+	}
+	return t, nil
 }
 
 // login runs a flow and caches the result. Messages go to w.
@@ -119,7 +161,7 @@ func logoutCmd(g *globals) *cobra.Command {
 			if err := auth.Forget(f.config()); err != nil {
 				return err
 			}
-			fmt.Fprintln(g.out, "Logged out (the cached tokens are gone).")
+			g.UI().Success("Logged out (the cached tokens are gone)")
 			return nil
 		},
 	}
@@ -199,7 +241,8 @@ For kubectl: set -gx KUBECONFIG <file>.`,
 			if err != nil {
 				return err
 			}
-			fmt.Fprintf(g.out, "Wrote %s.\nFor kubectl: set -gx KUBECONFIG %s\nThen: kubectl auth whoami\n", path, path)
+			g.UI().Success("Wrote %s", g.UI().Accent(path))
+			g.UI().Hint("For kubectl: set -gx KUBECONFIG %s, then kubectl auth whoami", path)
 			return nil
 		},
 	}
@@ -229,7 +272,7 @@ func (g *globals) writeKubeconfig(ctx context.Context, f authFlags, out, name st
 		if p == nil || (cl != nil && cl.Server == server && bytes.Equal(cl.CertificateAuthorityData, ca)) {
 			return out, nil
 		}
-		fmt.Fprintf(g.errOut, "The cluster's address or CA changed; rewriting %s.\n", out)
+		g.UI().Note("the cluster's address or CA changed; rewriting %s", out)
 	}
 	if p == nil {
 		// No discovery: copy the address and CA from your current kubeconfig

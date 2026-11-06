@@ -60,6 +60,7 @@ changes (node --watch); Go apps run with go run (restart it yourself).`,
 			if err != nil {
 				return err
 			}
+			u := g.UI()
 			ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
 			defer stop()
 
@@ -77,7 +78,7 @@ changes (node --watch); Go apps run with go run (restart it yourself).`,
 				env[k] = v
 			}
 			if len(dotenv) > 0 {
-				fmt.Fprintf(g.errOut, "secrets   %d from .env\n", len(dotenv))
+				u.KV([][2]string{{"secrets", fmt.Sprintf("%d from .env", len(dotenv))}})
 			}
 			needKube := secrets == "remote" || remoteBuckets || strings.HasPrefix(db, "branch:")
 			if needKube {
@@ -93,7 +94,7 @@ changes (node --watch); Go apps run with go run (restart it yourself).`,
 					for k, v := range s {
 						env[k] = v
 					}
-					fmt.Fprintf(g.errOut, "secrets   %d from the cluster\n", len(s))
+					u.KV([][2]string{{"secrets", fmt.Sprintf("%d from the cluster", len(s))}})
 				}
 				if remoteBuckets {
 					s, err := k.SecretData(ctx, p.App, functions.StorageSecret)
@@ -106,7 +107,7 @@ changes (node --watch); Go apps run with go run (restart it yourself).`,
 					for k, v := range s {
 						env[k] = v
 					}
-					fmt.Fprintf(g.errOut, "buckets   the app's real ones (%s)\n", s["AWS_ENDPOINT_URL_S3"])
+					u.KV([][2]string{{"buckets", u.Amber("the app's real ones") + " (" + s["AWS_ENDPOINT_URL_S3"] + ")"}})
 				}
 				if branch, ok := strings.CutPrefix(db, "branch:"); ok {
 					url, err := k.ProxyDatabase(ctx, p.App, dbCluster(branch), 0)
@@ -114,7 +115,7 @@ changes (node --watch); Go apps run with go run (restart it yourself).`,
 						return err
 					}
 					env["DATABASE_URL"] = url
-					fmt.Fprintf(g.errOut, "database  branch %s, through a port-forward\n", branch)
+					u.KV([][2]string{{"database", "branch " + u.Accent(branch) + ", through a port-forward"}})
 				}
 			}
 			if db == "" {
@@ -131,7 +132,7 @@ changes (node --watch); Go apps run with go run (restart it yourself).`,
 				}
 				env["DATABASE_URL"] = url
 			case db == "none":
-				fmt.Fprintln(g.errOut, "database  none (--db local for a local Postgres)")
+				u.KV([][2]string{{"database", "none " + u.Dim("(--db local for a local Postgres)")}})
 			case strings.HasPrefix(db, "branch:"):
 			default:
 				return fmt.Errorf("--db %q: local, branch:NAME or none", db)
@@ -205,24 +206,29 @@ func (g *globals) devPostgres(ctx context.Context, app string) (string, error) {
 		return "", errors.New("--db local needs docker (or --db branch:NAME, or --db none)")
 	}
 	name := "mcloud-dev-" + app
+	step := g.UI().Step("Starting Postgres " + name)
+	fail := func(err error) (string, error) {
+		step.Fail("Postgres didn't start")
+		return "", err
+	}
 	state, _ := cmdOutput(exec.CommandContext(ctx, "docker", "inspect", "-f", "{{.State.Running}}", name))
 	switch state {
 	case "true":
 	case "false":
 		if _, err := cmdOutput(exec.CommandContext(ctx, "docker", "start", name)); err != nil {
-			return "", err
+			return fail(err)
 		}
 	default:
-		fmt.Fprintf(g.errOut, "database  starting %s (%s) ...\n", name, devPostgresImage)
+		step.Status("a new container (%s)", devPostgresImage)
 		if _, err := cmdOutput(exec.CommandContext(ctx, "docker", "run", "-d", "--name", name,
 			"-p", "127.0.0.1::5432", "-e", "POSTGRES_PASSWORD=dev", "-e", "POSTGRES_DB=app",
 			"-v", name+":/var/lib/postgresql", devPostgresImage)); err != nil {
-			return "", fmt.Errorf("starting Postgres: %w", err)
+			return fail(fmt.Errorf("starting Postgres: %w", err))
 		}
 	}
 	out, err := cmdOutput(exec.CommandContext(ctx, "docker", "port", name, "5432/tcp"))
 	if err != nil {
-		return "", err
+		return fail(err)
 	}
 	hostPort := strings.Fields(out)[0]
 	for i := 0; ; i++ {
@@ -230,13 +236,14 @@ func (g *globals) devPostgres(ctx context.Context, app string) (string, error) {
 			break
 		}
 		if i > 60 {
-			return "", fmt.Errorf("Postgres in %s isn't ready after a minute: docker logs %s", name, name)
+			return fail(fmt.Errorf("Postgres in %s isn't ready after a minute: docker logs %s", name, name))
 		}
 		if err := sleep(ctx, time.Second); err != nil {
-			return "", err
+			return fail(err)
 		}
 	}
-	fmt.Fprintf(g.errOut, "database  local Postgres %s at %s (docker rm -f %s; docker volume rm %s to start over)\n", name, hostPort, name, name)
+	step.Done("Postgres %s is up", name)
+	g.UI().KV([][2]string{{"database", "local Postgres " + g.UI().Accent(name) + " at " + hostPort + g.UI().Dim(" (docker rm -f "+name+"; docker volume rm "+name+" to start over)")}})
 	return "postgres://postgres:dev@" + hostPort + "/app?sslmode=disable", nil
 }
 

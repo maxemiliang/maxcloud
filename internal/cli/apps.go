@@ -7,7 +7,6 @@ import (
 	"slices"
 	"sort"
 	"strings"
-	"text/tabwriter"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -43,19 +42,20 @@ func appsListCmd(g *globals) *cobra.Command {
 				return err
 			}
 			if len(apps) == 0 {
-				fmt.Fprintln(g.out, "No apps registered. Add one with `mcloud apps create`.")
+				g.UI().Note("no apps registered: mcloud deploy in an app's repo registers it")
 				return nil
 			}
-			tw := tabwriter.NewWriter(g.out, 0, 4, 2, ' ', 0)
-			fmt.Fprintln(tw, "NAME\tSOURCE\tREGISTERED\tDEPLOYED\tREVISION\tMESSAGE")
+			u := g.UI()
+			var rows [][]string
 			for _, a := range apps {
 				where := "cluster"
 				if a.InGit {
 					where = "homelab git"
 				}
-				fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n", a.Name, source(a.Entry), where, mark(a.Deploy.Status, a.Applied), shortRev(a.Revision), truncate(a.Deploy.Message, 60))
+				rows = append(rows, []string{u.Accent(a.Name), source(a.Entry), u.Dim(where), u.Mark(a.Deploy.Status, a.Applied), u.Dim(shortRev(a.Revision)), truncate(a.Deploy.Message, 60)})
 			}
-			return tw.Flush()
+			u.Table([]string{"Name", "Source", "Registered", "Deployed", "Revision", "Message"}, rows)
+			return nil
 		},
 	}
 }
@@ -162,7 +162,7 @@ func (g *globals) createApp(ctx context.Context, e registry.Entry, cf confirmFla
 		}
 	}
 
-	fmt.Fprintf(g.out, "Registers %s:\n\n%s\n", e.Name, indent(string(e.Render())))
+	g.UI().Printf("Registers %s:\n\n%s\n", g.UI().Bold(e.Name), g.UI().Dim(indent(string(e.Render()))))
 	if cf.dryRun {
 		return nil
 	}
@@ -175,12 +175,10 @@ func (g *globals) createApp(ctx context.Context, e registry.Entry, cf confirmFla
 	if err := k.PutRegistryEntry(ctx, &e); err != nil {
 		return err
 	}
-	fmt.Fprintf(g.out, "Registered %s.\n", e.Name)
+	g.UI().Success("Registered %s", g.UI().Bold(e.Name))
 	if e.Repo != "" && !e.Direct() {
-		fmt.Fprintf(g.out, `
-For Flux to read %[1]s, the homelab's Flux GitHub App needs access to it:
-GitHub, Settings, Applications, the Flux app, Configure, Repository access.
-`, e.Repo)
+		g.UI().Hint("For Flux to read %s, the homelab's Flux GitHub App needs access to it:", e.Repo)
+		g.UI().Hint("GitHub, Settings, Applications, the Flux app, Configure, Repository access.")
 	}
 	if cf.wait {
 		if e.Direct() {
@@ -188,7 +186,7 @@ GitHub, Settings, Applications, the Flux app, Configure, Repository access.
 		}
 		return g.waitDeployed(ctx, e.Name, cf.timeout)
 	}
-	fmt.Fprintf(g.out, "\nFollow it with `mcloud status %s`.\n", e.Name)
+	g.UI().Hint("Follow it with `mcloud status %s`.", e.Name)
 	return nil
 }
 
@@ -300,21 +298,22 @@ func diffEntries(a, b *registry.Entry) []string {
 func (g *globals) changeApp(ctx context.Context, k *kube.Client, old, e *registry.Entry, cf confirmFlags) error {
 	diff := diffEntries(old, e)
 	if len(diff) == 0 {
-		fmt.Fprintln(g.out, "Nothing changes.")
+		g.UI().Note("nothing changes")
 		return nil
 	}
-	fmt.Fprintf(g.out, "Changes %s:\n", e.Name)
+	g.UI().Printf("Changes %s:", g.UI().Bold(e.Name))
 	for _, d := range diff {
-		fmt.Fprintf(g.out, "  %s\n", d)
+		g.UI().Printf("  %s", d)
 	}
 	if old.Direct() != e.Direct() {
-		fmt.Fprintln(g.out)
+		g.UI().Println()
 		g.explainSwitch(e)
 	}
 	if old.DB == "true" && e.DB != "true" {
-		fmt.Fprintln(g.out, "\nRemoving the database deletes it; its backups stay in Object Storage.")
+		g.UI().Println()
+		g.UI().Warn("removing the database deletes it; its backups stay in Object Storage")
 	}
-	fmt.Fprintln(g.out)
+	g.UI().Println()
 	if cf.dryRun {
 		return nil
 	}
@@ -327,18 +326,17 @@ func (g *globals) changeApp(ctx context.Context, k *kube.Client, old, e *registr
 	if err := k.PutRegistryEntry(ctx, e); err != nil {
 		return err
 	}
-	fmt.Fprintln(g.out, "Changed.")
+	g.UI().Success("Changed %s", g.UI().Bold(e.Name))
 	return nil
 }
 
 // explainSwitch says what switching between gitops and direct does.
 func (g *globals) explainSwitch(e *registry.Entry) {
-	fmt.Fprintf(g.out, "Switching how %s deploys replaces its workloads: ", e.Name)
+	what := "Flux applies the app from git and takes over objects of the same name; delete any that mcloud applied and git doesn't have."
 	if e.Direct() {
-		fmt.Fprintln(g.out, "Flux removes everything it applied from the app's repo, and the app is down until `mcloud deploy` applies it again.")
-	} else {
-		fmt.Fprintln(g.out, "Flux applies the app from git and takes over objects of the same name; delete any that mcloud applied and git doesn't have.")
+		what = "Flux removes everything it applied from the app's repo, and the app is down until `mcloud deploy` applies it again."
 	}
+	g.UI().Warn("switching how %s deploys replaces its workloads: %s", e.Name, what)
 }
 
 // entryKeys maps mcloud apps set's flags to registry keys, for the fields
@@ -372,15 +370,17 @@ one.`,
 			if cur.InGit {
 				return fmt.Errorf("%s is registered in the homelab repo: remove apps/maxcloud/apps/%s.yaml there", name, name)
 			}
-			fmt.Fprintf(g.out, "Removes %s from the registry, which then deletes namespace %s and everything in it", name, name)
+			msg := fmt.Sprintf("Removes %s from the registry, which then deletes namespace %s and everything in it", name, name)
 			if st, err := k.AppStatus(ctx, name); err == nil && len(st.Databases) > 0 {
 				var dbs []string
 				for _, d := range st.Databases {
 					dbs = append(dbs, d.Name)
 				}
-				fmt.Fprintf(g.out, ", including the database(s) %s", strings.Join(dbs, ", "))
+				msg += fmt.Sprintf(", including the database(s) %s", strings.Join(dbs, ", "))
 			}
-			fmt.Fprint(g.out, ".\nBuckets and database backups in Object Storage are kept (still billed).\n\n")
+			g.UI().Printf("%s.", g.UI().Red(msg))
+			g.UI().Hint("Buckets and database backups in Object Storage are kept (still billed).")
+			g.UI().Println()
 			if cf.dryRun {
 				return nil
 			}
@@ -393,7 +393,7 @@ one.`,
 			if err := k.DeleteRegistryEntry(ctx, name); err != nil {
 				return err
 			}
-			fmt.Fprintf(g.out, "Removed %s.\n", name)
+			g.UI().Success("Removed %s", name)
 			return nil
 		},
 	}
@@ -407,7 +407,7 @@ one.`,
 func (g *globals) checkNamespace(ctx context.Context, name string) error {
 	k, err := g.kube()
 	if err != nil {
-		fmt.Fprintf(g.errOut, "warning: can't check the cluster for an existing namespace %s: %v\n", name, err)
+		g.UI().Warn("can't check the cluster for an existing namespace %s: %v", name, err)
 		return nil
 	}
 	ns, err := k.Core.CoreV1().Namespaces().Get(ctx, name, metav1.GetOptions{})
@@ -426,10 +426,10 @@ func (g *globals) checkRepo(ctx context.Context, gh *github.Client, e *registry.
 	ok, err := gh.RepoExists(ctx, github.Repo(e.Repo))
 	switch {
 	case err != nil:
-		fmt.Fprintf(g.errOut, "warning: can't check %s: %v\n", e.Repo, err)
+		g.UI().Warn("can't check %s: %v", e.Repo, err)
 		return
 	case !ok:
-		fmt.Fprintf(g.errOut, "warning: %s doesn't exist, or your GitHub login can't see it\n", e.Repo)
+		g.UI().Warn("%s doesn't exist, or your GitHub login can't see it", e.Repo)
 		return
 	}
 	p, b := e.Path, e.Branch
@@ -440,7 +440,7 @@ func (g *globals) checkRepo(ctx context.Context, gh *github.Client, e *registry.
 		b = registry.DefaultBranch
 	}
 	if ok, err := gh.Exists(ctx, github.Repo(e.Repo), b, p); err == nil && !ok {
-		fmt.Fprintf(g.errOut, "warning: %s has no %s on %s yet; Flux reports the app as failing until it does\n", e.Repo, p, b)
+		g.UI().Warn("%s has no %s on %s yet; Flux reports the app as failing until it does", e.Repo, p, b)
 	}
 }
 
@@ -451,29 +451,27 @@ func (g *globals) waitDeployed(ctx context.Context, name string, timeout time.Du
 	}
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	fmt.Fprintf(g.out, "\nWaiting for Flux to deploy %s ...\n", name)
-	last := ""
+	step := g.UI().Step("Waiting for Flux to deploy " + name)
 	for {
 		st, err := k.AppStatus(ctx, name)
 		if err == nil {
 			msg := "not registered on the cluster yet"
 			if st.Applied {
-				msg = st.Deploy.Message
+				msg = firstLine(st.Deploy.Message)
 				if msg == "" {
 					msg = "waiting for the first reconcile"
 				}
 			}
-			if msg != last {
-				fmt.Fprintf(g.out, "  %s\n", msg)
-				last = msg
-			}
+			step.Status("%s", msg)
 			if st.Applied && st.Deploy.Ready() {
-				fmt.Fprintf(g.out, "Deployed. `mcloud status %s` shows its services.\n", name)
+				step.Done("Deployed %s", name)
+				g.UI().Hint("`mcloud status %s` shows its services.", name)
 				return nil
 			}
 		}
 		select {
 		case <-ctx.Done():
+			step.Fail("Not deployed after %s", timeout)
 			return fmt.Errorf("not deployed after %s; see `mcloud status %s`", timeout, name)
 		case <-time.After(3 * time.Second):
 		}
@@ -489,14 +487,15 @@ func (g *globals) waitNamespace(ctx context.Context, name string, timeout time.D
 	}
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	fmt.Fprintf(g.out, "\nWaiting for Flux to create namespace %s ...\n", name)
+	step := g.UI().Step("Waiting for Flux to create namespace " + name)
 	for {
 		if ok, err := k.NamespaceExists(ctx, name); err == nil && ok {
-			fmt.Fprintf(g.out, "Ready for `mcloud deploy`.\n")
+			step.Done("Namespace %s is ready", name)
 			return nil
 		}
 		select {
 		case <-ctx.Done():
+			step.Fail("")
 			return fmt.Errorf("no namespace %s after %s; see `mcloud apps list`", name, timeout)
 		case <-time.After(3 * time.Second):
 		}

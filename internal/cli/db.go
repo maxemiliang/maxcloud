@@ -10,7 +10,6 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
-	"text/tabwriter"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -102,7 +101,7 @@ does that by itself).`,
 			if err != nil {
 				return err
 			}
-			fmt.Fprintf(g.errOut, "Forwarding to %s's database%s. Ctrl-C stops it.\n", name, map[bool]string{true: " branch " + branch}[branch != ""])
+			g.UI().Success("Forwarding to %s's database%s %s", g.UI().Bold(name), map[bool]string{true: " branch " + branch}[branch != ""], g.UI().Dim("(Ctrl-C stops it)"))
 			fmt.Fprintf(g.out, "DATABASE_URL=%s\n", url)
 			<-ctx.Done()
 			return nil
@@ -151,7 +150,7 @@ mcloud db branch create <name> --at TIME.`,
 			if db == nil {
 				return fmt.Errorf("app %s has no database run by maxcloud (db: true in its maxcloud.yaml)", name)
 			}
-			fmt.Fprintf(g.out, "This takes %s's database down and restores it to %s (%s).\nEverything written since then will be gone from it.\n",
+			g.UI().Warn("this takes %s's database down and restores it to %s (%s); everything written since then will be gone from it",
 				name, t.Local().Format("2006-01-02 15:04:05 MST"), t.UTC().Format(time.RFC3339))
 			if !yes {
 				ok, err := g.typeToConfirm(fmt.Sprintf("Type the app's name (%s) to restore: ", name), name)
@@ -162,9 +161,9 @@ mcloud db branch create <name> --at TIME.`,
 			if err := k.AnnotateDatabase(cmd.Context(), name, kube.RestoreToAnnotation, t.UTC().Format(time.RFC3339)); err != nil {
 				return err
 			}
-			fmt.Fprintln(g.out, "Restore requested.")
+			g.UI().Success("Restore requested")
 			if !wait {
-				fmt.Fprintf(g.out, "Follow it: kubectl get maxcloud -n %s\n", name)
+				g.UI().Hint("Follow it: kubectl get maxcloud -n %s", name)
 				return nil
 			}
 			return g.waitDatabase(cmd.Context(), k, name, db.Generation)
@@ -212,7 +211,7 @@ generation.`,
 			if err := k.AnnotateDatabase(cmd.Context(), name, kube.RecoverFromAnnotation, strconv.FormatInt(from, 10)); err != nil {
 				return err
 			}
-			fmt.Fprintf(g.out, "Asked to restore generation %d.\n", from)
+			g.UI().Success("Asked to restore generation %d", from)
 			return g.waitDatabase(cmd.Context(), k, name, db.Generation)
 		},
 	}
@@ -226,30 +225,30 @@ generation.`,
 func (g *globals) waitDatabase(ctx context.Context, k *kube.Client, app string, before int64) error {
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Minute)
 	defer cancel()
-	last := ""
+	step := g.UI().Step("Restoring " + app + "'s database")
 	for {
 		db, err := k.GetDatabase(ctx, app)
 		if err != nil {
+			step.Fail("")
 			return err
 		}
 		if db != nil {
-			line := fmt.Sprintf("%s, generation %d: %s", db.Phase, db.Generation, db.Ready)
-			if line != last {
-				fmt.Fprintln(g.out, "  "+line)
-				last = line
-			}
+			step.Status("%s, generation %d: %s", db.Phase, db.Generation, db.Ready)
 			switch {
 			case db.Phase == "Ready" && db.Generation > before:
-				fmt.Fprintf(g.out, "Done: %s\n", db.Restore)
+				step.Done("Restored: %s", db.Restore)
 				return nil
 			case db.Phase == "Blocked":
+				step.Fail("Blocked")
 				return fmt.Errorf("blocked: %s", db.Blocked)
 			case strings.Contains(db.Restore, "was left as it was"):
+				step.Fail("Refused")
 				return errors.New(db.Restore)
 			}
 		}
 		select {
 		case <-ctx.Done():
+			step.Fail("Still not back after 15 minutes")
 			return fmt.Errorf("still not back after 15 minutes: kubectl get maxcloud,cluster,backup -n %s", app)
 		case <-time.After(5 * time.Second):
 		}
@@ -304,32 +303,38 @@ func dbBranchCreateCmd(g *globals) *cobra.Command {
 			if err := k.CreateBranch(cmd.Context(), name, branch, t); err != nil {
 				return err
 			}
-			fmt.Fprintf(g.out, "Branch %s of %s's database requested (Cluster db-%s).\n", branch, name, branch)
+			u := g.UI()
 			if !wait {
+				u.Success("Branch %s of %s's database requested (Cluster db-%s)", branch, name, branch)
 				return nil
 			}
-			fmt.Fprintln(g.out, "Restoring it from the backups takes a few minutes (a recovery Job, then Postgres starts).")
 			ctx, cancel := context.WithTimeout(cmd.Context(), 15*time.Minute)
 			defer cancel()
-			last := ""
+			step := u.Step("Branching " + name + "'s database as " + branch)
+			step.Status("restoring from the backups: a recovery Job, then Postgres starts")
 			for {
 				b, err := k.GetBranch(ctx, name, branch)
 				if err != nil {
+					step.Fail("")
 					return err
 				}
-				if line := strings.TrimSpace(b.Phase + ": " + b.Message); b.Phase != "" && line != last {
-					fmt.Fprintf(g.out, "  %s %s\n", time.Now().Format("15:04:05"), line)
-					last = line
+				if b.Phase != "" {
+					step.Status("%s", strings.TrimSpace(b.Phase+": "+b.Message))
 				}
 				switch b.Phase {
 				case "Ready":
-					fmt.Fprintf(g.out, "Ready. mcloud db psql --branch %[1]s opens it; mcloud db proxy --branch %[1]s gives a local URL; mcloud dev --db branch:%[1]s runs the app on it.\n", branch)
+					step.Done("Branch %s is ready", u.Accent(branch))
+					u.Hint("mcloud db psql --branch %s      open it", branch)
+					u.Hint("mcloud db proxy --branch %s     a local DATABASE_URL", branch)
+					u.Hint("mcloud dev --db branch:%s       run the app on it", branch)
 					return nil
 				case "Failed":
+					step.Fail("Branch %s failed", branch)
 					return errors.New(b.Message)
 				}
 				select {
 				case <-ctx.Done():
+					step.Fail("Not ready after 15 minutes")
 					return fmt.Errorf("not ready after 15 minutes: kubectl get maxcloud,cluster -n %s", name)
 				case <-time.After(5 * time.Second):
 				}
@@ -360,19 +365,29 @@ func dbBranchListCmd(g *globals) *cobra.Command {
 				return err
 			}
 			if len(bs) == 0 {
-				fmt.Fprintln(g.out, "(no branches)")
+				g.UI().Note("no branches")
 				return nil
 			}
-			w := tabwriter.NewWriter(g.out, 0, 0, 2, ' ', 0)
-			fmt.Fprintln(w, "NAME\tPHASE\tCLUSTER\tAT\tFROM GEN\tAGE")
+			u := g.UI()
+			var rows [][]string
 			for _, b := range bs {
 				at := b.At
 				if at == "" {
 					at = "latest"
 				}
-				fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%d\t%s\n", b.Name, b.Phase, b.Cluster, at, b.FromGeneration, time.Since(b.Created).Round(time.Minute))
+				phase := b.Phase
+				switch phase {
+				case "Ready":
+					phase = u.Green(phase)
+				case "Failed":
+					phase = u.Red(phase)
+				default:
+					phase = u.Amber(phase)
+				}
+				rows = append(rows, []string{u.Accent(b.Name), phase, b.Cluster, at, fmt.Sprint(b.FromGeneration), u.Dim(time.Since(b.Created).Round(time.Minute).String())})
 			}
-			return w.Flush()
+			u.Table([]string{"Name", "Phase", "Cluster", "At", "From gen", "Age"}, rows)
+			return nil
 		},
 	}
 }
@@ -394,7 +409,7 @@ func dbBranchDeleteCmd(g *globals) *cobra.Command {
 			if err := k.DeleteBranch(cmd.Context(), name, branch); err != nil {
 				return err
 			}
-			fmt.Fprintf(g.out, "Deleted branch %s (and Cluster db-%s).\n", branch, branch)
+			g.UI().Success("Deleted branch %s (and Cluster db-%s)", branch, branch)
 			return nil
 		},
 	}

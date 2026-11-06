@@ -94,7 +94,7 @@ func (g *globals) syncApp(ctx context.Context, k *kube.Client, p *project, yes b
 		return false, err
 	}
 	if cur != nil && cur.InGit {
-		fmt.Fprintf(g.errOut, "note: %s is registered in the homelab repo; maxcloud.yaml's settings there win over this file\n", p.App)
+		g.UI().Note("%s is registered in the homelab repo; maxcloud.yaml's settings there win over this file", p.App)
 		return false, nil
 	}
 	var base *registry.Entry
@@ -109,15 +109,15 @@ func (g *globals) syncApp(ctx context.Context, k *kube.Client, p *project, yes b
 		if err := g.checkNamespace(ctx, e.Name); err != nil {
 			return false, err
 		}
-		fmt.Fprintf(g.out, "Registering %s (%s) ...\n", e.Name, source(&e))
 		if err := k.PutRegistryEntry(ctx, &e); err != nil {
 			return false, err
 		}
+		g.UI().Success("Registered %s %s", g.UI().Bold(e.Name), g.UI().Dim("("+source(&e)+")"))
 		if err := k.SetSyncedFields(ctx, e.Name, p.syncedFields()); err != nil {
 			return false, err
 		}
 		if !e.Direct() {
-			fmt.Fprintf(g.out, "For Flux to read %s, the homelab's Flux GitHub App needs access to it (GitHub, Settings, Applications, the Flux app, Repository access).\n", e.Repo)
+			g.UI().Hint("For Flux to read %s, the homelab's Flux GitHub App needs access to it (GitHub, Settings, Applications, the Flux app, Repository access).", e.Repo)
 		}
 		return true, nil
 	}
@@ -130,7 +130,10 @@ func (g *globals) syncApp(ctx context.Context, k *kube.Client, p *project, yes b
 	if len(diff) == 0 {
 		return false, nil
 	}
-	fmt.Fprintf(g.out, "Updating %s from %s: %s\n", e.Name, ProjectFile, strings.Join(diff, ", "))
+	g.UI().Printf("%s Updating %s from %s", g.UI().Accent("↻"), g.UI().Bold(e.Name), ProjectFile)
+	for _, d := range diff {
+		g.UI().Hint("%s", d)
+	}
 	if base.Direct() != e.Direct() {
 		g.explainSwitch(&e)
 		if !yes {

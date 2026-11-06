@@ -25,16 +25,31 @@ func doctorCmd(g *globals) *cobra.Command {
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			ctx, cancel := context.WithTimeout(cmd.Context(), time.Minute)
 			defer cancel()
+			u := g.UI()
 			bad := 0
 			line := func(ok bool, what, detail string) {
-				mark := "ok  "
 				if !ok {
-					mark = "FIX "
 					bad++
+					if u.Fancy() {
+						u.Printf("%s %-10s %s", u.Red("✗"), what, u.Red(detail))
+					} else {
+						u.Printf("FIX  %-10s %s", what, detail)
+					}
+					return
 				}
-				fmt.Fprintf(g.out, "%s %-10s %s\n", mark, what, detail)
+				if u.Fancy() {
+					u.Printf("%s %-10s %s", u.Green("✓"), what, detail)
+				} else {
+					u.Printf("ok   %-10s %s", what, detail)
+				}
 			}
-			note := func(what, detail string) { fmt.Fprintf(g.out, "--   %-10s %s\n", what, detail) }
+			note := func(what, detail string) {
+				if u.Fancy() {
+					u.Printf("%s %-10s %s", u.Dim("·"), what, u.Dim(detail))
+				} else {
+					u.Printf("--   %-10s %s", what, detail)
+				}
+			}
 
 			// The platform, and whether this mcloud is new enough for it.
 			p, err := discover(ctx)
@@ -108,7 +123,7 @@ func doctorCmd(g *globals) *cobra.Command {
 				}
 			}
 			if bad > 0 {
-				return errors.New("some things need fixing (FIX above)")
+				return errors.New("some things need fixing (marked above)")
 			}
 			return nil
 		},

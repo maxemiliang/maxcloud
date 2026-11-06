@@ -2,7 +2,7 @@
 package cli
 
 import (
-	"bufio"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -10,7 +10,6 @@ import (
 	"os"
 	"path/filepath"
 	"runtime/debug"
-	"strings"
 
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
@@ -18,6 +17,7 @@ import (
 
 	"github.com/maxemiliang/maxcloud/internal/github"
 	"github.com/maxemiliang/maxcloud/internal/kube"
+	"github.com/maxemiliang/maxcloud/internal/ui"
 )
 
 // Version is set at build time (-ldflags "-X ...cli.Version=v0.1.0").
@@ -31,6 +31,8 @@ type globals struct {
 	kubeconfig  string
 	kubeContext string
 	buildMode   string // mcloud deploy --build: auto, local, cluster
+	plain       bool   // --plain: no colors, spinners or prompts
+	ui          *ui.UI
 
 	in     io.Reader
 	out    io.Writer
@@ -44,9 +46,22 @@ func envOr(name, def string) string {
 	return def
 }
 
+// Run runs mcloud with these arguments and returns its exit code.
+func Run(ctx context.Context) int {
+	g := &globals{in: os.Stdin, out: os.Stdout, errOut: os.Stderr}
+	if err := newRoot(g).ExecuteContext(ctx); err != nil {
+		g.UI().Error(err)
+		return 1
+	}
+	return 0
+}
+
 // New builds the root command.
 func New() *cobra.Command {
-	g := &globals{in: os.Stdin, out: os.Stdout, errOut: os.Stderr}
+	return newRoot(&globals{in: os.Stdin, out: os.Stdout, errOut: os.Stderr})
+}
+
+func newRoot(g *globals) *cobra.Command {
 	root := &cobra.Command{
 		Use:   "mcloud",
 		Short: "Deploy and run apps on maxcloud, the homelab's run platform",
@@ -70,6 +85,7 @@ $GH_TOKEN, else the GitHub CLI's login.`,
 	f := root.PersistentFlags()
 	f.StringVar(&g.kubeconfig, "kubeconfig", "", "kubeconfig file (default $MCLOUD_KUBECONFIG, else mcloud login's, else $KUBECONFIG)")
 	f.StringVar(&g.kubeContext, "context", "", "kubeconfig context")
+	f.BoolVar(&g.plain, "plain", false, "plain output: no colors, spinners or interactive prompts ($MCLOUD_PLAIN; also off in CI, pipes, NO_COLOR)")
 
 	root.AddCommand(initCmd(g), deployCmd(g), appsCmd(g), statusCmd(g), logsCmd(g), generateCmd(g), buildCmd(g), devCmd(g), queueCmd(g), secretsCmd(g), dbCmd(g), loginCmd(g), logoutCmd(g), credentialCmd(g), kubeconfigCmd(g), doctorCmd(g), runCmd(g), callCmd(g))
 	return root
@@ -194,30 +210,19 @@ func appName(args []string) (string, error) {
 }
 
 // confirm asks a yes/no question on the terminal.
-func (g *globals) confirm(question string) (bool, error) {
-	if !isTerminal(g.in) {
-		return false, errors.New("not a terminal: pass --yes to go ahead")
-	}
-	fmt.Fprintf(g.out, "%s [y/N] ", question)
-	ans, err := bufio.NewReader(g.in).ReadString('\n')
-	if err != nil && !errors.Is(err, io.EOF) {
-		return false, err
-	}
-	ans = strings.ToLower(strings.TrimSpace(ans))
-	return ans == "y" || ans == "yes", nil
-}
+func (g *globals) confirm(question string) (bool, error) { return g.UI().Confirm(question) }
 
 // typeToConfirm makes the user type want.
 func (g *globals) typeToConfirm(prompt, want string) (bool, error) {
-	if !isTerminal(g.in) {
-		return false, errors.New("not a terminal: pass --yes to go ahead")
+	return g.UI().TypeToConfirm(prompt, want)
+}
+
+// UI is how commands talk to you (colors and spinners on a terminal).
+func (g *globals) UI() *ui.UI {
+	if g.ui == nil {
+		g.ui = ui.New(g.in, g.out, g.errOut, g.plain)
 	}
-	fmt.Fprintf(g.out, "%s ", prompt)
-	ans, err := bufio.NewReader(g.in).ReadString('\n')
-	if err != nil && !errors.Is(err, io.EOF) {
-		return false, err
-	}
-	return strings.TrimSpace(ans) == want, nil
+	return g.ui
 }
 
 func isTerminal(v any) bool {

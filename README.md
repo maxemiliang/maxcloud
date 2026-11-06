@@ -240,6 +240,11 @@ mcloud build                        # build and push the image (what deploys run
 mcloud generate                     # what deploy/k8s would become (asks the built app)
 ```
 
+On a terminal mcloud shows its progress with spinners and colors and asks
+with interactive prompts (`mcloud init` asks for the name, language and
+deploy mode). In pipes, in CI, with `NO_COLOR` or `MCLOUD_PLAIN=1`, or with
+`--plain`, it prints plain lines instead.
+
 Run inside an app's repo, commands take the app from its `maxcloud.yaml`
 (or `$MCLOUD_APP`). `apps create`, `set` and `delete` change the registry
 in the cluster (no commit anywhere), and show the change and ask first.

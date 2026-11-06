@@ -146,20 +146,37 @@ func (g *globals) buildPush(ctx context.Context, k *kube.Client, p *project, des
 		return "", nil, err
 	}
 	defer d.close()
+	u := g.UI()
 	ref := repo + ":direct-" + time.Now().UTC().Format("20060102-150405")
-	fmt.Fprintf(g.out, "Building %s ...\n", ref)
-	if err := g.buildImage(ctx, d, buildSpec{dir: p.Dir, ref: ref, cache: repo + ":build-cache"}); err != nil {
+	step := u.StepTail("Building "+ref, 6)
+	if err := g.buildImage(ctx, d, buildSpec{dir: p.Dir, ref: ref, cache: repo + ":build-cache", log: step.Writer()}); err != nil {
+		step.Fail("Build failed")
 		return "", nil, err
 	}
 	digest, err := g.imageDigest(ctx, d, ref)
 	if err != nil {
+		step.Fail("Build failed")
 		return "", nil, err
 	}
 	image := repo + "@" + digest
+	step.Done("Built %s", u.Accent(repo)+u.Dim("@"+shortDigest(digest)))
 	if !describe {
 		return image, nil, nil
 	}
-	fmt.Fprintln(g.out, "Asking the image for its functions ...")
+	step = u.Step("Asking the image for its functions")
 	desc, err := g.describeImage(ctx, d, image)
-	return image, desc, err
+	if err != nil {
+		step.Fail("")
+		return image, nil, err
+	}
+	step.Done("Found %d functions", len(desc.Functions))
+	return image, desc, nil
+}
+
+// shortDigest is sha256:0123456789ab.
+func shortDigest(d string) string {
+	if len(d) > len("sha256:")+12 {
+		return d[:len("sha256:")+12]
+	}
+	return d
 }

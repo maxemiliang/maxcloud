@@ -95,7 +95,7 @@ func olderThan(v, min string) bool {
 // warnIfOutdated says so when this mcloud is older than the platform wants.
 func (g *globals) warnIfOutdated(p *platform) {
 	if min := p.minVersion(); min != "" && olderThan(version(), min) {
-		fmt.Fprintf(g.errOut, "warning: this mcloud is %s; the platform wants %s or newer (mise up mcloud, or go install github.com/maxemiliang/maxcloud/cmd/mcloud@latest)\n", version(), min)
+		g.UI().Warn("this mcloud is %s; the platform wants %s or newer (mise up mcloud, or go install github.com/maxemiliang/maxcloud/cmd/mcloud@latest)", version(), min)
 	}
 }
 

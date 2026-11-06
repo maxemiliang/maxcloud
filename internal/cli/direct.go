@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/maxemiliang/maxcloud/internal/functions"
 	"github.com/maxemiliang/maxcloud/internal/kube"
@@ -10,7 +11,7 @@ import (
 
 // deployDirect builds the working tree, pushes the image, and applies the
 // functions' manifests to the cluster itself: no git, no Flux.
-func (g *globals) deployDirect(ctx context.Context, k *kube.Client, p *project) error {
+func (g *globals) deployDirect(ctx context.Context, k *kube.Client, p *project, started time.Time) error {
 	name := p.App
 	st, err := k.AppStatus(ctx, name)
 	if err != nil {
@@ -55,7 +56,7 @@ func (g *globals) deployDirect(ctx context.Context, k *kube.Client, p *project) 
 			return err
 		}
 		if db == nil && !hasCluster {
-			fmt.Fprintln(g.errOut, "note: "+functions.NeedsDatabaseHint(name))
+			g.UI().Note("%s", functions.NeedsDatabaseHint(name))
 		}
 	}
 	objs := functions.Objects(d, functions.Options{
@@ -63,20 +64,25 @@ func (g *globals) deployDirect(ctx context.Context, k *kube.Client, p *project) 
 		App:    name,
 		Labels: map[string]string{kube.DirectLabel: kube.FieldManager},
 	})
-	for _, f := range d.Functions {
-		fmt.Fprintf(g.out, "  %-9s %s\n", f.Kind, f.Name)
-	}
+	u := g.UI()
+	step := u.Step(fmt.Sprintf("Applying %d functions", len(d.Functions)))
 	if err := k.Apply(ctx, name, objs); err != nil {
+		step.Fail("")
 		return err
 	}
 	pruned, err := k.Prune(ctx, name, objs)
-	for _, p := range pruned {
-		fmt.Fprintf(g.out, "  removed   %s (no longer in the app)\n", p)
-	}
 	if err != nil {
+		step.Fail("")
 		return err
 	}
-	return g.followServices(ctx, k, name)
+	step.Done("Applied %d functions", len(d.Functions))
+	for _, f := range d.Functions {
+		u.Hint("%-9s %s", f.Kind, f.Name)
+	}
+	for _, p := range pruned {
+		u.Hint("removed   %s (no longer in the app)", p)
+	}
+	return g.followServices(ctx, k, name, started)
 }
 
 // imageRegistry is the maxcloud registry's host.

@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"os"
@@ -10,6 +11,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/maxemiliang/maxcloud/internal/kube"
+	"github.com/maxemiliang/maxcloud/internal/ui"
 )
 
 func runCmd(g *globals) *cobra.Command {
@@ -39,11 +41,12 @@ removed an hour after it ends.`,
 			if err != nil {
 				return fmt.Errorf("%s isn't a scheduled function of %s? %w", args[0], name, err)
 			}
-			fmt.Fprintf(g.errOut, "Started %s (Job %s/%s).\n", args[0], name, job)
+			u := g.UI()
+			u.Printf("%s Started %s %s", u.Accent("▶"), u.Bold(args[0]), u.Dim("(Job "+name+"/"+job+")"))
 			if err := k.FollowJob(ctx, name, job, g.out); err != nil {
 				return err
 			}
-			fmt.Fprintf(g.errOut, "%s succeeded.\n", args[0])
+			u.Success("%s succeeded", args[0])
 			return nil
 		},
 	}
@@ -97,12 +100,24 @@ zero starts for it.`,
 			}
 			ctx, cancel := context.WithTimeout(cmd.Context(), 3*time.Minute)
 			defer cancel()
-			return k.Call(ctx, name, kube.Request{
+			u := g.UI()
+			step := u.Step(fmt.Sprintf("%s %s %s", strings.ToUpper(method), args[0], path))
+			var resp bytes.Buffer
+			err = k.Call(ctx, name, kube.Request{
 				Method:  strings.ToUpper(method),
 				URL:     fmt.Sprintf("http://%s.%s.svc.cluster.local%s", args[0], name, path),
 				Headers: headers,
 				Body:    data,
-			}, g.out)
+			}, &resp)
+			if err != nil {
+				step.Fail("")
+				u.Printf("%s", resp.String())
+				return err
+			}
+			status, _, _ := strings.Cut(resp.String(), "\n")
+			step.Done("%s %s %s  %s", strings.ToUpper(method), args[0], path, colorStatus(u, strings.TrimSpace(status)))
+			u.Printf("%s", resp.String())
+			return nil
 		},
 	}
 	f := c.Flags()
@@ -119,4 +134,19 @@ func nonEmpty(v string) []string {
 		return nil
 	}
 	return []string{v}
+}
+
+// colorStatus colors an HTTP status line by its code.
+func colorStatus(u *ui.UI, line string) string {
+	f := strings.Fields(line)
+	if len(f) < 2 {
+		return line
+	}
+	switch f[1][0] {
+	case '2', '3':
+		return u.Green(line)
+	case '4':
+		return u.Amber(line)
+	}
+	return u.Red(line)
 }

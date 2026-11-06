@@ -140,13 +140,13 @@ func secretsListCmd(g *globals) *cobra.Command {
 			}
 			sort.Strings(names)
 			if len(names) == 0 {
-				fmt.Fprintln(g.out, "(no secrets)")
+				g.UI().Note("no secrets")
 			}
 			for _, n := range names {
 				fmt.Fprintln(g.out, n)
 			}
 			if p, err := loadProject(); err == nil && p.App == app && legacySecretsPath(p) != "" {
-				fmt.Fprintf(g.errOut, "note: %s is still in git; mcloud secrets migrate moves the app off it\n", legacySecretsPath(p))
+				g.UI().Note("%s is still in git; mcloud secrets migrate moves the app off it", legacySecretsPath(p))
 			}
 			return nil
 		},
@@ -183,8 +183,10 @@ func (g *globals) editSecrets(ctx context.Context, f secretsFlags, edit func(map
 	if err := k.ApplySecret(ctx, app, functions.AppSecrets, s); err != nil {
 		return err
 	}
+	u := g.UI()
 	if f.noRestart {
-		fmt.Fprintf(g.out, "%s. Functions get it when they next start.\n", done)
+		u.Success("%s", done)
+		u.Hint("Functions get it when they next start.")
 		return nil
 	}
 	restarted, err := k.RestartFunctions(ctx, app)
@@ -192,9 +194,10 @@ func (g *globals) editSecrets(ctx context.Context, f secretsFlags, edit func(map
 		return fmt.Errorf("%s, but restarting the functions failed (they get it when they next start): %w", strings.ToLower(done[:1])+done[1:], err)
 	}
 	if len(restarted) == 0 {
-		fmt.Fprintf(g.out, "%s.\n", done)
+		u.Success("%s", done)
 	} else {
-		fmt.Fprintf(g.out, "%s; restarting %s.\n", done, strings.Join(restarted, ", "))
+		u.Success("%s", done)
+		u.Hint("restarting %s", strings.Join(restarted, ", "))
 	}
 	return nil
 }
@@ -229,7 +232,7 @@ file from the repo: commit and push that.`,
 			}
 			rel := legacySecretsPath(p)
 			if rel == "" {
-				fmt.Fprintln(g.out, "Nothing to migrate: no "+legacySecretsFile+" here.")
+				g.UI().Note("nothing to migrate: no %s here", legacySecretsFile)
 				return nil
 			}
 			k, err := g.kube()
@@ -259,7 +262,8 @@ file from the repo: commit and push that.`,
 			if err := os.Remove(filepath.Join(p.Dir, rel)); err != nil {
 				return err
 			}
-			fmt.Fprintf(g.out, "The cluster's Secret %s/%s is mcloud's now, and %s is gone.\nCommit and push:\n  git commit -am \"secrets: kept in the cluster\" && git push\n", p.App, functions.AppSecrets, rel)
+			g.UI().Success("The cluster's Secret %s/%s is mcloud's now, and %s is gone", p.App, functions.AppSecrets, rel)
+			g.UI().Hint("Commit and push: git commit -am \"secrets: kept in the cluster\" && git push")
 			return nil
 		},
 	}
@@ -269,16 +273,14 @@ file from the repo: commit and push that.`,
 // terminal, else all of it (one trailing newline dropped).
 func readSecretValue(g *globals, name string) (string, error) {
 	if f, ok := g.in.(*os.File); ok && term.IsTerminal(int(f.Fd())) {
-		fmt.Fprintf(g.errOut, "Value for %s: ", name)
-		b, err := term.ReadPassword(int(f.Fd()))
-		fmt.Fprintln(g.errOut)
+		v, err := g.UI().Secret("Value for " + name)
 		if err != nil {
 			return "", err
 		}
-		if len(b) == 0 {
+		if v == "" {
 			return "", errors.New("empty value")
 		}
-		return string(b), nil
+		return v, nil
 	}
 	b, err := io.ReadAll(g.in)
 	if err != nil {

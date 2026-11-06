@@ -4,7 +4,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"path/filepath"
 
@@ -17,8 +16,5 @@ func main() {
 	if filepath.Base(os.Args[0]) == "docker-credential-mcloud" {
 		os.Exit(cli.CredentialHelper(os.Args[1:], os.Stdin, os.Stdout))
 	}
-	if err := cli.New().ExecuteContext(context.Background()); err != nil {
-		fmt.Fprintln(os.Stderr, "mcloud:", err)
-		os.Exit(1)
-	}
+	os.Exit(cli.Run(context.Background()))
 }
