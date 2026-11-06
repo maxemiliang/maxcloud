@@ -43,6 +43,32 @@ as they are: `onRequest(app.fetch)` with Hono, for example.
 | `timeoutSeconds` | `300` | Per request. |
 | `memory` | the namespace's default | Memory the container requests and is limited to, e.g. `"256Mi"`. |
 | `cpu` | the namespace's default | CPU the container requests, e.g. `"100m"`. |
+| `proxied` | `false` | Put the public hostname behind Cloudflare (WAF, caching, Cloudflare Access). Needs `public`. |
+| `healthPath` | none | A path that answers 2xx when an instance can take requests: Knative's readiness probe, and a liveness probe that restarts a stuck instance. |
+
+The container options below apply to scheduled and queue functions too:
+
+| Option | Default | |
+| --- | --- | --- |
+| `memoryLimit` | `memory` | Memory the container may use above its request, for spikes: `{ memory: "384Mi", memoryLimit: "1536Mi" }`. |
+| `user` | the image's | Run as this user id and group, for an image whose Dockerfile has no non-root `USER`. |
+| `readOnlyRootFilesystem` | `false` | Write only to `volumes`. |
+| `volumes` | none | Scratch directories, empty at each start: `[{ path: "/scratch", sizeLimit: "1Gi" }, { path: "/dev/shm", sizeLimit: "512Mi", memory: true }]`. `memory: true` keeps one in RAM (it counts against the memory limit). Knative doesn't allow `/tmp`: point `TMPDIR` at a volume. |
+
+### Node.js request listeners
+
+A framework that's a Node.js request listener (Express, h3's
+`toNodeListener`, Nitro) is served as it is with `{ node: listener }`:
+
+```ts
+import express from "express";
+const app = express();
+export const api = onRequest({ public: true }, { node: app });
+```
+
+It gets the server's own request and response, so responses stream and
+headers arrive as the client sent them. `api.fetch(request)` still works
+in tests (through a local server).
 
 ## Scheduled functions
 
@@ -185,6 +211,19 @@ On SIGTERM it finishes what's in flight and exits 0, so pods don't end in
 settings as JSON; `mcloud` deploys from that. While it runs,
 `MAXCLOUD_DESCRIBE=1` is set, so module-level code can skip connecting to
 things.
+
+`onShutdown(fn)` runs `fn` after SIGTERM, once the requests or jobs in
+flight are done and before the process exits: close a pool, flush logs.
+
+A bundled server can be its own entrypoint instead of package.json's
+`main` (`@max-cloud/nuxt` builds Nuxt this way): `start(exports)` does what
+`maxcloud-functions` does for those exports, and `isEntrypoint` tells
+whether the module is the one `node` was started with:
+
+```ts
+export const web = onRequest({ public: true }, { node: listener });
+if (await isEntrypoint(import.meta.url)) start({ web });
+```
 
 ## Local development
 

@@ -9,6 +9,9 @@ This repo holds:
 - `mcloud`, the command line (Go, `cmd/mcloud`).
 - `@max-cloud/functions`, the Node.js/TypeScript SDK for writing HTTP,
   scheduled and queue functions (`packages/functions`, see its README).
+- `@max-cloud/nuxt`, a Nuxt module: runtimeConfig from what the platform
+  gives the app, and the Nuxt server as a maxcloud function
+  (`packages/nuxt`, see its README).
 - `github.com/maxemiliang/maxcloud/functions`, the same for Go (`functions/`,
   see its README).
 - `maxcloud-controller` (`controller/`), which gives apps their S3
@@ -75,6 +78,10 @@ The homelab README's "Run an app" covers the platform side, and its
 `templates/run-app` is the starting point for apps that aren't functions;
 they use the same workflow without `functions: true`.
 
+A Nuxt app can be a function too: `@max-cloud/nuxt` builds its server as
+one HTTP function (and its scheduled tasks as scheduled ones), so the
+deploy workflow writes its manifests (`packages/nuxt/README.md`).
+
 ## maxcloud.yaml
 
 ```yaml
@@ -82,6 +89,8 @@ app: shop
 quota: {cpu: 500m, memory: 2Gi}
 buckets: [uploads, assets:public]
 db: {size: 2Gi}          # or db: true
+domains:                 # hostnames of your own, within what an admin allowed
+  - {host: shop.gronblom.dev, service: web, proxied: true}
 # deploy: direct         # mcloud deploy builds and applies from here, no git
 ```
 
@@ -106,7 +115,8 @@ maxcloud:
   app's own (`--secrets remote`); the app's real buckets only with
   `--buckets`.
 
-TypeScript runs from source and restarts on changes. To poke the deployed
+TypeScript runs from source and restarts on changes; a Nuxt app (a
+`nuxt.config`) runs `nuxt dev` on the port instead. To poke the deployed
 app: `mcloud call api /health` sends a request to any function, private
 ones too, and `mcloud run nightly` runs a scheduled function now.
 
@@ -147,7 +157,9 @@ Worker gets R2) from `buckets:` in `maxcloud.yaml`. The
 [controller](controller/README.md) turns each into a bucket
 `mc-shop--uploads` and puts the app's credentials in the Secret
 `maxcloud-s3`, which every function gets as environment variables. The
-SDKs' `bucketName("uploads")` gives the full name. Removing a bucket from
+SDKs' `bucketName("uploads")` gives the full name; so does the variable
+`MAXCLOUD_BUCKET_UPLOADS` (for frameworks configured by environment; a pod
+started before the bucket existed doesn't have it). Removing a bucket from
 the list keeps it and its objects.
 
 ### Public buckets
@@ -175,6 +187,34 @@ https://assets--shop.gronblom.dev/logo.png      # object logo.png in mc-shop--as
 - `kubectl get maxcloud -n shop` shows each bucket's URL.
 - Removing `:public` makes the bucket private again: its hostname and the
   public read go, its objects stay.
+
+## Custom domains
+
+A function (or any Knative service of the app) can have hostnames besides
+`<service>-<app>.gronblom.dev`, from `domains:` in `maxcloud.yaml`:
+
+```yaml
+domains:
+  - {host: paja.lankkupelit.fi, service: web, proxied: true}
+```
+
+- **An admin allows them first:** the homelab repo's
+  `infrastructure/configs/run/domains.yaml` lists the hostnames each app
+  may have. Admission refuses a registry entry (from `mcloud deploy`, or a
+  pushed `maxcloud.yaml`) with any other, and refuses any route in the
+  app's namespace with a hostname that isn't the app's.
+- **Zones the cluster has certificates for:** one level below
+  `gronblom.dev`, `lab.gronblom.dev` or `lankkupelit.fi`. external-dns
+  makes the DNS record. `proxied: true` puts it behind Cloudflare (WAF,
+  caching, Cloudflare Access), not for `*.lab.gronblom.dev`.
+- **The service can stay private.** The hostname reaches its revisions
+  directly, scale-to-zero included, and the app sees the `Host` the
+  client sent (`paja.lankkupelit.fi`, not a cluster-local name).
+- `kubectl get maxcloud -n <app>` shows each Domain. One that isn't Ready
+  says why: not on the admin's list, no certificate covers it, the
+  service isn't deployed yet, or another route already has the hostname
+  (it takes over once that one is gone).
+- Removing a domain from the list removes its route and DNS record.
 
 ## Databases
 
@@ -260,6 +300,7 @@ mcloud queue retry 41 42            # run failed jobs again (or --failed)
 
 mcloud apps list                    # registered apps, did the last deploy apply
 mcloud apps set shop --deploy direct  # by hand: what maxcloud.yaml leaves out
+mcloud apps set shop --domains shop.gronblom.dev:web:proxied
 mcloud apps delete shop             # remove it, namespace and data included
 
 mcloud build                        # build and push the image (what deploys run)
@@ -287,6 +328,7 @@ Each part has its own tags; pushing one releases it.
 | `v0.2.0` | `mcloud` binaries on GitHub Releases | `release.yaml` (GoReleaser) |
 | `controller/v0.2.0` | the controller image | `release-controller.yaml` (see `controller/README.md`) |
 | `functions-js/v0.2.0` | `@max-cloud/functions` on npm, after bumping `packages/functions/package.json` | `release-npm.yaml` (trusted publishing, no token) |
+| `nuxt-js/v0.1.0` | `@max-cloud/nuxt` on npm, after bumping `packages/nuxt/package.json` (release the functions SDK it needs first) | `release-npm.yaml` |
 | `functions/v0.2.0` | the Go SDK | the tag is the release (Go modules) |
 
 `run-deploy.yaml` installs the newest `mcloud` release (`v*`) when it runs,
@@ -302,6 +344,7 @@ go test ./...
 go run ./cmd/mcloud --help
 
 npm ci
+npm run build --workspaces   # @max-cloud/nuxt uses the functions SDK's build
 # The queue tests need a Postgres; without TEST_DATABASE_URL they're skipped.
 docker run -d --rm --name pg -p 127.0.0.1:55432:5432 -e POSTGRES_PASSWORD=test postgres:18
 set -x TEST_DATABASE_URL postgres://postgres:test@127.0.0.1:55432/postgres
