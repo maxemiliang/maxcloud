@@ -91,7 +91,11 @@ func doctorCmd(g *globals) *cobra.Command {
 				}
 			}
 			tool("docker", "direct deploys of apps with a Dockerfile, and mcloud dev's local Postgres")
-			tool("pack", "optional: without it, buildpacks run in a container (needs docker), or in the cluster")
+			if packWorks(ctx) {
+				note("pack", "works")
+			} else {
+				note("pack", "not installed (or a shim with no version): buildpacks run in a container instead (needs docker)")
+			}
 
 			// The app here, if any.
 			if proj, err := loadProject(); err == nil {

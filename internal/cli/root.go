@@ -30,6 +30,7 @@ const ProjectFile = "maxcloud.yaml"
 type globals struct {
 	kubeconfig  string
 	kubeContext string
+	buildMode   string // mcloud deploy --build: auto, local, cluster
 
 	in     io.Reader
 	out    io.Writer
@@ -68,7 +69,7 @@ GitHub access uses $GH_TOKEN, else the GitHub CLI's login.`,
 	f.StringVar(&g.kubeconfig, "kubeconfig", "", "kubeconfig file (default $MCLOUD_KUBECONFIG, else $KUBECONFIG)")
 	f.StringVar(&g.kubeContext, "context", "", "kubeconfig context")
 
-	root.AddCommand(initCmd(g), deployCmd(g), appsCmd(g), statusCmd(g), logsCmd(g), generateCmd(g), queueCmd(g), secretsCmd(g), dbCmd(g), loginCmd(g), logoutCmd(g), credentialCmd(g), kubeconfigCmd(g), doctorCmd(g), runCmd(g), callCmd(g))
+	root.AddCommand(initCmd(g), deployCmd(g), appsCmd(g), statusCmd(g), logsCmd(g), generateCmd(g), buildCmd(g), queueCmd(g), secretsCmd(g), dbCmd(g), loginCmd(g), logoutCmd(g), credentialCmd(g), kubeconfigCmd(g), doctorCmd(g), runCmd(g), callCmd(g))
 	return root
 }
 

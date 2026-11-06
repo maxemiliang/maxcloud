@@ -1,21 +1,22 @@
 # Reusable workflow: deploys an app to maxcloud. An app repo calls it on
-# every push to main (mcloud init writes the caller):
+# every push to main (mcloud init writes the caller), and grants it
+# `contents: write` (the deploy commit) and `id-token: write` (pushing to
+# the maxcloud registry as the repo itself).
 #
+# The work is `mcloud build --ci`, the same build mcloud's direct deploys
+# run:
 #   1. Builds the repo into an image, with its Dockerfile if it has one,
 #      otherwise with Cloud Native Buildpacks (Paketo: Go, Node.js, Python,
 #      Java, .NET, Ruby, PHP, ...).
 #   2. Pushes it to the maxcloud registry, registry.gronblom.dev/<app>/<app>
-#      (app: from maxcloud.yaml), tagged with the commit SHA. It logs in as
-#      the repo itself, with GitHub Actions' OIDC tokens: the caller grants
-#      `id-token: write`, and the app's registry entry names this repo.
-#      Callers that don't grant it yet push to ghcr.io/<owner>/<repo> as
-#      before (with `packages: write`).
+#      (app: from maxcloud.yaml), tagged with the commit SHA. mcloud is
+#      docker's credential helper, logging in with a fresh GitHub Actions
+#      OIDC token each time; the registry lets the repo its app's registry
+#      entry names push.
 #   3. For an app written with maxcloud functions (`functions: true`), asks
-#      the image what its functions are and writes their manifests
-#      (mcloud generate: functions.yaml, and database.yaml for queues).
-#   4. Pins that image by digest in the repo's deploy manifests and commits.
-#      Flux applies the commit (the app's entry in the homelab repo's app
-#      registry, apps/maxcloud/apps/).
+#      the image what its functions are and writes their manifests.
+#   4. Pins the image by digest in the repo's deploy manifests and commits.
+#      Flux applies the commit (the app's registry entry points it there).
 #
 # It lives in this public repo so that public and private app repos alike
 # can call it (a public repo can't use a private repo's workflows).
@@ -38,8 +39,9 @@ on:
         default: app
       functions:
         description: >-
-          The app is written with maxcloud functions (@max-cloud/functions):
-          generate its manifests from the image on every deploy.
+          The app is written with maxcloud functions (@max-cloud/functions, or
+          the Go functions package): generate its manifests from the image on
+          every deploy.
         type: boolean
         default: false
       app:
@@ -50,10 +52,15 @@ on:
         description: The maxcloud registry's host.
         type: string
         default: registry.gronblom.dev
+      mcloud-version:
+        description: >-
+          The mcloud release that builds (e.g. v0.10.0); default, the newest.
+          The workflow itself comes from main, so the newest mcloud matches it.
+        type: string
+        default: latest
 
-# No permissions here: the job gets the caller's (contents: write, and
-# id-token: write for the maxcloud registry or packages: write for GHCR), so
-# both kinds of callers work while apps move to the maxcloud registry.
+# No permissions here: the job gets the caller's (contents: write and
+# id-token: write).
 jobs:
   deploy:
     # Not ubuntu-latest: on ubuntu-26.04 (latest since November 2026) pack
@@ -66,154 +73,53 @@ jobs:
     concurrency:
       group: run-deploy-${{ github.repository }}
       cancel-in-progress: false
-    env:
-      # Paketo builder for repos without a Dockerfile. Its images run as a
-      # non-root user, which the restricted Pod Security level requires.
-      # renovate: datasource=docker depName=paketobuildpacks/ubuntu-noble-builder
-      PAKETO_BUILDER_VERSION: 0.0.213
-      # mcloud, for `functions: true` apps: a release of this repo.
-      # renovate: datasource=github-releases depName=maxemiliang/maxcloud
-      MCLOUD_VERSION: v0.5.0
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Image name
-        id: image
-        env:
-          APP: ${{ inputs.app }}
-          REGISTRY: ${{ inputs.registry }}
+      - name: Builder
+        id: builder
         run: |
-          # ACTIONS_ID_TOKEN_REQUEST_URL is there when the caller granted
-          # id-token: write.
-          if [ -n "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ]; then
-            if [ -z "$APP" ] && [ -f maxcloud.yaml ]; then
-              APP=$(yq -r '.app // ""' maxcloud.yaml)
-            fi
-            if [ -z "$APP" ]; then
-              echo "::error::No app name: set app: in maxcloud.yaml, or the app input."
-              exit 1
-            fi
-            repo="${REGISTRY}/${APP}/${APP}"
-            echo "registry=maxcloud" >>"$GITHUB_OUTPUT"
-          else
-            echo "::warning::Pushing to GHCR: grant id-token: write in this repo's deploy workflow to use the maxcloud registry (mcloud init writes it)."
-            # GHCR names must be lowercase.
-            repo=$(echo "ghcr.io/${GITHUB_REPOSITORY}" | tr '[:upper:]' '[:lower:]')
-            echo "registry=ghcr" >>"$GITHUB_OUTPUT"
-          fi
-          echo "ref=${repo}:${GITHUB_SHA}" >>"$GITHUB_OUTPUT"
-          echo "repo=${repo}" >>"$GITHUB_OUTPUT"
           if [ -f "${{ inputs.context }}/Dockerfile" ]; then
-            echo "builder=dockerfile" >>"$GITHUB_OUTPUT"
+            echo "kind=dockerfile" >>"$GITHUB_OUTPUT"
           else
-            echo "builder=buildpacks" >>"$GITHUB_OUTPUT"
+            echo "kind=buildpacks" >>"$GITHUB_OUTPUT"
           fi
 
-      # The maxcloud registry takes this repo's GitHub Actions OIDC tokens
-      # (audience: the registry's host). They last about 5 minutes, less
-      # than a build, so docker asks this credential helper for a fresh one
-      # each time it needs to log in.
-      - name: Log in to the maxcloud registry
-        if: steps.image.outputs.registry == 'maxcloud'
-        env:
-          REGISTRY: ${{ inputs.registry }}
-        run: |
-          mkdir -p "$RUNNER_TEMP/bin" ~/.docker
-          helper="$RUNNER_TEMP/bin/docker-credential-maxcloud-oidc"
-          cat >"$helper" <<'EOF'
-          #!/bin/sh
-          # Docker credential helper: a new GitHub Actions OIDC token on every get.
-          case "$1" in
-          get)
-            read -r server
-            token=$(curl -sSf -H "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
-              "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=${MAXCLOUD_REGISTRY}" | jq -r .value) || exit 1
-            jq -n --arg s "$server" --arg t "$token" '{ServerURL: $s, Username: "maxcloud", Secret: $t}'
-            ;;
-          list) echo '{}' ;;
-          *) ;; # store, erase: nothing is stored
-          esac
-          EOF
-          chmod +x "$helper"
-          echo "$RUNNER_TEMP/bin" >>"$GITHUB_PATH"
-          echo "MAXCLOUD_REGISTRY=${REGISTRY}" >>"$GITHUB_ENV"
-          cfg=~/.docker/config.json
-          [ -f "$cfg" ] || echo '{}' >"$cfg"
-          jq --arg r "$REGISTRY" '.credHelpers[$r] = "maxcloud-oidc"' "$cfg" >"$cfg.new" && mv "$cfg.new" "$cfg"
-
-      - if: steps.image.outputs.registry == 'ghcr'
-        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      # With a Dockerfile.
-      - if: steps.image.outputs.builder == 'dockerfile'
+      # A container builder, so mcloud can keep the build cache in the
+      # registry.
+      - if: steps.builder.outputs.kind == 'dockerfile'
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
-      - if: steps.image.outputs.builder == 'dockerfile'
-        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
-        with:
-          context: ${{ inputs.context }}
-          push: true
-          tags: ${{ steps.image.outputs.ref }}
-          # The cluster's nodes are amd64.
-          platforms: linux/amd64
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-      # Without one: buildpacks detect the language and build.
-      - if: steps.image.outputs.builder == 'buildpacks'
+      - if: steps.builder.outputs.kind == 'buildpacks'
         uses: buildpacks/github-actions/setup-pack@91cb4574e7b781941b4e3fa950e541e4b8754b3a # v6.2.2
-      - if: steps.image.outputs.builder == 'buildpacks'
-        run: |
-          pack build "${{ steps.image.outputs.ref }}" \
-            --path "${{ inputs.context }}" \
-            --builder "paketobuildpacks/ubuntu-noble-builder:${PAKETO_BUILDER_VERSION}" \
-            --cache-image "${{ steps.image.outputs.repo }}:build-cache" \
-            --publish
 
-      - name: Sync with the branch
+      - name: Install mcloud
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ inputs.mcloud-version }}
         run: |
-          # Start from the branch as it is now: an earlier run may have pushed
-          # its deploy commit since this one checked out.
-          git fetch origin "${GITHUB_REF_NAME}"
-          git checkout -B "${GITHUB_REF_NAME}" "origin/${GITHUB_REF_NAME}"
-
-      # Functions apps: the image says what its functions are when run with
-      # MAXCLOUD_DESCRIBE=1 (it prints one tagged line and exits), and mcloud
-      # turns that into manifests. Asking the image, not the source, means
-      # the manifests always match what was built.
-      - name: Generate the functions' manifests
-        if: inputs.functions
-        run: |
-          file="mcloud_${MCLOUD_VERSION#v}_linux_amd64.tar.gz"
-          base="https://github.com/maxemiliang/maxcloud/releases/download/${MCLOUD_VERSION}"
+          if [ "$VERSION" = latest ]; then
+            # The repo also tags the controller and the SDKs; mcloud's are v*.
+            VERSION=$(gh api repos/maxemiliang/maxcloud/releases --jq '[.[] | select(.tag_name | startswith("v")) | select(.draft | not)][0].tag_name')
+          fi
+          echo "mcloud ${VERSION}"
+          file="mcloud_${VERSION#v}_linux_amd64.tar.gz"
+          base="https://github.com/maxemiliang/maxcloud/releases/download/${VERSION}"
+          mkdir -p "$RUNNER_TEMP/bin"
           (cd "$RUNNER_TEMP" &&
             curl -sSfL -O "${base}/${file}" -O "${base}/checksums.txt" &&
             grep " ${file}\$" checksums.txt | sha256sum -c - &&
-            tar -xzf "$file" mcloud)
-          timeout 120 docker run --rm -e MAXCLOUD_DESCRIBE=1 "${{ steps.image.outputs.ref }}" >"$RUNNER_TEMP/describe.out"
-          "$RUNNER_TEMP/mcloud" generate --from "$RUNNER_TEMP/describe.out" --dir "${{ inputs.manifests }}" --image "${{ inputs.image }}"
+            tar -xzf "$file" -C "$RUNNER_TEMP/bin" mcloud)
+          echo "$RUNNER_TEMP/bin" >>"$GITHUB_PATH"
 
-      # kustomize is preinstalled on GitHub's Ubuntu runners.
-      - name: Pin the image in the manifests
-        id: pin
+      # kustomize (for pinning the image) is on GitHub's Ubuntu runners.
+      - name: Build, push and commit the deploy
+        env:
+          MCLOUD_IMAGE_REGISTRY: ${{ inputs.registry }}
+          CONTEXT: ${{ inputs.context }}
+          MANIFESTS: ${{ inputs.manifests }}
+          IMAGE: ${{ inputs.image }}
+          APP: ${{ inputs.app }}
+          FUNCTIONS: ${{ inputs.functions }}
         run: |
-          digest=$(docker buildx imagetools inspect "${{ steps.image.outputs.ref }}" --format '{{json .Manifest.Digest}}' | tr -d '"')
-          cd "${{ inputs.manifests }}"
-          kustomize edit set image "${{ inputs.image }}=${{ steps.image.outputs.repo }}@${digest}"
-          echo "digest=${digest}" >>"$GITHUB_OUTPUT"
-
-      # Pushed with GITHUB_TOKEN, so this commit doesn't trigger another run.
-      - name: Commit the deploy
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add "${{ inputs.manifests }}"
-          if git diff --cached --quiet; then
-            echo "Image unchanged, nothing to deploy."
-            exit 0
-          fi
-          git commit -m "deploy: ${GITHUB_SHA::7}" -m "Image ${{ steps.image.outputs.repo }}@${{ steps.pin.outputs.digest }}"
-          git push origin "HEAD:${GITHUB_REF_NAME}"
+          mcloud build --ci --context "$CONTEXT" --manifests "$MANIFESTS" --image "$IMAGE" \
+            --app "$APP" --functions="$FUNCTIONS"

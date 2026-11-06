@@ -33,12 +33,16 @@ The app's settings (quota, buckets, database, source) come from
 maxcloud.yaml: the first deploy registers the app, later ones bring its
 registry entry in line. No commit to the homelab repo.
 
-A direct app (deploy: direct in maxcloud.yaml) is deployed without git: mcloud builds the working tree,
-uncommitted changes included, pushes the image, and applies the functions'
-manifests with your kubeconfig. The image goes to the maxcloud registry
-(registry.gronblom.dev/<app>/<app>), with a short-lived token of the app's
-push ServiceAccount: nothing to log in to. Building without a Dockerfile
-needs pack.`,
+A direct app (deploy: direct in maxcloud.yaml) is deployed without git:
+mcloud builds the working tree, uncommitted changes included, pushes the
+image to the maxcloud registry (registry.gronblom.dev/<app>/<app>) with a
+short-lived token of the app's push ServiceAccount (nothing to log in to),
+and applies the functions' manifests with your kubeconfig.
+
+It builds with docker: the Dockerfile, or buildpacks (pack, or pack in a
+container). Without docker, an app without a Dockerfile builds in the
+cluster instead (--build cluster): a buildpacks pod in the app's
+namespace, with the source streamed to it.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			ctx := cmd.Context()
@@ -127,6 +131,7 @@ needs pack.`,
 	f.BoolVar(&noPush, "no-push", false, "don't push; follow the deploy of what's already pushed")
 	f.BoolVar(&direct, "direct", false, "deploy a direct app: build here and apply, without git (default for deploy: direct in maxcloud.yaml)")
 	f.DurationVar(&timeout, "timeout", 15*time.Minute, "give up following after this long")
+	f.StringVar(&g.buildMode, "build", "auto", "direct apps: where to build: local (docker, pack), cluster (buildpacks in the app's namespace, no docker needed), or auto (local if docker is installed)")
 	f.BoolVarP(&yes, "yes", "y", false, "don't ask before switching between gitops and direct (deploy: in maxcloud.yaml)")
 	return c
 }

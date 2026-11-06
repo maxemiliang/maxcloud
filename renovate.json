@@ -8,7 +8,7 @@
   "labels": ["dependencies"],
   "customManagers": [
     {
-      "description": "Versions with a `# renovate: datasource=... depName=...` comment on the line above (the Paketo builder in run-deploy.yaml).",
+      "description": "Versions with a `# renovate: datasource=... depName=...` comment on the line above, in workflows.",
       "customType": "regex",
       "managerFilePatterns": ["/^\\.github/workflows/.+\\.ya?ml$/"],
       "matchStrings": ["# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)\\s+\\w+: (?<currentValue>\\S+)"]
@@ -20,7 +20,7 @@
       "matchStrings": ["// renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)\\s+const \\w+ = \"[^\"]+:(?<currentValue>[^\"]+)\""]
     },
     {
-      "description": "The same in Go code (the Paketo builder for direct deploys, kept equal to run-deploy.yaml's).",
+      "description": "The same in Go code: the Paketo builder and pack image mcloud build uses (here and in run-deploy.yaml), the curl and Postgres images.",
       "customType": "regex",
       "managerFilePatterns": ["/^internal/.+\\.go$/"],
       "matchStrings": ["// renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)\\s+const \\w+ = \"(?<currentValue>[^\"]+)\""]
