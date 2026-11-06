@@ -32,3 +32,14 @@ export function db(): pg.Pool {
   pool ??= new pg.Pool({ connectionString: databaseUrl(), max: 4 });
   return pool;
 }
+
+/**
+ * Replaces the shared pool (undefined: make a new one from DATABASE_URL on
+ * next use) and returns the one it replaces. For
+ * `@max-cloud/functions/testing`; not part of the public API.
+ */
+export function swapPool(next: pg.Pool | undefined): pg.Pool | undefined {
+  const prev = pool;
+  pool = next;
+  return prev;
+}
