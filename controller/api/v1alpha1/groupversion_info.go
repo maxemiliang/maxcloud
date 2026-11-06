@@ -1,5 +1,6 @@
 // Package v1alpha1 is the maxcloud controller's API: what the app registry
-// asks for on an app's behalf (buckets, and later databases).
+// asks for on an app's behalf (Buckets, Databases, Domains), and the
+// DatabaseBranches apps make themselves.
 //
 // +kubebuilder:object:generate=true
 // +groupName=maxcloud.gronblom.dev

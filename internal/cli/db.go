@@ -22,10 +22,10 @@ func dbCmd(g *globals) *cobra.Command {
 	c := &cobra.Command{
 		Use:   "db",
 		Short: "An app's database: migrate it, restore it, recover it, branch it",
-		Long: `For apps whose database the maxcloud controller runs (mcloud apps set <app>
---db). Its backups are generations: db-1, db-2, ... in the bucket
-mc-<app>--db; every restore starts a new one and leaves the older ones as
-they are.`,
+		Long: `For apps whose database the maxcloud controller runs (db: in
+maxcloud.yaml, or mcloud apps set <app> --db). Its backups are
+generations: db-1, db-2, ... in the bucket mc-<app>--db; every restore
+starts a new one and leaves the older ones as they are.`,
 	}
 	c.AddCommand(dbPsqlCmd(g), dbProxyCmd(g), dbRestoreCmd(g), dbRecoverCmd(g), dbBranchCmd(g), dbMigrateCmd(g))
 	return c

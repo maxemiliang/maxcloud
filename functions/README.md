@@ -47,7 +47,11 @@ func resize(ctx context.Context, job *functions.Job) error {
 ```
 
 The name you register becomes the function's: its service, CronJob or
-worker. Use at most 40 lowercase letters, digits and dashes.
+worker. Use at most 40 lowercase letters, digits and dashes, starting with
+a letter; a bad name, a name registered twice or a bad cron schedule
+panics. `functions.HTTP(name, handler)` takes any `http.Handler` (a
+router, say); `HTTPFunc` takes a handler function. A handler that panics
+answers 500.
 
 ## Options
 
@@ -63,21 +67,41 @@ worker. Use at most 40 lowercase letters, digits and dashes.
 | `Retries(n)` | schedule | 0 |
 | `MaxAttempts(n)` | queue | 5 |
 | `Backoff(d)` | queue: first retry's delay, doubled each time | 10s |
+| `Proxied()` | HTTP: the public hostname behind Cloudflare (WAF, caching, Access); needs `Public()` | off |
+| `HealthPath(p)` | HTTP: a path that answers 2xx when an instance can take requests (readiness, and a liveness probe that restarts a stuck one) | none |
+| `MemoryLimit(q)` | all: memory above `Memory` (the request), for spikes | `Memory` |
+| `User(id)` | all: run as this user id and group, for an image without a non-root `USER` | the image's |
+| `ReadOnlyRootFilesystem()` | all: write only to volumes | off |
+| `Volume(path, sizeLimit)`, `MemoryVolume(path, sizeLimit)` | all: a scratch directory, empty at each start; `MemoryVolume` is in RAM and counts against the memory limit. Knative doesn't allow `/tmp`: point `TMPDIR` at a volume | none |
+
+Options that don't apply to a function's kind are ignored. Timeouts are
+rounded up to whole seconds.
 
 ## Queues
 
-Jobs live in the app's Postgres database (`$DATABASE_URL`; the app gets
-one with `db: true` in its `maxcloud.yaml`), in a table the SDK creates
-(`maxcloud_jobs`).
+`functions.Enqueue(ctx, queue, payload)` adds a job and returns its id;
+the payload is stored as JSON, and the handler reads it with
+`job.Decode(&v)`. A queue's name is lowercase letters, digits, dashes and
+underscores. Jobs live in the app's Postgres database (`$DATABASE_URL`;
+the app gets one with `db: true` in its `maxcloud.yaml`), in a table the
+SDK creates (`maxcloud_jobs`).
 
 - **Retries:** a job whose handler returns an error, panics, or passes its
-  timeout is retried, and so is one whose worker died, once its lease runs
-  out. Jobs can run more than once, so make handlers safe to repeat.
+  timeout is retried, and so is one whose worker died, once its lease (the
+  timeout plus 30 seconds) runs out. Jobs can run more than once, so make
+  handlers safe to repeat.
 - **Return when `ctx` is done.** A handler that ignores it keeps running in
   the background after its job has been counted as failed.
-- **Enqueue in your own transaction** with `functions.In(tx)`, and the job
-  exists only if the transaction commits.
+- **Shutting down:** on SIGTERM the worker takes no new jobs, gives the
+  ones in hand 25 seconds, then cancels their `ctx` and puts them back
+  without counting the attempt.
+- **Enqueue in your own transaction** with `functions.In(tx)` (a `pgx.Tx`,
+  `*pgx.Conn` or pool), and the job exists only if the transaction
+  commits. The table must exist by then (a worker or an earlier `Enqueue`
+  creates it).
 - **Delay a job** with `functions.Delay(d)`.
+- **Cleanup:** a worker deletes jobs that finished more than 7 days ago
+  when it starts. Failed jobs stay, with the error in `last_error`.
 
 ## Database
 
@@ -112,10 +136,11 @@ func main() {
 
 Before `Start` runs a function, it applies the ones the database hasn't
 had: each once, in name order, in its own transaction, recorded in the
-table `maxcloud_migrations`. Only one process applies them at a time; the
-others wait, so no function starts on an older schema than its code
-expects. A migration that fails, a file edited after it was applied, or
-migrations without a `$DATABASE_URL` stop the process (exit 1).
+table `public.maxcloud_migrations`. Only one process applies them at a
+time; the others wait, so no function starts on an older schema than its
+code expects. A migration that fails, a file edited after it was applied,
+or migrations without a `$DATABASE_URL` stop the process (exit 1). A
+migration the database has but the binary doesn't is left alone.
 `MAXCLOUD_MIGRATE=0` in the environment turns it off. `--describe` lists
 the embedded files, and the deploy warns when `migrations/` has one the
 binary doesn't.
@@ -131,7 +156,11 @@ An app's S3 buckets are listed in its `maxcloud.yaml`
 them as `mc-<app>--<bucket>` and gives every function the app's
 credentials as `AWS_*` environment variables, which the AWS SDK reads by
 itself. `MAXCLOUD_APP`, the app's name, is set on every function.
-`functions.BucketName("uploads")` returns the full name:
+`functions.BucketName("uploads")` returns the full name (or an error
+without `MAXCLOUD_APP`). Each bucket's full name is also in
+`MAXCLOUD_BUCKET_<NAME>` (`MAXCLOUD_BUCKET_UPLOADS`), for libraries
+configured by environment; a pod started before the bucket existed
+doesn't have it.
 
 ```go
 cfg, err := config.LoadDefaultConfig(ctx)
@@ -165,13 +194,19 @@ The objects are also readable straight from Object Storage, at
 
 `KVGet`, `KVSet`, `KVDelete` and `KVList` are a key-value store (like
 Workers KV) in the app's Postgres database (`DATABASE_URL`; the app needs
-`db: true` in its `maxcloud.yaml`). Values are JSON.
+`db: true` in its `maxcloud.yaml`). Values are JSON; reads see writes
+right away. Keys are 1 to 512 bytes.
 
 ```go
 err := functions.KVSet(ctx, "session:42", session, time.Hour) // 0: no expiry
-found, err := functions.KVGet(ctx, "session:42", &session)
+found, err := functions.KVGet(ctx, "session:42", &session)   // false if missing or expired
+existed, err := functions.KVDelete(ctx, "session:42")
 keys, next, err := functions.KVList(ctx, "session:", "", 100)
 ```
+
+`KVList` gives keys in order after the cursor (`""` to start), up to the
+limit (0: 100; at most 1000), and the cursor for the next page, `""` when
+there are no more. It's one table, `maxcloud_kv`, made on first use.
 
 ## Secrets
 
@@ -184,23 +219,34 @@ reads it, with an error that says how to set it when it's missing.
 `functions.Start()` runs the function named in `$FUNCTION_TARGET` (or
 `--target`):
 
-- **HTTP:** a server on `$PORT`.
+- **HTTP:** a server on `$PORT` (or `--port`, else 8080).
 - **Schedule:** one run, then it exits 0, or 1 on an error.
 - **Queue:** the worker loop.
 
 First it applies the app's pending migrations (see Migrations). On SIGTERM
-it finishes what's in flight (up to 25 seconds) and exits 0.
+an HTTP server or worker finishes what's in flight (up to 25 seconds) and
+exits 0; a scheduled run's `ctx` is cancelled. `Start` doesn't return: it
+exits the process, so deferred calls in `main` don't run.
 
-With `--describe`, or `MAXCLOUD_DESCRIBE=1` in the environment, it prints
-the registered functions as JSON instead; that's what `mcloud` deploys from.
-Register functions in `main` before `Start`, and don't connect to anything
-before that, so describing stays fast.
+With `--describe` it prints the registered functions, their settings and
+the embedded migrations as JSON instead. With `MAXCLOUD_DESCRIBE=1` in the
+environment it prints the same as one line, `maxcloud:describe:{...}`.
+That's how the deploy asks the built image: it runs it with that variable
+and the image's own command, so the image has to run your binary, and
+reads the line. Register functions in `main` before `Start`, and don't
+connect to anything before that: describing runs without the database or
+secrets. To see what a deploy would write:
+
+```fish
+go run . --describe | mcloud generate --from -
+```
 
 ## Local development
 
 Run `mcloud dev` in the app's repo. It starts a local Postgres (in Docker)
 or port-forwards to a database branch, sets `DATABASE_URL`, `MAXCLOUD_APP`
-and the secrets in the gitignored `.env`, and runs the app in dev mode.
+and the secrets from `.env` (keep it out of git), and runs the app in dev
+mode with `go run .`. It doesn't watch for changes: restart it yourself.
 
 Dev mode is `go run . --dev`, or `MAXCLOUD_DEV=1` in the environment. It
 runs the whole app in one process, with `MAXCLOUD_DEV=1` set:

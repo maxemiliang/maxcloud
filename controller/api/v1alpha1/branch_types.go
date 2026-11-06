@@ -7,32 +7,43 @@ import (
 
 // DatabaseBranchSpec: a copy of the app's database, as it is now or as it
 // was at a point in time, restored from its backups into a Cluster of its
-// own (db-<branch name>, connection details in db-<branch name>-app). The
-// branch doesn't back itself up: it's for trying things (a migration, a
-// preview deploy), then deleting.
+// own (db-<branch name>, connection details in db-<branch name>-app) with
+// one instance. The branch doesn't back itself up and never writes to the
+// database's backups: it's for trying things (a migration, a preview
+// deploy), then deleting. The spec can't change after it's created.
 type DatabaseBranchSpec struct {
-	// Database to branch, in the same namespace.
+	// Database to branch, in the same namespace. It needs at least one
+	// finished base backup.
 	// +kubebuilder:default=db
 	// +optional
 	Database string `json:"database,omitempty"`
 
-	// At: the point in time to branch from. Empty: the latest.
+	// At: the point in time to branch from (RFC 3339). Empty: the latest.
+	// It can't be before the end of the oldest finished base backup the
+	// database still has.
 	// +optional
 	At *metav1.Time `json:"at,omitempty"`
 
-	// Size of the branch's disk (default: the database's).
+	// Size of the branch's disk (default: the database's spec.size).
 	// +optional
 	Size *resource.Quantity `json:"size,omitempty"`
 }
 
+// BranchPhase is where the branch is in its life.
 type BranchPhase string
 
 const (
+	// BranchCreating: waiting for the database's backups, or restoring.
 	BranchCreating BranchPhase = "Creating"
-	BranchReady    BranchPhase = "Ready"
-	BranchFailed   BranchPhase = "Failed"
+	// BranchReady: the branch's Cluster is ready.
+	BranchReady BranchPhase = "Ready"
+	// BranchFailed: the branch can't be made, or its Cluster was deleted.
+	// The Ready condition says why. Only a missing Database is tried again
+	// (every minute); otherwise delete the branch and make a new one.
+	BranchFailed BranchPhase = "Failed"
 )
 
+// DatabaseBranchStatus is what the controller last saw.
 type DatabaseBranchStatus struct {
 	// Cluster is the branch's CloudNativePG Cluster; its connection details
 	// are in the Secret <Cluster>-app (key uri).
@@ -43,13 +54,17 @@ type DatabaseBranchStatus struct {
 	// +optional
 	FromGeneration int64 `json:"fromGeneration,omitempty"`
 
+	// Phase is where the branch is: Creating, Ready or Failed.
 	// +optional
 	Phase BranchPhase `json:"phase,omitempty"`
 
+	// ObservedGeneration is the spec generation the conditions describe.
 	// +optional
 	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
 
-	// Conditions: Ready.
+	// Conditions: Ready. When the branch failed, its reason is one of
+	// NoDatabase, NoBackupBefore, ClusterGone, Blocked (a Cluster of that
+	// name that isn't the branch's) or NotATenant.
 	// +listType=map
 	// +listMapKey=type
 	// +optional
@@ -72,7 +87,8 @@ type DatabaseBranch struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
-	// The spec can't change: a branch is restored once. Make a new one.
+	// Spec is what to copy: which database, from when, and how big a disk.
+	// It can't change: a branch is restored once. Make a new one.
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="a branch can't be changed; delete it and make a new one"
 	// +optional
 	Spec DatabaseBranchSpec `json:"spec,omitempty"`

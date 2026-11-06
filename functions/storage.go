@@ -20,7 +20,9 @@ var bucketRe = regexp.MustCompile(`^[a-z0-9]([a-z0-9]|-[a-z0-9])*$`)
 //
 //	cfg, _ := config.LoadDefaultConfig(ctx)
 //	s3c := s3.NewFromConfig(cfg, func(o *s3.Options) { o.UsePathStyle = true })
-//	s3c.PutObject(ctx, &s3.PutObjectInput{Bucket: aws.String(functions.BucketName("uploads")), ...})
+//	bucket, err := functions.BucketName("uploads")
+//	...
+//	s3c.PutObject(ctx, &s3.PutObjectInput{Bucket: aws.String(bucket), ...})
 func BucketName(name string) (string, error) {
 	return bucketName(name, os.Getenv)
 }

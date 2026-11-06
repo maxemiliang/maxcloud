@@ -200,8 +200,8 @@ func appsSetCmd(g *globals) *cobra.Command {
 		Long: `Change fields of a registered app. Only the flags you pass change; pass an
 empty value (--cpu "") to go back to the default.
 
-An app's maxcloud.yaml owns what it declares (quota, buckets, db): change
-those in the file. This refuses them, since the next push would undo them.
+An app's maxcloud.yaml owns what it declares (quota, buckets, db,
+domains): change those in the file. This refuses them, since the next push would undo them.
 Use it for what the file leaves out, for apps without one, and to switch
 --deploy between gitops and direct.`,
 		Example: `  mcloud apps set shop --cpu 500m --memory 2Gi

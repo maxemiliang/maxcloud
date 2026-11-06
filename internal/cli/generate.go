@@ -18,14 +18,17 @@ func generateCmd(g *globals) *cobra.Command {
 	c := &cobra.Command{
 		Use:   "generate",
 		Short: "Write deploy/k8s from the app's functions",
-		Long: `Write the manifests for the app's functions into deploy/k8s:
+		Long: `Write the manifests for the app's functions into deploy/k8s (--dir):
 functions.yaml (rewritten every time) and the kustomization listing it.
 Queue functions need the app's database: db: true in maxcloud.yaml.
 
-The deploy workflow runs this on every push, from the image it built. Run it
-locally to see what a deploy would change: it asks the built app
+The deploy workflow does the same on every push, from the image it built.
+Run it locally to see what a deploy would change: it asks the built app
 (npx maxcloud-functions --describe, in source: from maxcloud.yaml), so
-build the app first.`,
+build the app first. A Go app describes itself with go run . --describe;
+pipe that in with --from -.`,
+		Example: `  mcloud generate
+  go run . --describe | mcloud generate --from -`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			var data []byte

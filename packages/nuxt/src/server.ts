@@ -1,8 +1,8 @@
 // Server helpers for a Nuxt (Nitro) app on maxcloud:
 //
 //   import { s3Driver, drizzleDb } from "@max-cloud/nuxt/server";
-//   useStorage().mount("files", s3Driver("uploads"));
-//   const db = drizzleDb(schema);
+//   useStorage().mount("files", await s3Driver("uploads"));
+//   const db = await drizzleDb(schema);
 
 import { bucketName, db } from "@max-cloud/functions";
 

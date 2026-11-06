@@ -316,7 +316,9 @@ func buildCmd(g *globals) *cobra.Command {
 		Long: `Build the app in the current repo (with its Dockerfile, else with Paketo
 buildpacks) and push it to the maxcloud registry,
 registry.gronblom.dev/<app>/<app>. mcloud is docker's credential helper
-for the registry while it builds, so there's no docker login.
+for the registry while it builds, so there's no docker login. image: in
+maxcloud.yaml pushes somewhere else instead, with your own docker login
+(not with --ci).
 
 It builds the folder source: in maxcloud.yaml names (e.g. worker, when the
 repo's root is something else), else the folder maxcloud.yaml is in. The
@@ -364,7 +366,7 @@ the image.`,
 	f.StringVar(&o.manifests, "manifests", "deploy/k8s", "the manifests directory Flux applies (--ci)")
 	f.StringVar(&o.image, "image", "app", "the image's name in the manifests, replaced by the built one (--ci)")
 	f.BoolVar(&o.functions, "functions", false, "a maxcloud functions app: write its functions' manifests (--ci)")
-	f.StringVar(&o.app, "app", "", "the app (default: maxcloud.yaml's)")
+	f.StringVar(&o.app, "app", "", "the app (--ci; default: maxcloud.yaml's)")
 	f.BoolVar(&printContext, "print-context", false, "print the directory --ci would build and exit")
 	_ = f.MarkHidden("print-context")
 	return c

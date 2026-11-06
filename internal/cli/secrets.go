@@ -58,7 +58,7 @@ type secretsFlags struct {
 }
 
 func (f *secretsFlags) bind(c *cobra.Command, restart bool) {
-	c.Flags().StringVar(&f.app, "app", "", "the app (default: maxcloud.yaml's, or $MCLOUD_APP)")
+	c.Flags().StringVar(&f.app, "app", "", "the app (default: $MCLOUD_APP, else maxcloud.yaml's)")
 	if restart {
 		c.Flags().BoolVar(&f.noRestart, "no-restart", false, "don't restart the functions; they get the change when they next start")
 	}

@@ -50,7 +50,7 @@ removed an hour after it ends.`,
 			return nil
 		},
 	}
-	c.Flags().StringVar(&app, "app", "", "the app (default: maxcloud.yaml's, or $MCLOUD_APP)")
+	c.Flags().StringVar(&app, "app", "", "the app (default: $MCLOUD_APP, else maxcloud.yaml's)")
 	c.Flags().DurationVar(&timeout, "timeout", time.Hour, "stop following after this long (the run carries on)")
 	return c
 }
@@ -121,7 +121,7 @@ zero starts for it.`,
 		},
 	}
 	f := c.Flags()
-	f.StringVar(&app, "app", "", "the app (default: maxcloud.yaml's, or $MCLOUD_APP)")
+	f.StringVar(&app, "app", "", "the app (default: $MCLOUD_APP, else maxcloud.yaml's)")
 	f.StringVarP(&method, "request", "X", "", "HTTP method (default GET, or POST with -d)")
 	f.StringVarP(&data, "data", "d", "", "request body; @FILE reads it from a file")
 	f.StringArrayVarP(&headers, "header", "H", nil, `a header, "Name: value" (repeatable)`)
