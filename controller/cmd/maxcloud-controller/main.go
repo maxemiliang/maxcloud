@@ -196,11 +196,12 @@ func run(metricsAddr, probeAddr string, leaderElect bool) error {
 		HealthProbeBindAddress: probeAddr,
 		LeaderElection:         leaderElect,
 		LeaderElectionID:       "maxcloud-controller",
-		// The only Secrets read through the cache are apps' app-secrets
-		// (mcloud's); the rest are read uncached, so not every Secret in the
-		// cluster is held in memory.
+		// The only Secrets and ConfigMaps read through the cache are apps'
+		// app-secrets and app-env (mcloud's); the rest are read uncached, so
+		// not every one in the cluster is held in memory.
 		Cache: cache.Options{ByObject: map[client.Object]cache.ByObject{
-			&corev1.Secret{}: {Label: labels.SelectorFromSet(labels.Set{controller.ManagedByLabel: "mcloud"})},
+			&corev1.Secret{}:    {Label: labels.SelectorFromSet(labels.Set{controller.ManagedByLabel: "mcloud"})},
+			&corev1.ConfigMap{}: {Label: labels.SelectorFromSet(labels.Set{controller.ManagedByLabel: "mcloud"})},
 		}},
 	})
 	if err != nil {
@@ -285,8 +286,13 @@ func run(metricsAddr, probeAddr string, leaderElect bool) error {
 	} else {
 		ctrl.Log.WithName("setup").Info("MAXCLOUD_SECRETS_AGE_KEY unset: apps' secrets aren't backed up")
 	}
+	// Their plain variables (mcloud env set) too, as JSON: no key needed.
+	env := &controller.EnvBackup{Client: mgr.GetClient(), Storage: storage, Objects: s3c, Bucket: cfg.registryBucket}
+	if err := env.SetupWithManager(mgr); err != nil {
+		return fmt.Errorf("app env backup: %w", err)
+	}
 	if err := (&controller.RegistryBackup{
-		Client: mgr.GetClient(), Storage: storage, Objects: s3c, Bucket: cfg.registryBucket, Secrets: secrets,
+		Client: mgr.GetClient(), Storage: storage, Objects: s3c, Bucket: cfg.registryBucket, Secrets: secrets, Env: env,
 	}).SetupWithManager(mgr); err != nil {
 		return fmt.Errorf("registry backup: %w", err)
 	}

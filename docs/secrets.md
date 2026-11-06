@@ -9,7 +9,8 @@ maxcloud controller keeps an encrypted copy and puts it back after a
 cluster rebuild. A GitOps app that still has
 `deploy/k8s/secrets.sops.yaml` (how secrets were kept before) moves off it
 with `mcloud secrets migrate`, which takes over the Secret Flux already
-decrypted.
+decrypted. Settings that aren't secret are
+[environment variables](environment.md) instead.
 
 ```fish
 mcloud secrets set STRIPE_KEY       # asks for the value; restarts the functions

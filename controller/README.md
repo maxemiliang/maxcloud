@@ -215,6 +215,17 @@ from the API server. Without the key there's no copy and no restore. Keep
 the key somewhere other than the cluster: without it, the copies can't be
 read. Make one with `age-keygen`.
 
+### App env
+
+mcloud keeps an app's plain variables (`mcloud env set`) in the ConfigMap
+`app-env` in its namespace, labelled `app.kubernetes.io/managed-by:
+mcloud`. The controller copies it to the registry's bucket as
+`env/<app>.json` (`{"KEY":"value"}`, not encrypted: these aren't secrets,
+and no key is needed) and puts it back the same way it does
+`app-secrets`: when a tenant namespace appears, when the ConfigMap is
+deleted, and in the restore loop. Deleting the app deletes the copy too.
+The controller caches only ConfigMaps with mcloud's label.
+
 ### Pulling images from the maxcloud registry
 
 With `MAXCLOUD_IMAGE_REGISTRY` set (e.g. `registry.gronblom.dev`), every app

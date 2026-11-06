@@ -135,9 +135,10 @@ func (c *Client) SecretData(ctx context.Context, ns, name string) (map[string]st
 	return out, nil
 }
 
-// Marks on the app's secrets Secret: mcloud owns it (the maxcloud
-// controller backs up Secrets so marked), and Flux leaves it alone if it
-// once applied it from a secrets.sops.yaml that's gone from git since.
+// Marks on the app's secrets Secret and env ConfigMap: mcloud owns them
+// (the maxcloud controller backs up the ones so marked), and Flux leaves
+// the Secret alone if it once applied it from a secrets.sops.yaml that's
+// gone from git since.
 var appSecretsLabels = map[string]string{"app.kubernetes.io/managed-by": FieldManager}
 var appSecretsAnnotations = map[string]string{"kustomize.toolkit.fluxcd.io/prune": "disabled"}
 
@@ -185,27 +186,16 @@ func (c *Client) AdoptSecret(ctx context.Context, ns, name string) (bool, error)
 	return err == nil, err
 }
 
-func markAppSecrets(s *corev1.Secret) {
-	if s.Labels == nil {
-		s.Labels = map[string]string{}
-	}
-	if s.Annotations == nil {
-		s.Annotations = map[string]string{}
-	}
-	for k, v := range appSecretsLabels {
-		s.Labels[k] = v
-	}
-	for k, v := range appSecretsAnnotations {
-		s.Annotations[k] = v
-	}
-}
+func markAppSecrets(s *corev1.Secret) { markAppObject(&s.ObjectMeta) }
 
 // RestartedAtAnnotation on a function's pod template starts new pods (a
-// new revision, for a Knative service), which read the secrets again.
+// new revision, for a Knative service), which read the secrets and env
+// again.
 const RestartedAtAnnotation = "maxcloud.gronblom.dev/restarted-at"
 
 // RestartFunctions rolls the app's HTTP and queue functions, so they pick
-// up changed secrets; scheduled ones read them on their next run anyway.
+// up changed secrets or env; scheduled ones read them on their next run
+// anyway.
 // Returns what it restarted. It applies as its own field manager, so
 // neither Flux nor a direct deploy minds the annotation.
 func (c *Client) RestartFunctions(ctx context.Context, ns string) ([]string, error) {

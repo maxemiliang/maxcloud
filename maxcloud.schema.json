@@ -125,6 +125,12 @@
           }
         }
       }
+    },
+    "env": {
+      "description": "Plain environment variables (not secrets) for every function, e.g. {LOG_LEVEL: info}. The deploy writes them into the functions' manifests, so a change ships with the next deploy. Each value is taken exactly as written (0.10 stays 0.10). They win over mcloud env set, which refuses the names declared here. Names are A-Z, 0-9 and _, not starting with a digit; the platform's own (DATABASE_URL, PORT, AWS_*, MAXCLOUD_*, K_*) are refused. Apps with their own manifests don't get them.",
+      "type": "object",
+      "propertyNames": {"pattern": "^[A-Z_][A-Z0-9_]*$"},
+      "additionalProperties": {"type": ["string", "number", "boolean"]}
     }
   }
 }

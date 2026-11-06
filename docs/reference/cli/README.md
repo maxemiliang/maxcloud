@@ -29,6 +29,7 @@ $GH\_TOKEN (or $GITHUB\_TOKEN), else the GitHub CLI's login.
 | [`mcloud deploy`](mcloud-deploy.md) | Push this repo and follow the build and the rollout (direct apps: build here and apply) |
 | [`mcloud dev`](mcloud-dev.md) | Run the app here, all its functions in one process |
 | [`mcloud doctor`](mcloud-doctor.md) | Check that everything mcloud needs is set up, and say how to fix what isn't |
+| [`mcloud env`](mcloud-env.md) | An app's plain environment variables, for all its functions |
 | [`mcloud generate`](mcloud-generate.md) | Write deploy/k8s from the app's functions |
 | [`mcloud init`](mcloud-init.md) | Set up this repo as a functions app on maxcloud |
 | [`mcloud kubeconfig`](mcloud-kubeconfig.md) | Write the kubeconfig that logs in through Authelia (mcloud login does this) |

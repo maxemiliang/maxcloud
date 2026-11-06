@@ -47,8 +47,10 @@ maxcloud:
     pending migrations in migrations/ are applied to it first (see mcloud
     db migrate);
   - MAXCLOUD_APP, so bucketName() works;
-  - secrets from .env in the repo and in source: (keep them out of git),
-    or the app's own from the cluster (--secrets remote);
+  - env: from maxcloud.yaml;
+  - secrets from .env in the repo and in source: (keep them out of git;
+    it also overrides maxcloud.yaml's env here), or the app's own from
+    the cluster, with its mcloud env set variables (--secrets remote);
   - the app's real buckets with --buckets (careful: real data).
 
 It runs in the app's folder: source: in maxcloud.yaml, else the folder
@@ -79,8 +81,14 @@ runtimeConfig from the same environment.`,
 				"MAXCLOUD_DEV": "1",
 				"PORT":         strconv.Itoa(port),
 			}
-			// Secrets: .env (the repo's, then the source folder's), then (if
-			// asked) the cluster's.
+			// maxcloud.yaml's env, then .env (the repo's, then the source
+			// folder's), then (if asked) the cluster's variables and secrets.
+			for k, v := range p.Env {
+				env[k] = v
+			}
+			if len(p.Env) > 0 {
+				u.KV([][2]string{{"env", fmt.Sprintf("%d from %s", len(p.Env), ProjectFile)}})
+			}
 			dotenv, err := readDotenv(filepath.Join(p.Dir, ".env"))
 			if err != nil {
 				return err
@@ -110,6 +118,21 @@ runtimeConfig from the same environment.`,
 					return err
 				}
 				if secrets == "remote" {
+					vars, err := k.ConfigMapData(ctx, p.App, functions.AppEnv)
+					if err != nil {
+						return err
+					}
+					n := 0
+					for k, v := range vars {
+						// maxcloud.yaml's win on the cluster too.
+						if _, ok := p.Env[k]; !ok {
+							env[k] = v
+							n++
+						}
+					}
+					if n > 0 {
+						u.KV([][2]string{{"env", fmt.Sprintf("%d from the cluster (mcloud env)", n)}})
+					}
 					s, err := k.SecretData(ctx, p.App, functions.AppSecrets)
 					if err != nil {
 						return err
@@ -190,7 +213,7 @@ runtimeConfig from the same environment.`,
 	}
 	f := c.Flags()
 	f.StringVar(&db, "db", "", "local, branch:NAME or none (default: local if maxcloud.yaml has db:, else none)")
-	f.StringVar(&secrets, "secrets", "local", "local (.env) or remote (the app's secrets on the cluster, and .env)")
+	f.StringVar(&secrets, "secrets", "local", "local (.env) or remote (the app's secrets and mcloud env variables on the cluster, and .env)")
 	f.BoolVar(&remoteBuckets, "buckets", false, "use the app's real buckets (its S3 credentials from the cluster)")
 	f.BoolVar(&migrations, "migrate", true, "apply the pending migrations in migrations/ to the database first")
 	f.IntVar(&port, "port", 8080, "port to serve the HTTP functions on")

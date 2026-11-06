@@ -55,7 +55,11 @@ pipe that in with --from -.`,
 				return err
 			}
 			app, _ := appName(nil)
-			changed, err := functions.WriteDir(dir, d, functions.Options{Image: image, App: app})
+			env, err := manifestEnv(app)
+			if err != nil {
+				return err
+			}
+			changed, err := functions.WriteDir(dir, d, functions.Options{Image: image, App: app, Env: env})
 			if err != nil {
 				return err
 			}

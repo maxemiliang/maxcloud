@@ -69,6 +69,7 @@ func (g *globals) deployDirect(ctx context.Context, k *kube.Client, p *project, 
 	objs := functions.Objects(d, functions.Options{
 		Image:  image,
 		App:    name,
+		Env:    p.Env,
 		Labels: map[string]string{kube.DirectLabel: kube.FieldManager},
 	})
 	u := g.UI()

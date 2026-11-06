@@ -20,8 +20,10 @@ maxcloud:
     pending migrations in migrations/ are applied to it first (see mcloud
     db migrate);
   - MAXCLOUD\_APP, so bucketName() works;
-  - secrets from .env in the repo and in source: (keep them out of git),
-    or the app's own from the cluster (--secrets remote);
+  - env: from maxcloud.yaml;
+  - secrets from .env in the repo and in source: (keep them out of git;
+    it also overrides maxcloud.yaml's env here), or the app's own from
+    the cluster, with its mcloud env set variables (--secrets remote);
   - the app's real buckets with --buckets (careful: real data).
 
 It runs in the app's folder: source: in maxcloud.yaml, else the folder
@@ -52,5 +54,5 @@ Flags:
 | `--entry` string |  | TypeScript: the module exporting the functions (default src/index.ts, else package.json main) |
 | `--migrate` | `true` | apply the pending migrations in migrations/ to the database first |
 | `--port` int | `8080` | port to serve the HTTP functions on |
-| `--secrets` string | `local` | local (.env) or remote (the app's secrets on the cluster, and .env) |
+| `--secrets` string | `local` | local (.env) or remote (the app's secrets and mcloud env variables on the cluster, and .env) |
 

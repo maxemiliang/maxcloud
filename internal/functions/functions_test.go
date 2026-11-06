@@ -149,6 +149,34 @@ func TestManifestsOptionalStorage(t *testing.T) {
 	}
 }
 
+// maxcloud.yaml's env goes into every function's container as literals,
+// sorted, after the platform's variables; mcloud env set's ConfigMap and
+// the secrets come in through envFrom, the secrets last.
+func TestManifestsEnv(t *testing.T) {
+	d, _ := Parse([]byte(desc))
+	out, err := Manifests(d, Options{App: "shop", Env: map[string]string{"LOG_LEVEL": "debug", "API_BASE": "https://api.example.com"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := docs(t, out)
+	for _, c := range []any{
+		get(m["Service/api"], "spec", "template", "spec", "containers", 0),
+		get(m["CronJob/nightly"], "spec", "jobTemplate", "spec", "template", "spec", "containers", 0),
+		get(m["Deployment/resize"], "spec", "template", "spec", "containers", 0),
+	} {
+		env := get(c, "env").([]any)
+		n := len(env)
+		if get(c, "env", n-2, "name") != "API_BASE" || get(c, "env", n-2, "value") != "https://api.example.com" ||
+			get(c, "env", n-1, "name") != "LOG_LEVEL" || get(c, "env", n-1, "value") != "debug" {
+			t.Errorf("env %v", env)
+		}
+		if get(c, "envFrom", 1, "configMapRef", "name") != AppEnv || get(c, "envFrom", 1, "configMapRef", "optional") != true ||
+			get(c, "envFrom", 2, "secretRef", "name") != AppSecrets {
+			t.Errorf("envFrom %v", get(c, "envFrom"))
+		}
+	}
+}
+
 func TestWriteDir(t *testing.T) {
 	d, _ := Parse([]byte(desc))
 	dir := filepath.Join(t.TempDir(), "deploy", "k8s")
