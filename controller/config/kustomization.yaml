@@ -34,4 +34,4 @@ resources:
 # release-please's release PR bumps it (the annotation on the line).
 images:
   - name: ghcr.io/maxemiliang/maxcloud-controller
-    newTag: 0.10.0 # x-release-please-version
+    newTag: 0.11.0 # x-release-please-version
