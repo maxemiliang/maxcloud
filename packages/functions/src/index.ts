@@ -7,6 +7,9 @@ export {
   type ScheduleOptions,
   type QueueOptions,
   type HttpHandler,
+  type NodeHandler,
+  type NodeListener,
+  type Volume,
   type HttpContext,
   type ScheduleHandler,
   type ScheduleContext,
@@ -22,3 +25,4 @@ export { bucketName } from "./storage.ts";
 export { kv, type KVSetOptions, type KVListOptions, type KVList } from "./kv.ts";
 export { secret } from "./secrets.ts";
 export { db } from "./db.ts";
+export { start, isEntrypoint, onShutdown, type StartOptions } from "./start.ts";

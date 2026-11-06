@@ -51,7 +51,14 @@ export function describe(found: Found[]) {
     sdk: "@max-cloud/functions",
     version: packageVersion(),
     functions: found.map(({ name, exportName, fn }) => {
-      const base = { name, export: exportName, kind: fn.kind, memory: fn.options.memory ?? null, cpu: fn.options.cpu ?? null };
+      const o0 = fn.options;
+      const base = {
+        name, export: exportName, kind: fn.kind, memory: o0.memory ?? null, cpu: o0.cpu ?? null,
+        memoryLimit: o0.memoryLimit ?? null,
+        user: o0.user ?? null,
+        readOnlyRootFilesystem: o0.readOnlyRootFilesystem ?? false,
+        volumes: (o0.volumes ?? []).map((v) => ({ path: v.path, sizeLimit: v.sizeLimit ?? "", memory: v.memory ?? false })),
+      };
       switch (fn.kind) {
         case "http": {
           const o = fn.options;
@@ -63,10 +70,6 @@ export function describe(found: Found[]) {
             concurrency: o.concurrency ?? 0,
             timeoutSeconds: o.timeoutSeconds ?? 300,
             proxied: o.proxied ?? false,
-            memoryLimit: o.memoryLimit ?? null,
-            user: o.user ?? null,
-            readOnlyRootFilesystem: o.readOnlyRootFilesystem ?? false,
-            volumes: (o.volumes ?? []).map((v) => ({ path: v.path, sizeLimit: v.sizeLimit ?? "", memory: v.memory ?? false })),
             healthPath: o.healthPath ?? "",
           };
         }

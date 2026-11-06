@@ -76,6 +76,12 @@ test("<name>.localhost reaches that HTTP function, request unchanged", async (t)
   assert.equal((await get(port, "nightly.localhost")).status, 404, "only HTTP functions have a host");
 });
 
+test("<name>.localhost reaches a Node listener function directly", async (t) => {
+  const found = findFunctions({ web: onRequest({ node: (req, res) => res.end(`node ${req.headers.host} ${req.url}`) }) });
+  const { port } = await start(t, found);
+  assert.equal((await get(port, `web.localhost:${port}`, "/x?y=1")).body, `node web.localhost:${port} /x?y=1`);
+});
+
 test("GET / lists the functions", async (t) => {
   const { port } = await start(t);
   for (const host of [`localhost:${port}`, `127.0.0.1:${port}`]) {

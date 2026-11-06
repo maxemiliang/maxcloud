@@ -16,6 +16,18 @@ export interface CommonOptions {
    * Schedule: the whole run (default 3600). Queue: per job (default 300).
    */
   timeoutSeconds?: number;
+  /** Memory the container may use above `memory` (its request), for spikes, e.g. "1536Mi". */
+  memoryLimit?: string;
+  /** Run as this user id (and group), for an image whose Dockerfile has no non-root USER. */
+  user?: number;
+  /** Make the root filesystem read-only; write to `volumes` (and point TMPDIR at one). */
+  readOnlyRootFilesystem?: boolean;
+  /**
+   * Scratch directories, empty at every start. `memory: true` keeps one in
+   * RAM (counted against the container's memory): a bigger /dev/shm for
+   * Chromium, say. Knative doesn't allow /tmp.
+   */
+  volumes?: Volume[];
 }
 
 export interface HttpOptions extends CommonOptions {
@@ -32,18 +44,6 @@ export interface HttpOptions extends CommonOptions {
    * WAF, caching, Cloudflare Access. Needs `public`. Default false.
    */
   proxied?: boolean;
-  /** Memory the container may use above `memory` (its request), for spikes, e.g. "1536Mi". */
-  memoryLimit?: string;
-  /** Run as this user id (and group), for an image whose Dockerfile has no non-root USER. */
-  user?: number;
-  /** Make the root filesystem read-only; write to `volumes` (and point TMPDIR at one). */
-  readOnlyRootFilesystem?: boolean;
-  /**
-   * Scratch directories, empty at every start. `memory: true` keeps one in
-   * RAM (counted against the container's memory): a bigger /dev/shm for
-   * Chromium, say. Knative doesn't allow /tmp.
-   */
-  volumes?: Volume[];
   /**
    * A path that answers 2xx when an instance can take requests: it gets
    * traffic only after that, and is restarted when it stops answering.
@@ -90,6 +90,19 @@ export interface HttpContext {
 
 export type HttpHandler = (request: Request, context: HttpContext) => Response | Promise<Response>;
 
+/**
+ * A Node.js request listener: Express, Fastify's `server.routing`, h3's
+ * `toNodeListener(app)`, Nitro. It gets the server's own request and
+ * response, so streaming and the original headers work as they do in a
+ * plain Node server.
+ */
+export type NodeListener = (req: import("node:http").IncomingMessage, res: import("node:http").ServerResponse) => unknown;
+
+/** `{ node: listener }`: an HTTP function served by a Node.js request listener. */
+export interface NodeHandler {
+  node: NodeListener;
+}
+
 export interface ScheduleContext {
   /** Aborted at the timeout, or when the run is stopped. */
   signal: AbortSignal;
@@ -119,7 +132,10 @@ export interface HttpFunction {
   readonly [FUNCTION]: true;
   readonly kind: "http";
   readonly options: HttpOptions;
+  /** The fetch-style handler; for a Node listener, one that goes through a local server. */
   readonly handler: HttpHandler;
+  /** Set for a function made from a Node.js request listener (`{ node }`): served directly. */
+  readonly node?: NodeListener;
   /** Calls the handler directly, e.g. in tests. */
   fetch(request: Request): Promise<Response>;
 }
@@ -152,11 +168,17 @@ export function isFunction(v: unknown): v is MaxcloudFunction {
  * export const api = onRequest({ public: true }, app.fetch); // e.g. a Hono app
  * ```
  */
-export function onRequest(handler: HttpHandler): HttpFunction;
-export function onRequest(options: HttpOptions, handler: HttpHandler): HttpFunction;
-export function onRequest(a: HttpOptions | HttpHandler, b?: HttpHandler): HttpFunction {
-  const [options, handler] = typeof a === "function" ? [{}, a] : [a, b];
-  if (typeof handler !== "function") throw new TypeError("onRequest: missing handler");
+export function onRequest(handler: HttpHandler | NodeHandler): HttpFunction;
+export function onRequest(options: HttpOptions, handler: HttpHandler | NodeHandler): HttpFunction;
+export function onRequest(a: HttpOptions | HttpHandler | NodeHandler, b?: HttpHandler | NodeHandler): HttpFunction {
+  const [options, h] = typeof a === "function" || isNodeHandler(a) ? [{}, a] : [a as HttpOptions, b];
+  if (isNodeHandler(h)) {
+    const node = h.node;
+    const handler: HttpHandler = (request) => fetchThroughNode(node, request);
+    return { [FUNCTION]: true, kind: "http", options, handler, node, fetch: (request) => fetchThroughNode(node, request) };
+  }
+  if (typeof h !== "function") throw new TypeError("onRequest: missing handler (a function, or { node: listener })");
+  const handler = h;
   return {
     [FUNCTION]: true,
     kind: "http",
@@ -166,6 +188,45 @@ export function onRequest(a: HttpOptions | HttpHandler, b?: HttpHandler): HttpFu
       return handler(request, { signal: request.signal });
     },
   };
+}
+
+function isNodeHandler(v: unknown): v is NodeHandler {
+  return typeof v === "object" && v !== null && typeof (v as NodeHandler).node === "function";
+}
+
+/** Sends one request through a Node listener on a throwaway local server (for fetch() in tests). */
+async function fetchThroughNode(node: NodeListener, request: Request): Promise<Response> {
+  const http = await import("node:http");
+  const server = http.createServer((req, res) => void node(req, res));
+  await new Promise<void>((r) => server.listen(0, "127.0.0.1", () => r()));
+  const { port } = server.address() as import("node:net").AddressInfo;
+  const url = new URL(request.url);
+  const headers: Record<string, string> = {};
+  request.headers.forEach((v, k) => (headers[k] = v));
+  headers.host = url.host; // node:http, not fetch: fetch drops the Host it's given
+  const body = request.body ? Buffer.from(await request.arrayBuffer()) : undefined;
+  try {
+    return await new Promise<Response>((resolve, reject) => {
+      const req = http.request({ host: "127.0.0.1", port, method: request.method, path: url.pathname + url.search, headers }, (res) => {
+        const chunks: Buffer[] = [];
+        res.on("data", (c: Buffer) => chunks.push(c));
+        res.on("error", reject);
+        res.on("end", () => {
+          const h = new Headers();
+          for (const [k, v] of Object.entries(res.headers)) {
+            for (const x of Array.isArray(v) ? v : v === undefined ? [] : [v]) h.append(k, x);
+          }
+          const empty = request.method === "HEAD" || [204, 304].includes(res.statusCode ?? 200);
+          resolve(new Response(empty ? null : Buffer.concat(chunks), { status: res.statusCode, statusText: res.statusMessage, headers: h }));
+        });
+      });
+      req.on("error", reject);
+      req.end(body);
+    });
+  } finally {
+    server.closeAllConnections();
+    await new Promise((r) => server.close(r));
+  }
 }
 
 /**

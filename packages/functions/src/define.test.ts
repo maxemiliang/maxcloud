@@ -75,6 +75,7 @@ test("describe fills in the defaults", () => {
   assert.deepEqual(d.functions[1], {
     name: "nightly", export: "nightly", kind: "schedule", memory: null, cpu: null,
     schedule: "0 3 * * *", timeZone: "UTC", retries: 0, timeoutSeconds: 3600,
+    memoryLimit: null, user: null, readOnlyRootFilesystem: false, volumes: [],
   });
   const q = d.functions[2]!;
   assert.equal(q.name, "resize-image");
