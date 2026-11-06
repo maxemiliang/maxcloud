@@ -6,36 +6,53 @@ from [maxemiliang/homelab](https://github.com/maxemiliang/homelab).
 
 This repo holds:
 
-- `mcloud`, the command line (Go, `cmd/mcloud`). Available now.
+- `mcloud`, the command line (Go, `cmd/mcloud`).
 - `@max-cloud/functions`, the Node.js/TypeScript SDK for writing HTTP,
   scheduled and queue functions (`packages/functions`, see its README).
 - `github.com/maxemiliang/maxcloud/functions`, the same for Go (`functions/`,
   see its README).
 - `maxcloud-controller` (`controller/`), which gives apps their S3
-  buckets and Postgres databases. See its README.
+  buckets and Postgres databases, keeps their secrets safe through a
+  cluster rebuild, and describes the platform to mcloud. See its README.
+
+## Getting started
+
+```fish
+mise use -g github:maxemiliang/maxcloud   # or: go install github.com/maxemiliang/maxcloud/cmd/mcloud@latest
+mcloud login                              # once per machine: log in, and set up cluster access
+mcloud doctor                             # if anything's off: says what, and how to fix it
+
+mkdir shop && cd shop && git init
+mcloud init                               # a starter functions app (--lang go for Go)
+npm install
+mcloud dev                                # run it here: http://hello.localhost:8080/
+gh repo create --source . --push --private
+mcloud deploy                             # register it, push, follow the build and the rollout
+```
 
 ## How an app gets deployed
 
 1. **Set up the repo.** `mcloud init` writes a starter functions app (or
-   adds what an existing Node.js app needs), its deploy workflow and a
-   `maxcloud.yaml`: the whole app's definition, like a `wrangler.toml`
-   (quota, buckets, database).
+   adds what an existing Node.js or Go app needs), its deploy workflow and
+   a `maxcloud.yaml`: the whole app's definition, like a `wrangler.toml`.
 2. **Register the app.** The first `mcloud deploy` does it, from
-   `maxcloud.yaml` (or `mcloud apps create`). It adds the app's entry to
-   the registry in the cluster, with your kubeconfig: no commit to the
-   homelab repo. From that entry the platform creates the app's namespace
-   with its quota and guardrails, its buckets and database, and a
-   reconciler for the app's `deploy/k8s`. After that, a pushed change to
-   `maxcloud.yaml` reaches the entry by itself (the controller reads it
-   from Flux), within the limits a developer may ask for; `mcloud deploy`
-   does it too. The maxcloud controller keeps a copy of
+   `maxcloud.yaml`. It adds the app's entry to the registry in the cluster,
+   with your login: no commit to the homelab repo. From that entry the
+   platform creates the app's namespace with its quota and guardrails, its
+   buckets and database, and a reconciler for the app's `deploy/k8s`. After
+   that, a pushed change to `maxcloud.yaml` reaches the entry by itself (the
+   controller reads it from Flux), within the limits a developer may ask
+   for; `mcloud deploy` does it too. The maxcloud controller keeps a copy of
    every entry in Object Storage and puts them back after a cluster
    rebuild.
 3. **Push to deploy.** Every push to `main` runs the deploy workflow
-   (`.github/workflows/run-deploy.yaml` in this repo, which app repos call):
-   - it builds the image (buildpacks, or the repo's Dockerfile);
-   - it asks the image which functions it has, and `mcloud generate`
-     writes their manifests to `deploy/k8s`;
+   (`.github/workflows/run-deploy.yaml` in this repo, which app repos call).
+   It's `mcloud build --ci`:
+   - it builds the image (the repo's Dockerfile, else Paketo buildpacks)
+     and pushes it to `registry.gronblom.dev/<app>/<app>` as the repo
+     itself (GitHub's OIDC token; no secrets);
+   - it asks the image which functions it has and writes their manifests
+     to `deploy/k8s`;
    - it pins the image digest and commits.
 
    Flux then deploys that commit. `mcloud deploy` pushes and follows all
@@ -51,13 +68,47 @@ Each kind of function becomes:
 | `onSchedule` | a CronJob |
 | `onQueue` | a Deployment that KEDA scales from 0 on the queue's backlog |
 
-Queues keep their jobs in the app's Postgres database, which the registry
-gives it: `mcloud apps set <app> --db` (mcloud says so when an app with a
-queue has none).
+Queues keep their jobs in the app's Postgres database: `db: true` in
+`maxcloud.yaml` (mcloud says so when an app with a queue has none).
 
 The homelab README's "Run an app" covers the platform side, and its
 `templates/run-app` is the starting point for apps that aren't functions;
 they use the same workflow without `functions: true`.
+
+## maxcloud.yaml
+
+```yaml
+app: shop
+quota: {cpu: 500m, memory: 2Gi}
+buckets: [uploads, assets:public]
+db: {size: 2Gi}          # or db: true
+# deploy: direct         # mcloud deploy builds and applies from here, no git
+```
+
+It owns what it declares: a push (or `mcloud deploy`) applies it, and
+`mcloud apps set` refuses to change those fields, since the next push would
+undo them. What it leaves out stays as it is. Changing `deploy:` switches
+the app between GitOps and direct on the next `mcloud deploy`, which asks
+first.
+
+## Local development
+
+`mcloud dev` runs the whole app on your machine, with what it gets on
+maxcloud:
+
+- every HTTP function at `http://<name>.localhost:8080/` (a list at
+  `http://localhost:8080/`), the queue workers, and scheduled functions on
+  `POST http://localhost:8080/_run/<name>`;
+- `DATABASE_URL`: a local Postgres in Docker (kept between runs; the
+  default when `maxcloud.yaml` has `db:`), or a branch of the app's
+  database through a port-forward (`--db branch:NAME`);
+- `MAXCLOUD_APP`, and secrets from `.env` (keep it out of git), or the
+  app's own (`--secrets remote`); the app's real buckets only with
+  `--buckets`.
+
+TypeScript runs from source and restarts on changes. To poke the deployed
+app: `mcloud call api /health` sends a request to any function, private
+ones too, and `mcloud run nightly` runs a scheduled function now.
 
 ## Direct deploys
 
@@ -68,19 +119,23 @@ mcloud init --deploy direct                 # a starter with deploy: direct in m
 mcloud deploy                               # register, build here, push, apply, wait until ready
 ```
 
-`mcloud deploy` builds the working tree, uncommitted changes included: with
-the Dockerfile, or with `pack` (buildpacks) if there's none. It pushes the
-image to the maxcloud registry (`registry.gronblom.dev/<app>/<app>`) with a
-token of the app's push ServiceAccount that lasts an hour (so whoever may
-manage the app's namespace may push its images; no docker login of your
-own), asks the image for its functions, and applies their manifests with
-your kubeconfig. Functions you removed are deleted; the database never
-is.
+`mcloud deploy` builds the working tree, uncommitted changes included, with
+`mcloud build`, the same build CI runs: with the Dockerfile, or with
+buildpacks (`pack`, or pack in a container if only docker is installed).
+Without docker, an app without a Dockerfile builds in the cluster instead
+(`--build cluster`, chosen by itself): a buildpacks pod in the app's
+namespace, with the source streamed to it. The image goes to the maxcloud
+registry with a token of the app's push ServiceAccount that lasts an hour
+(whoever may manage the app's namespace may push its images); mcloud is
+docker's credential helper while it builds, so there's no docker login and
+nothing is written to `~/.docker`. Then it asks the image for its
+functions and applies their manifests. Functions you removed are deleted;
+the database never is.
 
 What you give up: nothing is in git, so a cluster rebuild doesn't bring a
 direct app back (run `mcloud deploy` again), and there's no history to
-revert to. Use GitOps (the default) for anything that matters. `mcloud apps
-set <app> --deploy gitops` switches an app over.
+revert to. Use GitOps (the default) for anything that matters: remove
+`deploy: direct` from `maxcloud.yaml` and `mcloud deploy`.
 
 `image:` in `maxcloud.yaml` pushes somewhere else instead (log in to it
 yourself); the cluster then needs to be able to pull from there.
@@ -88,13 +143,8 @@ yourself); the cluster then needs to be able to pull from there.
 ## Buckets
 
 An app gets S3 buckets (in the homelab's UpCloud Object Storage, the way a
-Worker gets R2) from its registry entry:
-
-```fish
-mcloud apps set shop --buckets uploads,assets:public
-```
-
-[`controller/`](controller/README.md) turns each into a bucket
+Worker gets R2) from `buckets:` in `maxcloud.yaml`. The
+[controller](controller/README.md) turns each into a bucket
 `mc-shop--uploads` and puts the app's credentials in the Secret
 `maxcloud-s3`, which every function gets as environment variables. The
 SDKs' `bucketName("uploads")` gives the full name. Removing a bucket from
@@ -103,118 +153,99 @@ the list keeps it and its objects.
 ## Databases
 
 An app gets a Postgres database (the way a Worker gets D1, but Postgres)
-from its registry entry too:
+from `db:` in `maxcloud.yaml`. The controller runs it with CloudNativePG,
+backs it up continuously to the bucket `mc-shop--db`, and restores it from
+there by itself if its cluster is lost. Every function gets
+`DATABASE_URL`. An app set up before this may have a `database.yaml` (what
+mcloud used to write for queue functions, with no backups): it keeps
+working, but the controller won't take it over. Moving it is a dump and
+restore (homelab `docs/runbooks/move-database-to-registry.md`).
 
 ```fish
-mcloud apps set shop --db                  # --db-size 2Gi, --db-instances 2
+mcloud db psql                      # psql in it (--branch NAME for a branch)
+mcloud db proxy                     # on localhost, with a DATABASE_URL to use
+mcloud db restore --at 15m          # as it was 15 minutes ago, in place
+mcloud db branch create try         # a throwaway copy (--at for a point in time)
 ```
 
-The controller runs it with CloudNativePG, backs it up continuously to the
-bucket `mc-shop--db`, and restores it from there by itself if its cluster
-is lost. Every function gets `DATABASE_URL`. An app set up before this may
-have a `database.yaml` (what mcloud used to write for queue functions, with
-no backups): it keeps working, but the controller won't take it over.
-Moving it is a dump and restore (homelab `docs/runbooks/move-database-to-registry.md`).
-
-`mcloud db restore --at TIME` takes it back to a point in time (in place;
-later writes are gone from it), and `mcloud db branch create NAME [--at
-TIME]` makes a throwaway copy with its own `DATABASE_URL`-style URL, for
-trying a migration or a preview. Both restore from the backups, so they
-reach back as far as the retention (7 days by default).
+`restore` and `branch` restore from the backups, so they reach back as far
+as the retention (7 days by default).
 
 ## Secrets and key-value storage
 
 `mcloud secrets set NAME` stores an app's secret, like `wrangler secret
-put`. A GitOps app keeps it in `deploy/k8s/secrets.sops.yaml`, encrypted
-with SOPS to the homelab's age key (Flux decrypts it): commit and push. A
-direct app keeps it in a Secret on the cluster. Every function gets the
-app's secrets as environment variables; the SDKs' `secret("NAME")` reads
-one. For KV, the SDKs' `kv` stores JSON values in the app's database.
+put`. Every app keeps them in the Secret `app-secrets` in its namespace:
+nothing to commit and no keys to hold, and the app's HTTP and queue
+functions restart so they have it right away. Every function gets the
+secrets as environment variables; the SDKs' `secret("NAME")` reads one. The
+maxcloud controller keeps an encrypted copy and puts it back after a
+cluster rebuild. A GitOps app that still has
+`deploy/k8s/secrets.sops.yaml` (how secrets were kept before) moves off it
+with `mcloud secrets migrate`, which takes over the Secret Flux already
+decrypted.
+
+For KV, the SDKs' `kv` stores JSON values in the app's database.
 
 ## Logging in
 
-mcloud (and kubectl) can log in to the cluster through the homelab's
-Authelia instead of using an admin kubeconfig. The cluster's API server
-trusts Authelia's ID tokens, and you act with what your groups allow:
+mcloud (and kubectl) log in to the cluster through the homelab's Authelia,
+and act with what your groups allow. `mcloud login` is all the setup:
 
-```fish
-mcloud kubeconfig                         # writes ~/.kube/homelab-oidc.yaml from your current one
-set -Ux MCLOUD_KUBECONFIG ~/.kube/homelab-oidc.yaml
-mcloud login                              # device code: approve it in a browser (--browser: this machine's)
-kubectl --kubeconfig ~/.kube/homelab-oidc.yaml auth whoami
-```
+- it reads the platform's discovery document
+  (`https://maxcloud.gronblom.dev/.well-known/maxcloud.json`,
+  `$MCLOUD_PLATFORM_URL`): the cluster's address and CA, and the oldest
+  mcloud that works with it (older ones warn);
+- it logs in: a device code you approve in any browser (`--browser`: this
+  machine's);
+- it writes mcloud's kubeconfig, `~/.config/mcloud/kubeconfig`, which
+  mcloud uses from then on. For kubectl: `set -gx KUBECONFIG
+  ~/.config/mcloud/kubeconfig`.
 
 The kubeconfig runs `mcloud credential` for a token: the ID token lasts an
 hour and is refreshed by itself; logging in again is needed after 12 hours
-or `mcloud logout`. If Authelia or the cluster is down, get an admin
-kubeconfig with `upctl kubernetes config` (the homelab's break-glass).
+or `mcloud logout`. mcloud picks its kubeconfig from `--kubeconfig`, else
+`$MCLOUD_KUBECONFIG`, else its own, else `$KUBECONFIG`. If Authelia or the
+cluster is down, get an admin kubeconfig with `upctl kubernetes config`
+(the homelab's break-glass) and pass it with `--kubeconfig`.
 
-## Install
-
-```fish
-mise use -g github:maxemiliang/maxcloud   # a release binary
-# or
-go install github.com/maxemiliang/maxcloud/cmd/mcloud@latest
-```
-
-`mcloud` reads the cluster with the kubeconfig in `$MCLOUD_KUBECONFIG`, else
-the usual `$KUBECONFIG`. It writes to GitHub with `$GH_TOKEN`, else your
-GitHub CLI login (`gh auth login`). In fish:
-
-```fish
-set -Ux MCLOUD_KUBECONFIG ~/.kube/homelab.yaml
-```
+GitOps deploys follow the build on GitHub with `$GH_TOKEN`, else your
+GitHub CLI login (`gh auth login`).
 
 ## Commands
 
 ```fish
-mcloud init                                         # in a new repo: a functions app (--lang go for Go)
-mcloud apps create shop --repo maxemiliang/shop     # register it (once)
-mcloud deploy                                       # push, follow build, Flux and rollout
+mcloud login                        # set up and log in (mcloud doctor checks it)
+mcloud init                         # in a new repo: a functions app (--lang go for Go)
+mcloud dev                          # run it here
+mcloud deploy                       # register, push, follow build, Flux and rollout
 
-mcloud apps list                                    # registered apps, did the last deploy apply
-mcloud apps set shop --cpu 500m --memory 2Gi        # change its quota
-mcloud apps set shop --buckets uploads,assets:public  # its S3 buckets
-mcloud apps set shop --db                             # a Postgres database, backed up
+mcloud status                       # deploy, services and URLs, workloads, databases, problems
+mcloud logs -f                      # logs of every pod; mcloud logs shop web -f for one service
+mcloud call api /health             # a request to a function, private ones too
+mcloud run nightly                  # a scheduled function, now
 
-mcloud queue ls shop                # jobs per queue and state, latest failed ones
-mcloud queue retry shop 41 42       # run failed jobs again (or --failed)
-
-mcloud db restore shop --at 15m     # the database as it was 15 minutes ago, in place
-mcloud db branch create shop try    # a throwaway copy (--at for a point in time)
-mcloud db branch list shop
-mcloud db recover shop --from 3     # unblock: restore backup generation 3
-
-mcloud login                        # log in to the cluster through Authelia (mcloud kubeconfig first)
-mcloud logout
-
-mcloud secrets set STRIPE_KEY       # in the app's repo: asks for the value
+mcloud secrets set STRIPE_KEY       # asks for the value; restarts the functions
 mcloud secrets list                 # names only
 mcloud secrets unset STRIPE_KEY
-mcloud apps delete shop                             # remove it, namespace and data included
 
-mcloud status shop        # deploy, services and URLs, workloads, databases, problems
-mcloud logs shop          # logs of every pod
-mcloud logs shop web -f   # follow one service, including pods that start later
-mcloud generate           # what deploy/k8s would become (asks the built app)
+mcloud db psql                      # and db proxy, restore, recover, branch
+mcloud queue ls                     # jobs per queue and state, latest failed ones
+mcloud queue retry 41 42            # run failed jobs again (or --failed)
+
+mcloud apps list                    # registered apps, did the last deploy apply
+mcloud apps set shop --deploy direct  # by hand: what maxcloud.yaml leaves out
+mcloud apps delete shop             # remove it, namespace and data included
+
+mcloud build                        # build and push the image (what deploys run)
+mcloud generate                     # what deploy/k8s would become (asks the built app)
 ```
 
-Run inside an app's repo, commands take the app from its `maxcloud.yaml`,
-which also holds what `mcloud deploy` keeps the app's registry entry in
-line with (what it leaves out stays as it is):
-
-```yaml
-app: shop
-quota: {cpu: 500m, memory: 2Gi}
-buckets: [uploads, assets:public]
-db: {size: 2Gi}          # or db: true
-```
-
-`create`, `set` and `delete` change the registry in the cluster with your
-kubeconfig (no commit anywhere), and show the change and ask first, since it
-deploys. Pass `--dry-run` to only see it, or `--yes` to skip the question.
-`delete` asks you to type the app's name. Apps registered in the homelab
-repo itself (the platform's own, like run-demo) change there instead.
+Run inside an app's repo, commands take the app from its `maxcloud.yaml`
+(or `$MCLOUD_APP`). `apps create`, `set` and `delete` change the registry
+in the cluster (no commit anywhere), and show the change and ask first.
+Pass `--dry-run` to only see it, or `--yes` to skip the question. `delete`
+asks you to type the app's name. Apps registered in the homelab repo itself
+(the platform's own, like run-demo) change there instead.
 
 ## Releasing
 
@@ -223,11 +254,15 @@ Each part has its own tags; pushing one releases it.
 | Tag | Releases | How |
 | --- | --- | --- |
 | `v0.2.0` | `mcloud` binaries on GitHub Releases | `release.yaml` (GoReleaser) |
+| `controller/v0.2.0` | the controller image | `release-controller.yaml` (see `controller/README.md`) |
 | `functions-js/v0.2.0` | `@max-cloud/functions` on npm, after bumping `packages/functions/package.json` | `release-npm.yaml` (trusted publishing, no token) |
 | `functions/v0.2.0` | the Go SDK | the tag is the release (Go modules) |
 
-`run-deploy.yaml` pins the `mcloud` it uses (`MCLOUD_VERSION`), and Renovate
-bumps it after each release.
+`run-deploy.yaml` installs the newest `mcloud` release (`v*`) when it runs,
+so a workflow change that needs a new mcloud goes out after that release.
+`mcloud init` writes the newest `@max-cloud/functions` from npm into a new
+app; bump `sdkFallback` in `internal/cli/sdkversion.go` with each SDK
+release for when npm can't be asked.
 
 ## Development
 
