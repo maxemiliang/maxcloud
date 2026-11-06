@@ -137,3 +137,17 @@ func TestDrizzleKitMigrationsAreLeftAlone(t *testing.T) {
 		t.Errorf("deploy warning for a drizzle-kit folder: %q", w)
 	}
 }
+
+// With source:, migrations are in the app's folder: what the image is built
+// from, and where its runtime looks.
+func TestMigrationsInSourceFolder(t *testing.T) {
+	root := t.TempDir()
+	os.WriteFile(filepath.Join(root, ProjectFile), []byte("app: shop\nsource: worker\n"), 0o644)
+	os.MkdirAll(filepath.Join(root, "worker", "migrations"), 0o755)
+	os.WriteFile(filepath.Join(root, "worker", "migrations", "0001_init.sql"), []byte("SELECT 1;\n"), 0o644)
+	t.Chdir(root)
+	files, where, err := loadMigrations("")
+	if err != nil || len(files) != 1 || where != filepath.Join("worker", "migrations") {
+		t.Fatalf("%v %q %v", files, where, err)
+	}
+}

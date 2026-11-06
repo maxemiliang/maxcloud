@@ -291,3 +291,83 @@ build first):
 ```fish
 FUNCTION_TARGET=api npx maxcloud-functions
 ```
+
+## Testing
+
+`@max-cloud/functions/testing` has two helpers for tests (any runner:
+`node:test`, Vitest, ...). It's a separate entry point, so it stays out of
+the app's production bundle.
+
+### A throwaway database
+
+`testDatabase()` creates a uniquely named schema (`maxcloud_test_...`) in
+the Postgres at `TEST_DATABASE_URL` and points the SDK at it until
+`drop()`: `db()`, `kv` and `enqueue` use it, and `DATABASE_URL` is set to a
+URL whose connections start with `search_path` set to the schema, so queue
+workers and child processes land there too. `drop()` closes its pool,
+drops the schema with everything in it and puts back the previous
+`DATABASE_URL` and `db()` pool.
+
+```ts
+import { after, before, test } from "node:test";
+import assert from "node:assert/strict";
+import { db, kv } from "@max-cloud/functions";
+import { testDatabase, type TestDatabase } from "@max-cloud/functions/testing";
+
+const skip = process.env.TEST_DATABASE_URL ? false : "set TEST_DATABASE_URL";
+let t: TestDatabase;
+before(async () => { if (!skip) t = await testDatabase(); });
+after(() => t?.drop());
+
+test("signup", { skip }, async () => {
+  await db().query("CREATE TABLE users (email text PRIMARY KEY)"); // or run your migrations
+  await kv.set("welcome", true);
+  assert.equal(await kv.get("welcome"), true);
+});
+```
+
+Any Postgres you can create schemas in will do:
+
+```fish
+docker run -d --rm --name pg-test -p 127.0.0.1:5433:5432 -e POSTGRES_PASSWORD=test postgres:18
+set -x TEST_DATABASE_URL postgres://postgres:test@127.0.0.1:5433/postgres
+```
+
+Only the schema is on the search path, not `public`: a table your test
+didn't create there doesn't exist, and an extension installed in `public`
+is only reachable as `public.<name>`. `t.url`, `t.pool` and `t.schema` are
+there for your own connections. `testDatabase({ use: false })` makes the
+schema without touching `db()` or `DATABASE_URL`. A schema left behind by a
+crashed run can be dropped by hand; they all start with `maxcloud_test_`.
+
+### In-memory buckets
+
+`testBuckets()` starts an S3 server in the test process, on
+`127.0.0.1` with a random port, and sets the `AWS_*` variables a function
+gets on maxcloud to point at it (and `MAXCLOUD_APP` to `test` if it isn't
+set). The app's own S3 client then talks to it unchanged: the AWS SDK,
+aws4fetch, unstorage's `s3` driver. Objects live in memory; signatures
+aren't checked.
+
+```ts
+import { bucketName } from "@max-cloud/functions";
+import { testBuckets } from "@max-cloud/functions/testing";
+
+const s3 = await testBuckets({ buckets: ["uploads"] }); // bucketName("uploads") exists
+s3.put(bucketName("uploads"), "in/cat.png", png, "image/png"); // a starting point
+await resizeImage({ key: "in/cat.png" });                       // your code, using the AWS SDK
+assert.ok(s3.get(bucketName("uploads"), "out/cat.png"));        // a Buffer, or undefined
+await s3.close();                                               // puts the environment back
+```
+
+It answers PutObject, GetObject (with `Range`), HeadObject, DeleteObject,
+DeleteObjects, CopyObject, ListObjectsV2 and ListObjects, and creating,
+listing and deleting buckets, with S3's XML and error codes (`NoSuchKey`,
+`NoSuchBucket`). Multipart uploads (`@aws-sdk/lib-storage`'s `Upload` for
+bodies over 5 MB) answer 501. Requests are path-style
+(`http://127.0.0.1:PORT/<bucket>/<key>`); the AWS SDK uses that for an IP
+endpoint by itself. The helper's own methods take a bucket's full name:
+`createBucket`, `get`, `object` (body and headers), `put`, `keys(bucket,
+prefix)`, `clear()` (empties every bucket); `s3.env` is the `AWS_*`
+variables, for a child process. `testBuckets({ use: false })` leaves the
+environment alone.

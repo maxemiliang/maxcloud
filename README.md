@@ -91,6 +91,7 @@ buckets: [uploads, assets:public]
 db: {size: 2Gi}          # or db: true
 domains:                 # hostnames of your own, within what an admin allowed
   - {host: shop.gronblom.dev, service: web, proxied: true}
+# source: worker         # build the app from this folder, not the repo's root
 # deploy: direct         # mcloud deploy builds and applies from here, no git
 ```
 
@@ -99,6 +100,17 @@ It owns what it declares: a push (or `mcloud deploy`) applies it, and
 undo them. What it leaves out stays as it is. Changing `deploy:` switches
 the app between GitOps and direct on the next `mcloud deploy`, which asks
 first.
+
+`source:` is the folder the app lives in, relative to `maxcloud.yaml`
+(default: the folder `maxcloud.yaml` is in). Use it when the repo's root is
+something else, e.g. a Go CLI at the root with the web app in `worker/`:
+buildpacks would otherwise detect Go. Everything that builds or runs the
+app uses it: `mcloud build`, direct deploys (local and `--build cluster`,
+which streams only that folder), the deploy workflow (unless its `context`
+input says otherwise), `mcloud generate` and `mcloud dev`. A Dockerfile and
+`project.toml` are looked for there. It has to be a directory inside the
+repo, without `..`. The manifests stay where they are (`deploy/k8s` at the
+root).
 
 ## Local development
 
@@ -241,7 +253,8 @@ as the retention (7 days by default).
 
 ### Migrations
 
-SQL migrations go in `migrations/`, next to `maxcloud.yaml`, one file per
+SQL migrations go in `migrations/` in the app's folder (next to
+`maxcloud.yaml`, or in `source:`), one file per
 change, named `NUMBER_DESCRIPTION.sql` with numbers of one width:
 
 ```

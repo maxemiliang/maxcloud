@@ -119,6 +119,9 @@ type project struct {
 	App    string `json:"app"`
 	Deploy string `json:"deploy"` // "direct" for direct deploys
 	Image  string `json:"image"`  // image repository for direct deploys
+	// The folder the image is built from (and mcloud dev runs in),
+	// relative to maxcloud.yaml; default ".". See sourceDir.
+	Source string `json:"source"`
 
 	// GitOps source: the repo (default: the origin remote), manifests
 	// directory and branch.

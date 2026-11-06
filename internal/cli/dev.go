@@ -47,21 +47,26 @@ maxcloud:
     pending migrations in migrations/ are applied to it first (see mcloud
     db migrate);
   - MAXCLOUD_APP, so bucketName() works;
-  - secrets from .env in the repo (keep it out of git), or the app's own
-    from the cluster (--secrets remote);
+  - secrets from .env in the repo and in source: (keep them out of git),
+    or the app's own from the cluster (--secrets remote);
   - the app's real buckets with --buckets remote (careful: real data).
 
-TypeScript runs your source with Node's type stripping and restarts on
-changes (node --watch); Go apps run with go run (restart it yourself). A
-Nuxt app (a nuxt.config) runs nuxt dev on the port instead, at
-http://localhost:8080/; @max-cloud/nuxt fills its runtimeConfig from the
-same environment.`,
+It runs in the app's folder: source: in maxcloud.yaml, else the folder
+maxcloud.yaml is in. TypeScript runs your source with Node's type
+stripping and restarts on changes (node --watch); Go apps run with go run
+(restart it yourself). A Nuxt app (a nuxt.config) runs nuxt dev on the
+port instead, at http://localhost:8080/; @max-cloud/nuxt fills its
+runtimeConfig from the same environment.`,
 		Example: `  mcloud dev
   mcloud dev --db branch:try-migration
   mcloud dev --secrets remote --buckets remote`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			p, err := loadProject()
+			if err != nil {
+				return err
+			}
+			src, err := p.sourceDir()
 			if err != nil {
 				return err
 			}
@@ -74,10 +79,23 @@ same environment.`,
 				"MAXCLOUD_DEV": "1",
 				"PORT":         strconv.Itoa(port),
 			}
-			// Secrets: .env, then (if asked) the cluster's.
+			// Secrets: .env (the repo's, then the source folder's), then (if
+			// asked) the cluster's.
 			dotenv, err := readDotenv(filepath.Join(p.Dir, ".env"))
 			if err != nil {
 				return err
+			}
+			if src != p.Dir {
+				more, err := readDotenv(filepath.Join(src, ".env"))
+				if err != nil {
+					return err
+				}
+				if dotenv == nil {
+					dotenv = map[string]string{}
+				}
+				for k, v := range more {
+					dotenv[k] = v
+				}
 			}
 			for k, v := range dotenv {
 				env[k] = v
@@ -144,12 +162,12 @@ same environment.`,
 			}
 
 			if migrations {
-				if err := g.devMigrate(ctx, p, env["DATABASE_URL"]); err != nil {
+				if err := g.devMigrate(ctx, p, src, env["DATABASE_URL"]); err != nil {
 					return err
 				}
 			}
 
-			run, err := devCommand(ctx, p.Dir, entry, port)
+			run, err := devCommand(ctx, src, entry, port)
 			if err != nil {
 				return err
 			}
@@ -188,7 +206,7 @@ func devCommand(ctx context.Context, dir, entry string, port int) (*exec.Cmd, er
 		return cmd, nil
 	}
 	if _, err := os.Stat(filepath.Join(dir, "package.json")); err != nil {
-		return nil, errors.New("no package.json or go.mod here: which app is this?")
+		return nil, fmt.Errorf("no package.json or go.mod in %s: which app is this? (source: in maxcloud.yaml names the app's folder)", dir)
 	}
 	if isNuxt(dir) {
 		// Nuxt's own dev server (Vite, hot reload); @max-cloud/nuxt turns

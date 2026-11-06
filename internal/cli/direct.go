@@ -31,7 +31,11 @@ func (g *globals) deployDirect(ctx context.Context, k *kube.Client, p *project, 
 		return fmt.Errorf("namespace %s doesn't exist yet; Flux creates it within a minute of registering", name)
 	}
 
-	where, err := buildWhere(ctx, p.Dir, g.buildMode)
+	src, err := p.sourceDir()
+	if err != nil {
+		return err
+	}
+	where, err := buildWhere(ctx, src, g.buildMode)
 	if err != nil {
 		return err
 	}

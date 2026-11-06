@@ -134,6 +134,9 @@ app: %[1]s
 # infrastructure/configs/run/domains.yaml); proxied: behind Cloudflare.
 # domains:
 #   - {host: shop.gronblom.dev, service: web, proxied: true}
+# The folder the app is built from and mcloud dev runs in, if it isn't this
+# one (e.g. the web app in worker/ of a repo whose root is a Go CLI):
+# source: worker
 `,
 	".github/workflows/deploy.yaml": `# Every push to main deploys this app to maxcloud (maxemiliang/maxcloud,
 # .github/workflows/run-deploy.yaml): builds the image, writes the

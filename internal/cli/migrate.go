@@ -22,7 +22,8 @@ func dbMigrateCmd(g *globals) *cobra.Command {
 	c := &cobra.Command{
 		Use:   "migrate [APP]",
 		Short: "Apply the app's SQL migrations (migrations/*.sql) to its database",
-		Long: `Apply the files in migrations/ (next to maxcloud.yaml, or --dir) that the
+		Long: `Apply the files in migrations/ (in the app's folder: source: in
+maxcloud.yaml, else next to it; or --dir) that the
 database hasn't had yet, in name order, each in its own transaction. Name
 them NUMBER_DESCRIPTION.sql with numbers of one width: 0001_init.sql,
 0002_add_orders.sql. The database records each one it applied, with a
@@ -129,21 +130,26 @@ database it runs the app with.`,
 		},
 	}
 	c.Flags().StringVar(&branch, "branch", "", "a branch of the database (mcloud db branch list)")
-	c.Flags().StringVar(&dir, "dir", "", "the migrations directory (default: migrations/ next to maxcloud.yaml)")
+	c.Flags().StringVar(&dir, "dir", "", "the migrations directory (default: migrations/ in the app's folder, source: or next to maxcloud.yaml)")
 	c.Flags().StringVar(&url, "database-url", "", "apply to this Postgres instead of the app's database")
 	c.Flags().BoolVar(&dryRun, "dry-run", false, "list the applied and pending migrations, apply none")
 	c.Flags().BoolVarP(&yes, "yes", "y", false, "don't ask")
 	return c
 }
 
-// loadMigrations reads dir (default: migrations/ next to maxcloud.yaml, or
+// loadMigrations reads dir (default: migrations/ in the app's folder, or
 // here) and returns the files and how to name the directory.
 func loadMigrations(dir string) ([]migrate.File, string, error) {
 	explicit := dir != ""
 	if !explicit {
 		dir = migrate.Dir
 		if p, err := loadProject(); err == nil {
-			dir = filepath.Join(p.Dir, migrate.Dir)
+			// The app's folder (source:), which the image is built from.
+			src, err := p.sourceDir()
+			if err != nil {
+				return nil, "", err
+			}
+			dir = filepath.Join(src, migrate.Dir)
 		}
 	}
 	abs, err := filepath.Abs(dir)
@@ -160,7 +166,7 @@ func loadMigrations(dir string) ([]migrate.File, string, error) {
 		if explicit {
 			return nil, "", fmt.Errorf("--dir %s: not a directory", dir)
 		}
-		return nil, "", fmt.Errorf("no %s directory: put the migrations in migrations/ next to maxcloud.yaml (0001_init.sql, ...), or pass --dir", where)
+		return nil, "", fmt.Errorf("no %s directory: put the migrations in migrations/ in the app's folder (next to maxcloud.yaml, or source:), 0001_init.sql, ..., or pass --dir", where)
 	}
 	if drizzleKitDir(abs) {
 		return nil, "", fmt.Errorf("%s is drizzle-kit's (it has meta/_journal.json): apply it with drizzle-kit migrate or drizzle's migrator; mcloud would apply every file a second time", where)
@@ -195,12 +201,12 @@ func (g *globals) applyMigrations(ctx context.Context, conn *pgx.Conn, files []m
 
 // devMigrate applies the app's pending migrations to the database mcloud
 // dev hands it, if the app has any.
-func (g *globals) devMigrate(ctx context.Context, p *project, url string) error {
-	if drizzleKitDir(filepath.Join(p.Dir, migrate.Dir)) {
+func (g *globals) devMigrate(ctx context.Context, p *project, src, url string) error {
+	if drizzleKitDir(filepath.Join(src, migrate.Dir)) {
 		g.UI().Note("%s is drizzle-kit's: not applied here (the app's own migrator does)", migrate.Dir)
 		return nil
 	}
-	files, err := migrate.Load(os.DirFS(p.Dir), migrate.Dir)
+	files, err := migrate.Load(os.DirFS(src), migrate.Dir)
 	if err != nil || len(files) == 0 {
 		return err
 	}
@@ -248,10 +254,14 @@ func imageMigrationsWarning(d *functions.Description) string {
 	if err != nil {
 		return ""
 	}
-	if drizzleKitDir(filepath.Join(p.Dir, migrate.Dir)) {
+	src, err := p.sourceDir()
+	if err != nil {
 		return ""
 	}
-	files, err := migrate.Load(os.DirFS(p.Dir), migrate.Dir)
+	if drizzleKitDir(filepath.Join(src, migrate.Dir)) {
+		return ""
+	}
+	files, err := migrate.Load(os.DirFS(src), migrate.Dir)
 	if err != nil {
 		return err.Error()
 	}
