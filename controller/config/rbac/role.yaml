@@ -6,6 +6,14 @@ metadata:
 rules:
 - apiGroups:
   - ""
+  resourceNames:
+  - kube-root-ca.crt
+  resources:
+  - configmaps
+  verbs:
+  - get
+- apiGroups:
+  - ""
   resources:
   - events
   verbs:
@@ -23,12 +31,13 @@ rules:
   - ""
   resources:
   - secrets
-  - services
   verbs:
   - create
   - delete
   - get
+  - list
   - update
+  - watch
 - apiGroups:
   - ""
   resources:
@@ -47,6 +56,15 @@ rules:
   - serviceaccounts/token
   verbs:
   - create
+- apiGroups:
+  - ""
+  resources:
+  - services
+  verbs:
+  - create
+  - delete
+  - get
+  - update
 - apiGroups:
   - ""
   resourceNames:

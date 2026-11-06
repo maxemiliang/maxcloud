@@ -1,0 +1,15 @@
+# The discovery document (/.well-known/maxcloud.json). The cluster's repo
+# routes to it publicly.
+apiVersion: v1
+kind: Service
+metadata:
+  name: maxcloud-controller
+  labels:
+    app.kubernetes.io/name: maxcloud-controller
+spec:
+  selector:
+    app.kubernetes.io/name: maxcloud-controller
+  ports:
+    - name: discovery
+      port: 8082
+      targetPort: discovery

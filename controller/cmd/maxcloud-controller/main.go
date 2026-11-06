@@ -15,6 +15,13 @@
 //	MAXCLOUD_PUBLIC_GATEWAY      namespace/gateway/listener for those (default traefik/public/https-public)
 //	POD_NAMESPACE                where their route objects go (default maxcloud-system)
 //	MAXCLOUD_REGISTRY_BUCKET     where the app registry's in-cluster entries are copied (default maxcloud-registry)
+//	MAXCLOUD_SECRETS_AGE_KEY     age identity (AGE-SECRET-KEY-1...): turns on the apps' secrets backup (off if unset)
+//	MAXCLOUD_IMAGE_REGISTRY      the maxcloud registry's host: apps get pull credentials for it (off if unset)
+//	MAXCLOUD_API_SERVER          the API server's external URL: turns on the discovery document (off if unset)
+//	MAXCLOUD_DISCOVERY_ADDR      where that's served (default :8082)
+//	MAXCLOUD_OIDC_ISSUER         optional, in the discovery document
+//	MAXCLOUD_OIDC_CLIENT_ID      optional, in the discovery document
+//	MAXCLOUD_MIN_MCLOUD_VERSION  optional, in the discovery document
 //	AWS_ACCESS_KEY_ID            the controller's own S3 user
 //	AWS_SECRET_ACCESS_KEY
 package main
@@ -28,10 +35,14 @@ import (
 	"strings"
 	"time"
 
+	"filippo.io/age"
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
@@ -39,6 +50,7 @@ import (
 
 	v1 "github.com/maxemiliang/maxcloud/controller/api/v1alpha1"
 	"github.com/maxemiliang/maxcloud/controller/internal/controller"
+	"github.com/maxemiliang/maxcloud/controller/internal/discovery"
 	"github.com/maxemiliang/maxcloud/controller/internal/objectstorage"
 )
 
@@ -50,6 +62,8 @@ type config struct {
 	postgresImage, dbStorageClass                                      string
 	publicDomain, publicGateway, namespace                             string
 	registryBucket                                                     string
+	secretsKey                                                         *age.X25519Identity
+	apiServer, discoveryAddr, oidcIssuer, oidcClientID, minMcloud      string
 	imageRegistry, zotNamespace                                        string
 	pullTokenLifetime                                                  time.Duration
 	tokenExpires                                                       time.Time
@@ -71,6 +85,21 @@ func configFromEnv() (config, error) {
 	if c.registryBucket = os.Getenv("MAXCLOUD_REGISTRY_BUCKET"); c.registryBucket == "" {
 		c.registryBucket = "maxcloud-registry"
 	}
+	if s := os.Getenv("MAXCLOUD_SECRETS_AGE_KEY"); s != "" {
+		id, err := controller.ParseAgeIdentity(s)
+		if err != nil {
+			// Not the error itself: it could quote the key.
+			return c, errors.New("MAXCLOUD_SECRETS_AGE_KEY: not an age X25519 identity (AGE-SECRET-KEY-1...)")
+		}
+		c.secretsKey = id
+	}
+	c.apiServer = strings.TrimRight(os.Getenv("MAXCLOUD_API_SERVER"), "/")
+	if c.discoveryAddr = os.Getenv("MAXCLOUD_DISCOVERY_ADDR"); c.discoveryAddr == "" {
+		c.discoveryAddr = ":8082"
+	}
+	c.oidcIssuer = os.Getenv("MAXCLOUD_OIDC_ISSUER")
+	c.oidcClientID = os.Getenv("MAXCLOUD_OIDC_CLIENT_ID")
+	c.minMcloud = os.Getenv("MAXCLOUD_MIN_MCLOUD_VERSION")
 	c.imageRegistry = os.Getenv("MAXCLOUD_IMAGE_REGISTRY")
 	c.zotNamespace = os.Getenv("MAXCLOUD_ZOT_NAMESPACE")
 	c.pullTokenLifetime = 7 * 24 * time.Hour
@@ -158,6 +187,12 @@ func run(metricsAddr, probeAddr string, leaderElect bool) error {
 		HealthProbeBindAddress: probeAddr,
 		LeaderElection:         leaderElect,
 		LeaderElectionID:       "maxcloud-controller",
+		// The only Secrets read through the cache are apps' app-secrets
+		// (mcloud's); the rest are read uncached, so not every Secret in the
+		// cluster is held in memory.
+		Cache: cache.Options{ByObject: map[client.Object]cache.ByObject{
+			&corev1.Secret{}: {Label: labels.SelectorFromSet(labels.Set{controller.ManagedByLabel: "mcloud"})},
+		}},
 	})
 	if err != nil {
 		return fmt.Errorf("manager: %w", err)
@@ -215,10 +250,39 @@ func run(metricsAddr, probeAddr string, leaderElect bool) error {
 		return fmt.Errorf("database branch controller: %w", err)
 	}
 
+	// Apps' secrets live only in the cluster: an encrypted copy of each goes
+	// to the registry's bucket, restored after the registry's entries.
+	var secrets *controller.SecretBackup
+	if cfg.secretsKey != nil {
+		secrets = &controller.SecretBackup{
+			Client: mgr.GetClient(), Storage: storage, Objects: s3c, Bucket: cfg.registryBucket, Identity: cfg.secretsKey,
+		}
+		if err := secrets.SetupWithManager(mgr); err != nil {
+			return fmt.Errorf("app secrets backup: %w", err)
+		}
+	} else {
+		ctrl.Log.WithName("setup").Info("MAXCLOUD_SECRETS_AGE_KEY unset: apps' secrets aren't backed up")
+	}
 	if err := (&controller.RegistryBackup{
-		Client: mgr.GetClient(), Storage: storage, Objects: s3c, Bucket: cfg.registryBucket,
+		Client: mgr.GetClient(), Storage: storage, Objects: s3c, Bucket: cfg.registryBucket, Secrets: secrets,
 	}).SetupWithManager(mgr); err != nil {
 		return fmt.Errorf("registry backup: %w", err)
+	}
+
+	// The public discovery document, on every replica.
+	if cfg.apiServer != "" {
+		doc := discovery.Document{APIServer: cfg.apiServer, ImageRegistry: cfg.imageRegistry}
+		if cfg.oidcIssuer != "" {
+			doc.OIDC = &discovery.OIDC{Issuer: cfg.oidcIssuer, ClientID: cfg.oidcClientID}
+		}
+		if cfg.minMcloud != "" {
+			doc.Mcloud = &discovery.Mcloud{MinVersion: cfg.minMcloud}
+		}
+		if err := mgr.Add(&discovery.Server{
+			Addr: cfg.discoveryAddr, Reader: mgr.GetAPIReader(), Namespace: cfg.namespace, Document: doc,
+		}); err != nil {
+			return fmt.Errorf("discovery: %w", err)
+		}
 	}
 
 	// Apps pull their images from the maxcloud registry with tokens of their

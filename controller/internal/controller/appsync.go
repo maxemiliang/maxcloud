@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
@@ -55,8 +56,12 @@ const (
 	// last try didn't take.
 	SyncedRevisionAnnotation = "maxcloud.gronblom.dev/synced-revision"
 	SyncErrorAnnotation      = "maxcloud.gronblom.dev/sync-error"
-	projectFile              = "maxcloud.yaml"
-	maxArtifactBytes         = 64 << 20
+	// SyncedFieldsAnnotation lists the registry keys the app's maxcloud.yaml
+	// declares (comma-separated, sorted), so mcloud can refuse to set them by
+	// hand: the next push would undo it.
+	SyncedFieldsAnnotation = "maxcloud.gronblom.dev/synced-fields"
+	projectFile            = "maxcloud.yaml"
+	maxArtifactBytes       = 64 << 20
 )
 
 // +kubebuilder:rbac:groups=source.toolkit.fluxcd.io,resources=gitrepositories,verbs=get;list;watch
@@ -92,7 +97,7 @@ func (r *AppSync) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result,
 	if err != nil {
 		return ctrl.Result{}, err // Flux's artifact is unreachable: try again
 	}
-	var changes []string
+	var changes, fields []string
 	if found {
 		p, err := parseProject(data)
 		if err != nil {
@@ -106,6 +111,7 @@ func (r *AppSync) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result,
 			values = map[string]any{}
 		}
 		changes = p.apply(values)
+		fields = p.declares()
 		if len(changes) > 0 {
 			want := entry.DeepCopy()
 			if err := unstructured.SetNestedMap(want.Object, values, "spec", "defaultValues"); err != nil {
@@ -134,6 +140,11 @@ func (r *AppSync) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result,
 	}
 	annotations[SyncedRevisionAnnotation] = revision
 	delete(annotations, SyncErrorAnnotation)
+	if found {
+		annotations[SyncedFieldsAnnotation] = strings.Join(fields, ",")
+	} else {
+		delete(annotations, SyncedFieldsAnnotation)
+	}
 	entry.SetAnnotations(annotations)
 	if err := r.Patch(ctx, entry, patch); err != nil {
 		return ctrl.Result{}, err
@@ -311,6 +322,31 @@ func (p *project) apply(values map[string]any) []string {
 		}
 	}
 	return changes
+}
+
+// declares is the registry keys the file sets, sorted. With db (true, false
+// or a map) the file owns the whole database setting.
+func (p *project) declares() []string {
+	var keys []string
+	if q := p.Quota; q != nil {
+		if q.CPU != "" {
+			keys = append(keys, "cpu")
+		}
+		if q.Memory != "" {
+			keys = append(keys, "memory")
+		}
+		if q.Pods != nil {
+			keys = append(keys, "pods")
+		}
+	}
+	if p.Buckets != nil {
+		keys = append(keys, "buckets")
+	}
+	if p.DB != nil {
+		keys = append(keys, "db", "dbSize", "dbInstances")
+	}
+	slices.Sort(keys)
+	return keys
 }
 
 func (r *AppSync) SetupWithManager(mgr ctrl.Manager) error {

@@ -112,6 +112,36 @@ itself from its backups. A finalizer on each entry deletes the copy first
 when the app is deleted on purpose, so a deleted app doesn't come back.
 Entries that live in the homelab repo aren't copied: git has them.
 
+### App secrets
+
+mcloud keeps an app's secrets in the Secret `app-secrets` in its namespace,
+labelled `app.kubernetes.io/managed-by: mcloud`. The cluster holds the only
+copy, so with `MAXCLOUD_SECRETS_AGE_KEY` set (an age identity,
+`AGE-SECRET-KEY-1...`), the controller keeps one in the registry's bucket
+too: `secrets/<app>.age`, the Secret's data as JSON (`{"KEY":"value"}`),
+encrypted to that key. It writes the copy when the
+data changes. An empty Secret is copied as `{}`: no secrets is a state
+like any other.
+
+When an app's namespace exists and has no `app-secrets`, the controller
+creates it from the copy, with mcloud's label and
+`kustomize.toolkit.fluxcd.io/prune: disabled`. It looks when a tenant
+namespace appears, when the Secret is deleted, and in the restore loop
+after the registry's entries (at start and every 15 minutes). So after a
+rebuild the secrets come back with the app, and deleting `app-secrets` by
+hand brings it straight back from the copy: to remove secrets, unset them
+with mcloud.
+
+Deleting the app deletes the copy, with the registry entry's copy (the same
+finalizer), so an app made later under the same name starts without
+secrets. A Secret whose app has no registry entry isn't copied.
+
+The controller caches only Secrets labelled
+`app.kubernetes.io/managed-by: mcloud`; it reads any other Secret straight
+from the API server. Without the key there's no copy and no restore. Keep
+the key somewhere other than the cluster: without it, the copies can't be
+read. Make one with `age-keygen`.
+
 ### Pulling images from the maxcloud registry
 
 With `MAXCLOUD_IMAGE_REGISTRY` set (e.g. `registry.gronblom.dev`), every app
@@ -176,6 +206,42 @@ in the annotation `maxcloud.gronblom.dev/sync-error` and a Warning event.
 `maxcloud.gronblom.dev/synced-revision` is the last revision handled.
 Entries in the homelab repo are left alone.
 
+`maxcloud.gronblom.dev/synced-fields` lists the entry's keys the file
+declares, sorted: from `cpu`, `memory`, `pods`, `buckets`, `db`, `dbSize`
+and `dbInstances`. `quota: {cpu: 1}` declares `cpu`; `buckets: [...]`
+(an empty list too) declares `buckets`; `db` in any form (`true`, `false`
+or a map) declares all three database keys, since the file then owns the
+database setting. mcloud refuses to set these by hand: the next push would
+undo it. The annotation is set for each revision handled, and removed when
+the revision has no `maxcloud.yaml`. A revision that fails to sync leaves
+it as it was.
+
+### The discovery document
+
+So that a new machine can log in without an admin kubeconfig, the
+controller serves `GET /.well-known/maxcloud.json` on `:8082`
+(`MAXCLOUD_DISCOVERY_ADDR`), the Service `maxcloud-controller`'s port
+`discovery`. It's public and holds nothing secret:
+
+```json
+{
+  "apiServer": "https://xyz.k8s.upcloud.com:6443",
+  "certificateAuthorityData": "<base64 of the CA's PEM>",
+  "oidc": {"issuer": "https://...", "clientID": "..."},
+  "imageRegistry": "registry.gronblom.dev",
+  "mcloud": {"minVersion": "0.9.0"}
+}
+```
+
+It's served only with `MAXCLOUD_API_SERVER` set (the API server's external
+URL), by every replica. The CA is `ca.crt` from the ConfigMap
+`kube-root-ca.crt` in the controller's namespace, read again every 5
+minutes. `oidc` comes from `MAXCLOUD_OIDC_ISSUER` and
+`MAXCLOUD_OIDC_CLIENT_ID` (left out without an issuer), `imageRegistry`
+from `MAXCLOUD_IMAGE_REGISTRY`, and `mcloud.minVersion` from
+`MAXCLOUD_MIN_MCLOUD_VERSION` (left out if unset). Clients may cache it
+for 5 minutes. The public route to it lives in the cluster's repo.
+
 ## Running it
 
 From a tag, a cluster applies [`config/`](config/kustomization.yaml): the
@@ -189,7 +255,9 @@ CRDs, RBAC and the Deployment. The cluster provides the namespace
     `maxcloud_upcloud_token_expiry_timestamp_seconds` so an alert can warn
     before it runs out;
   - `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`: the controller's own S3
-    user, with full access to that instance (bucket policies).
+    user, with full access to that instance (bucket policies);
+  - optionally `MAXCLOUD_SECRETS_AGE_KEY`, which turns on the
+    [app secrets' copies](#app-secrets).
 - ConfigMap `maxcloud-controller`: `MAXCLOUD_OBJECT_STORAGE_ID` (the
   instance's UUID), `MAXCLOUD_S3_ENDPOINT` (`https://...`) and optionally
   `MAXCLOUD_S3_REGION` (default `europe-1`), `MAXCLOUD_POSTGRES_IMAGE`,
@@ -198,6 +266,9 @@ CRDs, RBAC and the Deployment. The cluster provides the namespace
   what keeps the data), and a retaining class leaves one behind each time.
 
 `MAXCLOUD_IMAGE_REGISTRY` (optional) turns on the pull credentials above.
+`MAXCLOUD_API_SERVER`, `MAXCLOUD_OIDC_ISSUER`, `MAXCLOUD_OIDC_CLIENT_ID`
+and `MAXCLOUD_MIN_MCLOUD_VERSION` (all optional) make the
+[discovery document](#the-discovery-document).
 
 For the sync from apps' repos the cluster also provides: a NetworkPolicy
 letting `maxcloud-system` reach source-controller in `flux-system`, and a
@@ -205,7 +276,8 @@ Role there for the user `maxcloud:app-sync` to update
 ResourceSetInputProviders.
 
 It acts only in namespaces labelled `run.gronblom.dev/tenant: "true"`.
-Metrics are on `:8080/metrics`: `maxcloud_bucket_size_bytes`,
+Metrics are on `:8080/metrics`, probes on `:8081`, the discovery document
+on `:8082`. Metrics: `maxcloud_bucket_size_bytes`,
 `maxcloud_bucket_objects` and the token's expiry.
 
 The controller isn't on the data path: if it's down, buckets and

@@ -203,3 +203,60 @@ func TestAppSyncOtherCases(t *testing.T) {
 		}
 	})
 }
+
+func TestAppSyncRecordsSyncedFields(t *testing.T) {
+	for _, tc := range []struct{ file, want string }{
+		{"app: shop\nquota: {cpu: 500m, pods: 30}\nbuckets: [uploads]\ndb: {size: 2Gi}\n", "buckets,cpu,db,dbInstances,dbSize,pods"},
+		{"quota: {cpu: '1'}\n", "cpu"},
+		{"quota: {memory: 1Gi}\ndb: true\n", "db,dbInstances,dbSize,memory"},
+		{"db: false\n", "db,dbInstances,dbSize"},
+		{"buckets: []\n", "buckets"},
+		{"app: shop\n", ""},
+	} {
+		e := newSyncEnv(t, mcloudLabels, map[string]string{"maxcloud.yaml": tc.file})
+		if err := e.reconcile(); err != nil {
+			t.Fatal(err)
+		}
+		a := e.entry().GetAnnotations()
+		if got, ok := a[SyncedFieldsAnnotation]; !ok || got != tc.want {
+			t.Errorf("%q: synced-fields = %q (set: %v), want %q", tc.file, got, ok, tc.want)
+		}
+	}
+
+	t.Run("set even when nothing changes", func(t *testing.T) {
+		e := newSyncEnv(t, mcloudLabels, map[string]string{"maxcloud.yaml": "quota: {cpu: 200m}\n"})
+		if err := e.reconcile(); err != nil {
+			t.Fatal(err)
+		}
+		if a := e.entry().GetAnnotations(); a[SyncedFieldsAnnotation] != "cpu" {
+			t.Errorf("annotations = %v", a)
+		}
+	})
+	t.Run("removed when the revision has no maxcloud.yaml", func(t *testing.T) {
+		e := newSyncEnv(t, mcloudLabels, map[string]string{"deploy/k8s/x.yaml": "..."})
+		ent := e.entry()
+		ent.SetAnnotations(map[string]string{SyncedFieldsAnnotation: "cpu"})
+		e.c.Update(context.Background(), ent)
+		if err := e.reconcile(); err != nil {
+			t.Fatal(err)
+		}
+		if a := e.entry().GetAnnotations(); a[SyncedRevisionAnnotation] != "main@sha1:abc" {
+			t.Errorf("annotations = %v", a)
+		} else if _, ok := a[SyncedFieldsAnnotation]; ok {
+			t.Errorf("synced-fields kept: %v", a)
+		}
+	})
+	t.Run("a failed sync leaves the previous value", func(t *testing.T) {
+		e := newSyncEnv(t, mcloudLabels, map[string]string{"maxcloud.yaml": "app: shop\nquota: {cpu: '8'}\nbuckets: [x]\n"})
+		ent := e.entry()
+		ent.SetAnnotations(map[string]string{SyncedFieldsAnnotation: "memory"})
+		e.c.Update(context.Background(), ent)
+		e.writeOK = false
+		if err := e.reconcile(); err != nil {
+			t.Fatal(err)
+		}
+		if a := e.entry().GetAnnotations(); a[SyncedFieldsAnnotation] != "memory" || a[SyncErrorAnnotation] == "" {
+			t.Errorf("annotations = %v", a)
+		}
+	})
+}

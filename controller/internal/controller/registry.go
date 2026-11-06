@@ -46,6 +46,9 @@ type RegistryBackup struct {
 	Storage objectstorage.Storage
 	Objects objectstorage.Objects
 	Bucket  string
+	// Secrets, if set, restores apps' secrets after each Restore of the
+	// entries.
+	Secrets *SecretBackup
 }
 
 // +kubebuilder:rbac:groups=fluxcd.controlplane.io,resources=resourcesetinputproviders,verbs=get;list;watch;create;update;patch
@@ -71,10 +74,14 @@ func (r *RegistryBackup) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 		if !controllerutil.ContainsFinalizer(u, RegistryFinalizer) {
 			return ctrl.Result{}, nil
 		}
-		if err := r.Objects.DeleteObject(ctx, r.Bucket, backupKey(u.GetName())); err != nil {
-			return ctrl.Result{}, err
+		// The app's secrets' copy goes too (whether or not the secrets backup
+		// is on), so an app made later under the same name doesn't get them.
+		for _, k := range []string{secretsKey(u.GetName()), backupKey(u.GetName())} {
+			if err := r.Objects.DeleteObject(ctx, r.Bucket, k); err != nil {
+				return ctrl.Result{}, err
+			}
 		}
-		log.FromContext(ctx).Info("app removed from the registry; its copy too", "app", u.GetName())
+		log.FromContext(ctx).Info("app removed from the registry; its copies too", "app", u.GetName())
 		controllerutil.RemoveFinalizer(u, RegistryFinalizer)
 		return ctrl.Result{}, r.Update(ctx, u)
 	}
@@ -156,12 +163,17 @@ func (r *RegistryBackup) Restore(ctx context.Context) error {
 }
 
 // Start runs Restore when the controller starts (as the leader), and every
-// 15 minutes after.
+// 15 minutes after, then the apps' secrets' restore.
 func (r *RegistryBackup) Start(ctx context.Context) error {
 	logger := log.FromContext(ctx).WithName("registry-restore")
 	for {
 		if err := r.Restore(ctx); err != nil {
 			logger.Error(err, "restoring registry entries")
+		}
+		if r.Secrets != nil {
+			if err := r.Secrets.Restore(ctx); err != nil {
+				logger.Error(err, "restoring app secrets")
+			}
 		}
 		select {
 		case <-ctx.Done():
