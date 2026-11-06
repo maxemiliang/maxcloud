@@ -224,6 +224,7 @@ func TestAppSyncRecordsSyncedFields(t *testing.T) {
 		{"db: false\n", "db,dbInstances,dbSize"},
 		{"buckets: []\n", "buckets"},
 		{"domains: [{host: shop.example.com, service: web}]\n", "domains"},
+		{"deploy: gitops\nquota: {cpu: '1'}\n", "cpu,deploy"},
 		{"app: shop\n", ""},
 	} {
 		e := newSyncEnv(t, mcloudLabels, map[string]string{"maxcloud.yaml": tc.file})

@@ -229,8 +229,11 @@ func projectFileFrom(tgz []byte) ([]byte, bool, error) {
 // project is the part of maxcloud.yaml the sync takes (mcloud's
 // internal/cli/root.go has the whole file).
 type project struct {
-	App   string `json:"app"`
-	Quota *struct {
+	App string `json:"app"`
+	// Deploy isn't applied (mcloud deploy switches it), but declaring it
+	// makes it the file's, so mcloud apps set --deploy refuses it.
+	Deploy string `json:"deploy"`
+	Quota  *struct {
 		CPU    string `json:"cpu"`
 		Memory string `json:"memory"`
 		Pods   any    `json:"pods"`
@@ -349,6 +352,9 @@ func (p *project) apply(values map[string]any) []string {
 // or a map) the file owns the whole database setting.
 func (p *project) declares() []string {
 	var keys []string
+	if p.Deploy != "" {
+		keys = append(keys, "deploy")
+	}
 	if q := p.Quota; q != nil {
 		if q.CPU != "" {
 			keys = append(keys, "cpu")

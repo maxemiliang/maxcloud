@@ -288,12 +288,13 @@ in the annotation `maxcloud.gronblom.dev/sync-error` and a Warning event.
 Entries in the homelab repo are left alone.
 
 `maxcloud.gronblom.dev/synced-fields` lists the entry's keys the file
-declares, sorted: from `cpu`, `memory`, `pods`, `buckets`, `db`, `dbSize`,
-`dbInstances` and `domains`. `quota: {cpu: 1}` declares `cpu`; `buckets: [...]`
-(an empty list too) declares `buckets`; `db` in any form (`true`, `false`
-or a map) declares all three database keys, since the file then owns the
-database setting. mcloud refuses to set these by hand: the next push would
-undo it. The annotation is set for each revision handled, and removed when
+declares, sorted: from `deploy`, `cpu`, `memory`, `pods`, `buckets`, `db`,
+`dbSize`, `dbInstances` and `domains`. `quota: {cpu: 1}` declares `cpu`;
+`buckets: [...]` (an empty list too) declares `buckets`; `db` in any form
+(`true`, `false` or a map) declares all three database keys, since the file
+then owns the database setting. `deploy:` is declared but not applied here:
+`mcloud deploy` switches the mode. mcloud refuses to set these by hand: the
+next push or deploy would undo it. The annotation is set for each revision handled, and removed when
 the revision has no `maxcloud.yaml`. A revision that fails to sync leaves
 it as it was.
 
