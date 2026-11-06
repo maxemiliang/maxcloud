@@ -38,7 +38,7 @@ func (c *Client) PrimaryPod(ctx context.Context, ns, cluster string) (string, er
 	}
 	sort.Strings(names)
 	if len(names) == 0 {
-		return "", fmt.Errorf("app %s has no database (mcloud apps set %s --db)", ns, ns)
+		return "", fmt.Errorf("app %s has no database (db: true in its maxcloud.yaml)", ns)
 	}
 	return "", fmt.Errorf("no running primary for database %s in %s (its databases: %s)", cluster, ns, strings.Join(names, ", "))
 }

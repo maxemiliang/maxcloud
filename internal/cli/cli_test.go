@@ -69,6 +69,7 @@ func TestSource(t *testing.T) {
 }
 
 func TestInitWritesStarters(t *testing.T) {
+	t.Setenv("MCLOUD_SDK_VERSION", "0.9.1")
 	for _, lang := range []string{"node", "go"} {
 		dir := filepath.Join(t.TempDir(), "my-app")
 		os.MkdirAll(dir, 0o755)
@@ -99,7 +100,7 @@ func TestInitWritesStarters(t *testing.T) {
 			}
 		} else {
 			pj, _ := os.ReadFile("package.json")
-			if !strings.Contains(string(pj), `"name": "my-app"`) {
+			if !strings.Contains(string(pj), `"name": "my-app"`) || !strings.Contains(string(pj), `"@max-cloud/functions": "^0.9.1"`) {
 				t.Errorf("package.json:\n%s", pj)
 			}
 		}
@@ -202,5 +203,24 @@ func TestCredentialPrintsTheCachedToken(t *testing.T) {
 	}
 	if !cred.Status.ExpirationTimestamp.Before(exp) {
 		t.Errorf("expires %v, want before the token's %v", cred.Status.ExpirationTimestamp, exp)
+	}
+}
+
+func TestCaretAllows(t *testing.T) {
+	for _, c := range []struct {
+		rng, v string
+		ok     bool
+	}{
+		{"^0.1.0", "0.3.0", false},
+		{"^0.3.0", "0.3.2", true},
+		{"^1.2.0", "1.9.0", true},
+		{"^1.2.0", "2.0.0", false},
+		{"0.1.0", "0.3.0", false},
+		{"latest", "0.3.0", true},
+		{"^0.0.3", "0.0.4", false},
+	} {
+		if got := caretAllows(c.rng, c.v); got != c.ok {
+			t.Errorf("caretAllows(%q, %q) = %v", c.rng, c.v, got)
+		}
 	}
 }

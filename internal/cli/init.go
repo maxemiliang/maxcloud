@@ -2,7 +2,6 @@ package cli
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -33,7 +32,7 @@ var starter = map[string]string{
     "dev": "tsc && maxcloud-functions"
   },
   "dependencies": {
-    "@max-cloud/functions": "^0.1.0"
+    "@max-cloud/functions": "^%[3]s"
   },
   "devDependencies": {
     "@types/node": "^24.19.2",
@@ -160,9 +159,8 @@ images:
 }
 
 func initCmd(g *globals) *cobra.Command {
-	var register bool
 	var lang, deploy string
-	var cf commitFlags
+	var dryRun bool
 	c := &cobra.Command{
 		Use:   "init [NAME]",
 		Short: "Set up this repo as a functions app on maxcloud",
@@ -173,9 +171,7 @@ Go app it adds only what deploys need and says what's still missing.
 Existing files are never overwritten.
 
 NAME (default: the directory's name) becomes the app's namespace and part of
-its URLs. The first mcloud deploy registers the app from maxcloud.yaml;
---register does it now (mcloud apps create), with this repo's GitHub remote
-as its source.`,
+its URLs. The first mcloud deploy registers the app from maxcloud.yaml.`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			dir, err := os.Getwd()
@@ -201,7 +197,7 @@ as its source.`,
 				fmt.Fprintln(g.errOut, "go.mod: register your functions in main and call functions.Start() (go get github.com/maxemiliang/maxcloud/functions)")
 			} else if pkg, err := os.ReadFile("package.json"); err == nil {
 				lang = "node"
-				for _, w := range checkPackageJSON(pkg) {
+				for _, w := range checkPackageJSON(pkg, latestSDK(cmd.Context())) {
 					fmt.Fprintf(g.errOut, "package.json: %s\n", w)
 				}
 				if strings.Contains(string(pkg), `"build"`) {
@@ -236,8 +232,12 @@ as its source.`,
 				module = "github.com/" + repo
 			}
 
+			sdk := ""
+			if lang == "node" {
+				sdk = latestSDK(cmd.Context())
+			}
 			verb := "wrote  "
-			if cf.dryRun {
+			if dryRun {
 				verb = "writes "
 			}
 			for _, p := range sortedKeys(files) {
@@ -245,14 +245,14 @@ as its source.`,
 					fmt.Fprintf(g.out, "  exists  %s\n", p)
 					continue
 				}
-				if cf.dryRun {
+				if dryRun {
 					fmt.Fprintf(g.out, "  %s %s\n", verb, p)
 					continue
 				}
 				if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
 					return err
 				}
-				content := strings.NewReplacer("%[1]s", name, "%[2]s", module).Replace(files[p])
+				content := strings.NewReplacer("%[1]s", name, "%[2]s", module, "%[3]s", sdk).Replace(files[p])
 				if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
 					return err
 				}
@@ -268,17 +268,6 @@ as its source.`,
 			if deploy != "direct" {
 				fmt.Fprintf(g.out, "  git add -A && git commit -m \"maxcloud app\"\n")
 			}
-			if register {
-				if repo == "" && deploy != "direct" {
-					return errors.New("--register: this repo has no GitHub remote (origin) yet")
-				}
-				fmt.Fprintln(g.out)
-				e := registry.Entry{Name: name, Repo: repo}
-				if deploy == "direct" {
-					e = registry.Entry{Name: name, Deploy: registry.DeployDirect}
-				}
-				return g.createApp(cmd.Context(), e, cf)
-			}
 			if deploy == "direct" {
 				fmt.Fprintf(g.out, "  mcloud deploy        # registers the app the first time, builds here, applies, waits until it's ready\n")
 			} else {
@@ -292,13 +281,13 @@ as its source.`,
 	}
 	c.Flags().StringVar(&lang, "lang", "node", "language of a new app: node (TypeScript) or go; an existing go.mod or package.json decides by itself")
 	c.Flags().StringVar(&deploy, "deploy", "gitops", "gitops (push to deploy) or direct (mcloud deploy builds and applies from here, no git)")
-	c.Flags().BoolVar(&register, "register", false, "also register the app now (otherwise the first mcloud deploy does)")
-	cf.bind(c.Flags(), false)
+	c.Flags().BoolVar(&dryRun, "dry-run", false, "show the files it would write, write none")
 	return c
 }
 
 // checkPackageJSON says what an existing app's package.json still needs.
-func checkPackageJSON(data []byte) []string {
+// latest is the SDK's newest version ("" if unknown).
+func checkPackageJSON(data []byte, latest string) []string {
 	var p struct {
 		Type         string            `json:"type"`
 		Main         string            `json:"main"`
@@ -309,8 +298,10 @@ func checkPackageJSON(data []byte) []string {
 		return []string{"can't read it: " + err.Error()}
 	}
 	var out []string
-	if _, ok := p.Dependencies["@max-cloud/functions"]; !ok {
+	if r, ok := p.Dependencies["@max-cloud/functions"]; !ok {
 		out = append(out, "add the SDK: npm install @max-cloud/functions")
+	} else if latest != "" && !caretAllows(r, latest) {
+		out = append(out, fmt.Sprintf("the SDK is held at %s, which leaves out %s: npm install @max-cloud/functions@latest", r, latest))
 	}
 	if s := p.Scripts["start"]; s != "maxcloud-functions" {
 		if s == "" {

@@ -20,7 +20,7 @@ func generateCmd(g *globals) *cobra.Command {
 		Short: "Write deploy/k8s from the app's functions",
 		Long: `Write the manifests for the app's functions into deploy/k8s:
 functions.yaml (rewritten every time) and the kustomization listing it.
-Queue functions need the app's database: mcloud apps set <app> --db.
+Queue functions need the app's database: db: true in maxcloud.yaml.
 
 The deploy workflow runs this on every push, from the image it built. Run it
 locally to see what a deploy would change: it asks the built app
@@ -44,7 +44,8 @@ locally to see what a deploy would change: it asks the built app
 			if err != nil {
 				return err
 			}
-			changed, err := functions.WriteDir(dir, d, image)
+			app, _ := appName(nil)
+			changed, err := functions.WriteDir(dir, d, functions.Options{Image: image, App: app})
 			if err != nil {
 				return err
 			}
@@ -58,7 +59,6 @@ locally to see what a deploy would change: it asks the built app
 				fmt.Fprintf(g.errOut, "wrote %s\n", p)
 			}
 			if _, err := os.Stat(filepath.Join(dir, functions.LegacyDatabaseFile)); d.NeedsDatabase() && err != nil {
-				app, _ := appName(nil)
 				hint := functions.NeedsDatabaseHint(app)
 				if os.Getenv("GITHUB_ACTIONS") == "true" {
 					// Shown on the workflow run's summary page.

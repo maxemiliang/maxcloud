@@ -139,6 +139,9 @@ type Options struct {
 	LegacyDatabase bool
 	// Labels are added to every object (direct deploys mark theirs).
 	Labels map[string]string
+	// App is the app's name: every function gets it as MAXCLOUD_APP (a
+	// literal: Knative refuses the downward API unless a flag allows it).
+	App string
 }
 
 const (
@@ -214,6 +217,9 @@ func labels(f Function) obj {
 
 func env(f Function, o Options) []any {
 	e := []any{obj{"name": "FUNCTION_TARGET", "value": f.Name}}
+	if o.App != "" {
+		e = append(e, obj{"name": "MAXCLOUD_APP", "value": o.App})
+	}
 	ref := obj{"name": DatabaseName + "-app", "key": "uri"}
 	if !o.LegacyDatabase {
 		// No database.yaml: the app may still have a database from the
@@ -429,15 +435,15 @@ func NeedsDatabaseHint(app string) string {
 		app = "<app>"
 	}
 	return "queue functions keep their jobs in the app's database: if " + app +
-		" has none yet, mcloud apps set " + app + " --db (the workers wait until it's there)"
+		" has none yet, add db: true to its maxcloud.yaml (the workers wait until it's there)"
 }
 
 // WriteDir writes functions.yaml into dir (deploy/k8s) and lists it in
 // kustomization.yaml, creating that if needed; an existing database.yaml
 // stays listed too. Returns the files it changed.
-func WriteDir(dir string, d *Description, image string) ([]string, error) {
-	if image == "" {
-		image = "app"
+func WriteDir(dir string, d *Description, o Options) ([]string, error) {
+	if o.Image == "" {
+		o.Image = "app"
 	}
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, err
@@ -457,11 +463,12 @@ func WriteDir(dir string, d *Description, image string) ([]string, error) {
 
 	// An app set up before the maxcloud controller ran databases may have
 	// a database.yaml: it keeps it. New ones get their database from the
-	// registry (mcloud apps set <app> --db) instead; NeedsDatabaseHint says so.
+	// registry (db: true in maxcloud.yaml) instead; NeedsDatabaseHint says so.
 	_, err := os.Stat(filepath.Join(dir, LegacyDatabaseFile))
 	hasDB := err == nil
 
-	m, err := Manifests(d, Options{Image: image, LegacyDatabase: hasDB})
+	o.LegacyDatabase = hasDB
+	m, err := Manifests(d, o)
 	if err != nil {
 		return nil, err
 	}
@@ -486,7 +493,7 @@ func WriteDir(dir string, d *Description, image string) ([]string, error) {
 		}
 	}
 	if !regexp.MustCompile(`(?m)^images:`).MatchString(ks) {
-		ks += "images:\n  - name: " + image + "\n"
+		ks += "images:\n  - name: " + o.Image + "\n"
 	}
 	if err := write("kustomization.yaml", []byte(ks)); err != nil {
 		return nil, err

@@ -83,7 +83,7 @@ func (r *BranchReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	if err := r.Get(ctx, types.NamespacedName{Namespace: b.Namespace, Name: b.Spec.Database}, &db); err != nil {
 		if apierrors.IsNotFound(err) {
 			return ctrl.Result{RequeueAfter: time.Minute}, r.setStatus(ctx, &b, v1.BranchFailed, metav1.ConditionFalse, "NoDatabase",
-				fmt.Sprintf("no Database %s in %s (mcloud apps set %s --db)", b.Spec.Database, b.Namespace, b.Namespace))
+				fmt.Sprintf("no Database %s in %s (db: true in the app's maxcloud.yaml)", b.Spec.Database, b.Namespace))
 		}
 		return ctrl.Result{}, err
 	}

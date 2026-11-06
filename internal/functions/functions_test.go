@@ -152,7 +152,7 @@ func TestManifestsOptionalStorage(t *testing.T) {
 func TestWriteDir(t *testing.T) {
 	d, _ := Parse([]byte(desc))
 	dir := filepath.Join(t.TempDir(), "deploy", "k8s")
-	changed, err := WriteDir(dir, d, "")
+	changed, err := WriteDir(dir, d, Options{App: "shop"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -174,22 +174,25 @@ func TestWriteDir(t *testing.T) {
 	}
 	// The queue's KEDA login is in functions.yaml now.
 	f, _ := os.ReadFile(filepath.Join(dir, "functions.yaml"))
+	if !strings.Contains(string(f), "name: MAXCLOUD_APP\n              value: shop") && !strings.Contains(string(f), "value: shop") {
+		t.Errorf("functions.yaml has no MAXCLOUD_APP:\n%s", f)
+	}
 	if !strings.Contains(string(f), "kind: TriggerAuthentication") {
 		t.Errorf("functions.yaml has no TriggerAuthentication:\n%s", f)
 	}
 	// Second run: nothing changes.
-	if changed, err := WriteDir(dir, d, ""); err != nil || len(changed) != 0 {
+	if changed, err := WriteDir(dir, d, Options{App: "shop"}); err != nil || len(changed) != 0 {
 		t.Errorf("rerun changed %v, %v", changed, err)
 	}
 	// After `kustomize edit set image` (unindented lists), a rerun still
 	// sees what's listed.
 	os.WriteFile(filepath.Join(dir, "kustomization.yaml"), []byte("apiVersion: kustomize.config.k8s.io/v1beta1\nkind: Kustomization\nresources:\n- functions.yaml\nimages:\n- digest: sha256:abc\n  name: app\n  newName: ghcr.io/o/r\n"), 0o644)
-	if changed, err := WriteDir(dir, d, ""); err != nil || len(changed) != 0 {
+	if changed, err := WriteDir(dir, d, Options{App: "shop"}); err != nil || len(changed) != 0 {
 		t.Errorf("after kustomize edit: changed %v, %v", changed, err)
 	}
 	// The user's own manifests stay listed, and an existing images block isn't duplicated.
 	os.WriteFile(filepath.Join(dir, "kustomization.yaml"), []byte("apiVersion: kustomize.config.k8s.io/v1beta1\nkind: Kustomization\nresources:\n  - sso.yaml\nimages:\n  - name: app\n    newName: ghcr.io/o/r\n    digest: sha256:abc\n"), 0o644)
-	if _, err := WriteDir(dir, d, ""); err != nil {
+	if _, err := WriteDir(dir, d, Options{}); err != nil {
 		t.Fatal(err)
 	}
 	k, _ = os.ReadFile(filepath.Join(dir, "kustomization.yaml"))
@@ -205,7 +208,7 @@ func TestWriteDirKeepsALegacyDatabase(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "deploy", "k8s")
 	os.MkdirAll(dir, 0o755)
 	os.WriteFile(filepath.Join(dir, LegacyDatabaseFile), []byte("# mine\n"), 0o644)
-	if _, err := WriteDir(dir, d, ""); err != nil {
+	if _, err := WriteDir(dir, d, Options{}); err != nil {
 		t.Fatal(err)
 	}
 	if b, _ := os.ReadFile(filepath.Join(dir, LegacyDatabaseFile)); string(b) != "# mine\n" {

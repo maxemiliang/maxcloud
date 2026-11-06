@@ -64,7 +64,7 @@ mcloud db branch create <name> --at TIME.`,
 				return err
 			}
 			if db == nil {
-				return fmt.Errorf("app %s has no database run by maxcloud (mcloud apps set %s --db)", name, name)
+				return fmt.Errorf("app %s has no database run by maxcloud (db: true in its maxcloud.yaml)", name)
 			}
 			fmt.Fprintf(g.out, "This takes %s's database down and restores it to %s (%s).\nEverything written since then will be gone from it.\n",
 				name, t.Local().Format("2006-01-02 15:04:05 MST"), t.UTC().Format(time.RFC3339))

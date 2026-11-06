@@ -62,7 +62,7 @@ func (c *Client) AnnotateDatabase(ctx context.Context, app, key, value string) e
 	patch, _ := json.Marshal(map[string]any{"metadata": map[string]any{"annotations": map[string]string{key: value}}})
 	_, err := c.Dyn.Resource(gvrDatabase).Namespace(app).Patch(ctx, "db", types.MergePatchType, patch, metav1.PatchOptions{})
 	if apierrors.IsNotFound(err) {
-		return fmt.Errorf("app %s has no database run by maxcloud (mcloud apps set %s --db)", app, app)
+		return fmt.Errorf("app %s has no database run by maxcloud (db: true in its maxcloud.yaml)", app)
 	}
 	return err
 }

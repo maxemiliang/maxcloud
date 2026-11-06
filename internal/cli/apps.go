@@ -94,12 +94,12 @@ func entryFlags(f *pflag.FlagSet, e *registry.Entry) {
 	f.StringVar(&e.DBSize, "db-size", "", "database disk per instance (default 1Gi; can grow, not shrink)")
 }
 
-type commitFlags struct {
+type confirmFlags struct {
 	yes, dryRun, wait bool
 	timeout           time.Duration
 }
 
-func (cf *commitFlags) bind(f *pflag.FlagSet, wait bool) {
+func (cf *confirmFlags) bind(f *pflag.FlagSet, wait bool) {
 	f.BoolVarP(&cf.yes, "yes", "y", false, "don't ask before changing the registry")
 	f.BoolVar(&cf.dryRun, "dry-run", false, "show the change, make none")
 	if wait {
@@ -110,7 +110,7 @@ func (cf *commitFlags) bind(f *pflag.FlagSet, wait bool) {
 
 func appsCreateCmd(g *globals) *cobra.Command {
 	var e registry.Entry
-	var cf commitFlags
+	var cf confirmFlags
 	c := &cobra.Command{
 		Use:   "create NAME",
 		Short: "Register an app: its namespace, quota and deploys from its repo",
@@ -138,7 +138,7 @@ https://<service>-<name>.gronblom.dev.`,
 
 // createApp registers e in the cluster, after showing it and asking
 // (unless cf says otherwise).
-func (g *globals) createApp(ctx context.Context, e registry.Entry, cf commitFlags) error {
+func (g *globals) createApp(ctx context.Context, e registry.Entry, cf confirmFlags) error {
 	if err := e.Validate(); err != nil {
 		return err
 	}
@@ -192,7 +192,7 @@ GitHub, Settings, Applications, the Flux app, Configure, Repository access.
 
 func appsSetCmd(g *globals) *cobra.Command {
 	var flags registry.Entry
-	var cf commitFlags
+	var cf confirmFlags
 	c := &cobra.Command{
 		Use:   "set NAME",
 		Short: "Change an app's quota or source",
@@ -278,7 +278,7 @@ func diffEntries(a, b *registry.Entry) []string {
 
 // changeApp shows what changes from old to e, asks (unless cf says
 // otherwise), and writes e to the registry.
-func (g *globals) changeApp(ctx context.Context, k *kube.Client, old, e *registry.Entry, cf commitFlags) error {
+func (g *globals) changeApp(ctx context.Context, k *kube.Client, old, e *registry.Entry, cf confirmFlags) error {
 	diff := diffEntries(old, e)
 	if len(diff) == 0 {
 		fmt.Fprintln(g.out, "Nothing changes.")
@@ -317,7 +317,7 @@ func (g *globals) changeApp(ctx context.Context, k *kube.Client, old, e *registr
 }
 
 func appsDeleteCmd(g *globals) *cobra.Command {
-	var cf commitFlags
+	var cf confirmFlags
 	c := &cobra.Command{
 		Use:   "delete NAME",
 		Short: "Remove an app, its namespace and all its data",
