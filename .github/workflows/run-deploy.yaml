@@ -56,7 +56,11 @@ on:
 # both kinds of callers work while apps move to the maxcloud registry.
 jobs:
   deploy:
-    runs-on: ubuntu-latest
+    # Not ubuntu-latest: on ubuntu-26.04 (latest since November 2026) pack
+    # can't read the builder image it just pulled ("failed to fetch base
+    # layers: open /tmp/imgutil.local.image...: no such file or
+    # directory"). Every deploy before worked on 24.04.
+    runs-on: ubuntu-24.04
     # One deploy at a time per repo; a newer push waits rather than racing
     # the deploy commit of an older one.
     concurrency:
