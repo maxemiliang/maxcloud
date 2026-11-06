@@ -64,7 +64,7 @@ func isAppSecrets(o client.Object) bool {
 // if it's there, the Secret from its copy if not.
 func (r *SecretBackup) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	app := req.Namespace
-	if ok, err := r.liveTenant(ctx, app); err != nil || !ok {
+	if ok, err := liveTenant(ctx, r.Client, app); err != nil || !ok {
 		return ctrl.Result{}, err
 	}
 	var s corev1.Secret
@@ -82,9 +82,9 @@ func (r *SecretBackup) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Re
 }
 
 // liveTenant: the namespace exists, is an app's, and isn't going away.
-func (r *SecretBackup) liveTenant(ctx context.Context, name string) (bool, error) {
+func liveTenant(ctx context.Context, c client.Reader, name string) (bool, error) {
 	var ns corev1.Namespace
-	if err := r.Get(ctx, types.NamespacedName{Name: name}, &ns); err != nil {
+	if err := c.Get(ctx, types.NamespacedName{Name: name}, &ns); err != nil {
 		return false, client.IgnoreNotFound(err)
 	}
 	return ns.Labels[TenantLabel] == "true" && ns.DeletionTimestamp.IsZero(), nil
@@ -93,10 +93,10 @@ func (r *SecretBackup) liveTenant(ctx context.Context, name string) (bool, error
 // inRegistry: the app has a registry entry that isn't being deleted. Only
 // then is a copy made: an app on its way out (its entry deleted, which
 // deletes the copy, and its namespace not gone yet) mustn't get one again.
-func (r *SecretBackup) inRegistry(ctx context.Context, app string) (bool, error) {
+func inRegistry(ctx context.Context, c client.Reader, app string) (bool, error) {
 	u := &unstructured.Unstructured{}
 	u.SetGroupVersionKind(providerGVK)
-	if err := r.Get(ctx, types.NamespacedName{Namespace: RegistryNamespace, Name: app}, u); err != nil {
+	if err := c.Get(ctx, types.NamespacedName{Namespace: RegistryNamespace, Name: app}, u); err != nil {
 		return false, client.IgnoreNotFound(err)
 	}
 	return u.GetDeletionTimestamp().IsZero(), nil
@@ -113,7 +113,7 @@ func secretJSON(data map[string][]byte) ([]byte, error) {
 
 func (r *SecretBackup) backup(ctx context.Context, s *corev1.Secret) error {
 	app := s.Namespace
-	if ok, err := r.inRegistry(ctx, app); err != nil || !ok {
+	if ok, err := inRegistry(ctx, r.Client, app); err != nil || !ok {
 		return err
 	}
 	plain, err := secretJSON(s.Data)
@@ -202,7 +202,7 @@ func (r *SecretBackup) Restore(ctx context.Context) error {
 			continue
 		}
 		app := strings.TrimSuffix(strings.TrimPrefix(k, secretsPrefix), ".age")
-		if ok, err := r.liveTenant(ctx, app); err != nil || !ok {
+		if ok, err := liveTenant(ctx, r.Client, app); err != nil || !ok {
 			errs = append(errs, err)
 			continue
 		}

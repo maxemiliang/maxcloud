@@ -46,9 +46,10 @@ type RegistryBackup struct {
 	Storage objectstorage.Storage
 	Objects objectstorage.Objects
 	Bucket  string
-	// Secrets, if set, restores apps' secrets after each Restore of the
-	// entries.
+	// Secrets and Env, if set, restore apps' secrets and variables after
+	// each Restore of the entries.
 	Secrets *SecretBackup
+	Env     *EnvBackup
 }
 
 // +kubebuilder:rbac:groups=fluxcd.controlplane.io,resources=resourcesetinputproviders,verbs=get;list;watch;create;update;patch
@@ -74,9 +75,10 @@ func (r *RegistryBackup) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 		if !controllerutil.ContainsFinalizer(u, RegistryFinalizer) {
 			return ctrl.Result{}, nil
 		}
-		// The app's secrets' copy goes too (whether or not the secrets backup
-		// is on), so an app made later under the same name doesn't get them.
-		for _, k := range []string{secretsKey(u.GetName()), backupKey(u.GetName())} {
+		// The app's secrets' and variables' copies go too (whether or not
+		// those backups are on), so an app made later under the same name
+		// doesn't get them.
+		for _, k := range []string{secretsKey(u.GetName()), envKey(u.GetName()), backupKey(u.GetName())} {
 			if err := r.Objects.DeleteObject(ctx, r.Bucket, k); err != nil {
 				return ctrl.Result{}, err
 			}
@@ -163,7 +165,7 @@ func (r *RegistryBackup) Restore(ctx context.Context) error {
 }
 
 // Start runs Restore when the controller starts (as the leader), and every
-// 15 minutes after, then the apps' secrets' restore.
+// 15 minutes after, then the apps' secrets' and variables' restores.
 func (r *RegistryBackup) Start(ctx context.Context) error {
 	logger := log.FromContext(ctx).WithName("registry-restore")
 	for {
@@ -173,6 +175,11 @@ func (r *RegistryBackup) Start(ctx context.Context) error {
 		if r.Secrets != nil {
 			if err := r.Secrets.Restore(ctx); err != nil {
 				logger.Error(err, "restoring app secrets")
+			}
+		}
+		if r.Env != nil {
+			if err := r.Env.Restore(ctx); err != nil {
+				logger.Error(err, "restoring app env")
 			}
 		}
 		select {
