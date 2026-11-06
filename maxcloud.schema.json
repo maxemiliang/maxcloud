@@ -14,7 +14,7 @@
       "maxLength": 30
     },
     "deploy": {
-      "description": "gitops: a push to the repo deploys, through Flux. direct: mcloud deploy builds here and applies the manifests itself, nothing from git. Changing it switches the app on the next mcloud deploy, which asks first.",
+      "description": "gitops: a push to the repo deploys, through Flux. direct: mcloud deploy builds here and applies the manifests itself, nothing from git. Changing it switches the app on the next mcloud deploy, which asks first. Left out, the app keeps its current mode (gitops for a new app), and mcloud apps set --deploy can change it; set, apps set refuses to.",
       "type": "string",
       "enum": ["gitops", "direct"],
       "default": "gitops"

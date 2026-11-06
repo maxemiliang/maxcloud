@@ -140,8 +140,9 @@ func main() {
 
 Before `Start` runs a function, it applies the ones the database hasn't
 had: each once, in name order, in its own transaction, recorded in the
-table `public.maxcloud_migrations`. Only one process applies them at a
-time; the others wait, so no function starts on an older schema than its
+table `maxcloud_migrations` (the one the connection's `search_path` finds,
+else a new one in its current schema: `public` on maxcloud). Only one
+process applies them at a time; the others wait, so no function starts on an older schema than its
 code expects. A migration that fails, a file edited after it was applied,
 or migrations without a `$DATABASE_URL` stop the process (exit 1). A
 migration the database has but the binary doesn't is left alone.
@@ -230,9 +231,10 @@ reads it, with an error that says how to set it when it's missing.
 First it applies the app's pending migrations (see Migrations). On SIGTERM
 an HTTP server or worker finishes what's in flight (up to 25 seconds) and
 exits 0; a scheduled run's `ctx` is cancelled. `Start` doesn't return: it
-exits the process, so deferred calls in `main` don't run. Put cleanup in `functions.OnShutdown` instead: it runs after the function
-stops (after SIGTERM, once what was in flight is done; after a schedule's
-run) and before the process exits.
+exits the process, so deferred calls in `main` don't run. Put cleanup in
+`functions.OnShutdown` instead: it runs after the function stops (after
+SIGTERM, once what was in flight is done; after a schedule's run) and
+before the process exits.
 
 ```go
 functions.OnShutdown(func(ctx context.Context) error {
