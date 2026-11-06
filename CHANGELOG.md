@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.13.0](https://github.com/maxemiliang/maxcloud/compare/v0.12.0...v0.13.0) (2026-11-06)
+
+
+### Features
+
+* **mcloud:** env: in maxcloud.yaml and mcloud env set/get/list/unset ([a3236d3](https://github.com/maxemiliang/maxcloud/commit/a3236d3f98ae97026c83047831efe37a9112f116))
+* plain environment variables (env: in maxcloud.yaml, mcloud env) ([08e5f08](https://github.com/maxemiliang/maxcloud/commit/08e5f086f984f4693f96b15a81a67a07c047fadd))
+
+
+### Bug Fixes
+
+* bugs from the docs audit (deploy mode, migrations table, restore-to, Go shutdown/pool, small things) ([bb61573](https://github.com/maxemiliang/maxcloud/commit/bb615731a3eb4934bd43b64f1fa2553475085400))
+* **functions:** describe a sub-second Backoff as the worker uses it ([c7602f2](https://github.com/maxemiliang/maxcloud/commit/c7602f227e302842fd76bd9af2d512725c2548da))
+* **mcloud:** deploy follows the registry entry's mode when maxcloud.yaml has no deploy: ([9a9d95e](https://github.com/maxemiliang/maxcloud/commit/9a9d95e9d443b5b76b117c011e45b89f2786e336))
+* **migrate:** record migrations in the connection's schema, not always public ([4bc6335](https://github.com/maxemiliang/maxcloud/commit/4bc63353787924e7df612edd1e42882f8b1e8491))
+
 ## [0.12.0](https://github.com/maxemiliang/maxcloud/compare/v0.11.0...v0.12.0) (2026-11-06)
 
 
