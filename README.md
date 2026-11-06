@@ -150,6 +150,32 @@ Worker gets R2) from `buckets:` in `maxcloud.yaml`. The
 SDKs' `bucketName("uploads")` gives the full name. Removing a bucket from
 the list keeps it and its objects.
 
+### Public buckets
+
+Add `:public` to a bucket's name in the list, and anyone can read its
+objects (not list them) at a hostname of its own:
+
+```yaml
+buckets: [uploads, assets:public]
+```
+
+```
+https://assets--shop.gronblom.dev/logo.png      # object logo.png in mc-shop--assets
+```
+
+- It's for files you'd put on a CDN: images, downloads, built front-end
+  assets. Only GET and HEAD go through; writing still takes the app's
+  credentials (from a function, or a presigned URL it hands out).
+- Cloudflare serves the hostname and caches what it serves, by file
+  extension and the object's `Cache-Control`. A changed object can be
+  served stale until that runs out, so give changed files new keys
+  (`app.3f2a91.js`), or set `Cache-Control` when you upload.
+- The same objects are also readable straight from Object Storage, at
+  `<AWS_ENDPOINT_URL_S3>/mc-shop--assets/logo.png` (not cached).
+- `kubectl get maxcloud -n shop` shows each bucket's URL.
+- Removing `:public` makes the bucket private again: its hostname and the
+  public read go, its objects stay.
+
 ## Databases
 
 An app gets a Postgres database (the way a Worker gets D1, but Postgres)

@@ -108,6 +108,27 @@ bucket, err := functions.BucketName("uploads") // "mc-shop--uploads"
 _, err = s3c.PutObject(ctx, &s3.PutObjectInput{Bucket: &bucket, Key: aws.String("a.txt"), Body: r})
 ```
 
+### Public buckets
+
+A bucket listed as `assets:public` can be read by anyone (not listed) at
+`https://<bucket>--<app>.gronblom.dev/<key>`, behind Cloudflare, which
+caches it. Writing still needs the app's credentials:
+
+```go
+bucket, _ := functions.BucketName("assets")
+key := "avatars/" + userID + "." + hash + ".png" // new content, new key: the CDN caches
+_, err = s3c.PutObject(ctx, &s3.PutObjectInput{
+	Bucket: &bucket, Key: &key, Body: png,
+	ContentType:  aws.String("image/png"),
+	CacheControl: aws.String("public, max-age=31536000, immutable"),
+})
+url := "https://assets--" + os.Getenv("MAXCLOUD_APP") + ".gronblom.dev/" + key
+```
+
+The objects are also readable straight from Object Storage, at
+`<AWS_ENDPOINT_URL_S3>/<full bucket name>/<key>` (not cached). Removing
+`:public` makes the bucket private again; its objects stay.
+
 ## Key-value storage
 
 `KVGet`, `KVSet`, `KVDelete` and `KVList` are a key-value store (like

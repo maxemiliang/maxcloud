@@ -110,10 +110,31 @@ const uploads = bucketName("uploads"); // "mc-shop--uploads"
 const url = await getSignedUrl(s3, new PutObjectCommand({ Bucket: uploads, Key: "a.png" }), { expiresIn: 300 });
 ```
 
-A `:public` bucket's objects can be read by anyone at
-`<AWS_ENDPOINT_URL_S3>/<bucket>/<key>`; listing and writing still need the
-credentials. Object Storage has no bucket events: uploads tell the app
-themselves (presigned URL, then a queue job).
+Object Storage has no bucket events: uploads tell the app themselves
+(presigned URL, then a queue job).
+
+### Public buckets
+
+A bucket listed as `assets:public` can be read by anyone (not listed) at
+`https://<bucket>--<app>.gronblom.dev/<key>`, behind Cloudflare, which
+caches it. Writing still needs the app's credentials. So a function
+uploads to it with the AWS SDK and hands out the public URL:
+
+```ts
+const key = `avatars/${userId}.${hash}.png`; // new content, new key: the CDN caches
+await s3.send(new PutObjectCommand({
+  Bucket: bucketName("assets"),
+  Key: key,
+  Body: png,
+  ContentType: "image/png",
+  CacheControl: "public, max-age=31536000, immutable",
+}));
+const url = `https://assets--${process.env.MAXCLOUD_APP}.gronblom.dev/${key}`;
+```
+
+The objects are also readable straight from Object Storage, at
+`<AWS_ENDPOINT_URL_S3>/<full bucket name>/<key>` (not cached). Removing
+`:public` makes the bucket private again; its objects stay.
 
 ## Key-value storage
 
