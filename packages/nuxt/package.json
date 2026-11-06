@@ -2,7 +2,13 @@
   "name": "@max-cloud/nuxt",
   "version": "0.1.0",
   "description": "Nuxt on maxcloud, the homelab's run platform: runtimeConfig from the platform's environment, and the app as a maxcloud function",
-  "keywords": ["nuxt", "nuxt-module", "nitro", "knative", "maxcloud"],
+  "keywords": [
+    "nuxt",
+    "nuxt-module",
+    "nitro",
+    "knative",
+    "maxcloud"
+  ],
   "license": "MIT",
   "type": "module",
   "repository": {
@@ -23,7 +29,9 @@
       "default": "./dist/server.js"
     }
   },
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit",
@@ -41,8 +49,12 @@
     "unstorage": "^1.16.0"
   },
   "peerDependenciesMeta": {
-    "drizzle-orm": { "optional": true },
-    "unstorage": { "optional": true }
+    "drizzle-orm": {
+      "optional": true
+    },
+    "unstorage": {
+      "optional": true
+    }
   },
   "devDependencies": {
     "@types/node": "^24.19.2",
