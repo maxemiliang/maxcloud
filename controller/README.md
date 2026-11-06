@@ -351,15 +351,14 @@ on the cluster like the deployed one would, so scale that one to 0 first.
 
 ## Releasing
 
-Bump `newTag` in `config/kustomization.yaml`, commit, then:
+release-please does it (the root README, Releasing): its release PR bumps
+`newTag` in `config/kustomization.yaml`, and merging it tags
+`controller/v0.11.0` and runs `release-controller.yaml`, which builds and
+pushes `ghcr.io/maxemiliang/maxcloud-controller:0.11.0` (and refuses if
+`newTag` doesn't match). Clusters pick the tag in their `GitRepository`.
 
-```fish
-git tag controller/v0.2.0 && git push origin controller/v0.2.0
-```
-
-`release-controller.yaml` builds and pushes
-`ghcr.io/maxemiliang/maxcloud-controller:0.2.0` (and refuses if `newTag`
-doesn't match). Clusters pick the tag in their `GitRepository`.
+By hand: bump `newTag`, commit, then
+`git tag controller/v0.11.0 && git push origin controller/v0.11.0`.
 
 ## How a database comes back
 

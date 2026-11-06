@@ -30,7 +30,8 @@ resources:
   - rbac/leader_election.yaml
   - manager/deployment.yaml
   - manager/service.yaml
-# The release workflow checks that this is the tag being released.
+# The release workflow checks that this is the tag being released;
+# release-please's release PR bumps it (the annotation on the line).
 images:
   - name: ghcr.io/maxemiliang/maxcloud-controller
-    newTag: 0.10.0
+    newTag: 0.10.0 # x-release-please-version

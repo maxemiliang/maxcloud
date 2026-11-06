@@ -1,12 +1,18 @@
-# mcloud releases: a v* tag builds the binaries (linux, macOS; amd64, arm64)
-# and publishes them as a GitHub release (.goreleaser.yaml).
-#
-#   git tag v0.2.0 && git push origin v0.2.0
+# mcloud releases: builds the binaries (linux, macOS; amd64, arm64) for a v*
+# tag and adds them to its GitHub release (.goreleaser.yaml). release-please
+# (release-please.yaml) calls it when a release PR with mcloud in it is
+# merged; pushing a v* tag by hand still works.
 name: release
 
 on:
   push:
     tags: ["v*"]
+  workflow_call:
+    inputs:
+      tag:
+        description: The v* tag to release
+        type: string
+        required: true
 
 permissions: {}
 
@@ -18,6 +24,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ inputs.tag || github.ref }}
           fetch-depth: 0 # the changelog needs the history
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
@@ -29,3 +36,5 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # A release commit carries every component's tag; this is mcloud's.
+          GORELEASER_CURRENT_TAG: ${{ inputs.tag || github.ref_name }}

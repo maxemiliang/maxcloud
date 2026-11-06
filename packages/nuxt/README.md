@@ -146,3 +146,7 @@ with a close hook, runtimeConfig in its own keys, an SSR page, a streaming
 route, a scheduled task). `npm test` builds it and runs it as maxcloud
 would; `MAXCLOUD_SKIP_NUXT_BUILD=1` reuses the last build. Build
 `@max-cloud/functions` first (`npm run build --workspaces` at the root).
+
+It depends on `@max-cloud/functions` `>=0.5.0 <1.0.0`, not `^0.5.0`: below
+1.0.0 a caret allows no new minor version, so the next SDK release would
+stop npm from linking the workspace's copy.

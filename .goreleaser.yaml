@@ -1,6 +1,7 @@
-# mcloud releases: `git tag v0.2.0 && git push origin v0.2.0`, and
-# .github/workflows/release.yaml runs GoReleaser. Tags of the SDKs
-# (functions/v*, functions-js/v*) aren't mcloud's.
+# mcloud releases: release-please tags v* and makes the GitHub release, and
+# .github/workflows/release.yaml runs GoReleaser, which adds the binaries to
+# it. The other parts' tags (functions/v*, functions-js/v*, nuxt-js/v*,
+# controller/v*) aren't mcloud's.
 version: 2
 
 project_name: mcloud
@@ -9,6 +10,7 @@ git:
   ignore_tags:
     - "functions/*"
     - "functions-js/*"
+    - "nuxt-js/*"
     - "controller/*"
 
 builds:
@@ -40,3 +42,8 @@ changelog:
       - "^ci"
       - "^docs"
       - "^test"
+
+release:
+  # release-please made the release, with its changelog: add the binaries
+  # and leave the notes alone.
+  mode: keep-existing

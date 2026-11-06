@@ -1,21 +1,22 @@
-# npm releases: a tag matching the version in the package's package.json
-# publishes it.
+# npm releases of @max-cloud/functions (functions-js/v* tags) and
+# @max-cloud/nuxt (nuxt-js/v*). release-please (release-please.yaml) calls
+# this when a release PR with either package in it is merged.
 #
-#   git tag functions-js/v0.2.0 && git push origin functions-js/v0.2.0   # @max-cloud/functions
-#   git tag nuxt-js/v0.1.0 && git push origin nuxt-js/v0.1.0             # @max-cloud/nuxt
-#
-# @max-cloud/nuxt depends on @max-cloud/functions: release that first when
-# it needs a newer one.
-#
-# No npm token: npm trusts this workflow (trusted publishing, OIDC), set up
-# on npmjs.com under the package's Settings, Trusted publisher: GitHub
-# Actions, maxemiliang/maxcloud, workflow release-npm.yaml. Packages
-# published this way carry provenance (which commit and workflow built them).
+# No npm token: npm trusts the workflow that calls this one (trusted
+# publishing, OIDC). On npmjs.com, each package's Settings, Trusted
+# publisher: GitHub Actions, maxemiliang/maxcloud, workflow
+# release-please.yaml. npm checks the calling workflow's name, so tags pushed
+# by hand don't publish. Packages published this way carry provenance
+# (which commit and workflow built them).
 name: release-npm
 
 on:
-  push:
-    tags: ["functions-js/v*", "nuxt-js/v*"]
+  workflow_call:
+    inputs:
+      tag:
+        description: The functions-js/v* or nuxt-js/v* tag to publish
+        type: string
+        required: true
 
 permissions: {}
 
@@ -25,29 +26,34 @@ jobs:
     permissions:
       contents: read
       id-token: write # npm trusted publishing
+    env:
+      TAG: ${{ inputs.tag }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.tag }}
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24
           registry-url: https://registry.npmjs.org
       - name: Which package
         run: |
-          case "$GITHUB_REF_NAME" in
+          case "$TAG" in
             functions-js/v*) echo "PKG=packages/functions" >> "$GITHUB_ENV" ;;
             nuxt-js/v*) echo "PKG=packages/nuxt" >> "$GITHUB_ENV" ;;
-            *) echo "::error::unknown tag $GITHUB_REF_NAME"; exit 1 ;;
+            *) echo "::error::unknown tag $TAG"; exit 1 ;;
           esac
       - name: Tag matches package.json
         run: |
           cd "$PKG"
-          want="${GITHUB_REF_NAME#*-js/v}"
+          want="${TAG#*-js/v}"
           have=$(node -p 'require("./package.json").version')
           if [ "$want" != "$have" ]; then
             echo "::error::tag says $want, package.json says $have"
             exit 1
           fi
       - run: npm ci
+      # Both: @max-cloud/nuxt builds against @max-cloud/functions' dist.
       - run: npm run build --workspaces
       - run: npm run typecheck --workspace "$PKG"
       - run: npm test --workspace "$PKG"
