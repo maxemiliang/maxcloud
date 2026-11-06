@@ -29,7 +29,7 @@ var starter = map[string]string{
   "scripts": {
     "build": "tsc",
     "start": "maxcloud-functions",
-    "dev": "tsc && maxcloud-functions"
+    "dev": "mcloud dev"
   },
   "dependencies": {
     "@max-cloud/functions": "^%[3]s"
@@ -65,6 +65,8 @@ export const hello = onRequest(async (req) => {
 `,
 	".gitignore": `node_modules/
 dist/
+# mcloud dev's secrets
+.env
 `,
 	// Paketo only compiles TypeScript when told to.
 	"project.toml": `# Buildpacks settings (Paketo): run "npm run build" before the image is made.
@@ -79,6 +81,9 @@ value = "build"
 
 // The files a new Go functions app starts with.
 var goStarter = map[string]string{
+	".gitignore": `# mcloud dev's secrets
+.env
+`,
 	"go.mod": `module %[2]s
 
 go 1.25.0
