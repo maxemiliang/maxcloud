@@ -160,11 +160,7 @@ func runDev(ctx context.Context, cfg devConfig) int {
 				continue
 			}
 			workers.Go(func() {
-				p, err := Pool(ctx)
-				if err == nil {
-					err = runWorker(ctx, f, workerConfig{pool: p, logf: cfg.logger.Printf})
-				}
-				if err != nil {
+				if err := runWorker(ctx, f, workerConfig{url: cfg.getenv("DATABASE_URL"), logf: cfg.logger.Printf}); err != nil {
 					cfg.logger.Printf("%s: worker stopped: %v", f.name, err)
 				}
 			})

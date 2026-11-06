@@ -102,6 +102,10 @@ SDK creates (`maxcloud_jobs`).
 - **Delay a job** with `functions.Delay(d)`.
 - **Cleanup:** a worker deletes jobs that finished more than 7 days ago
   when it starts. Failed jobs stay, with the error in `last_error`.
+- **Connections:** a worker claims and finishes jobs on a pool of its own,
+  `Concurrency(n)` + 1 connections (one is its `LISTEN`). Handlers use
+  `functions.Pool`, which pgx sizes to max(4, CPUs): with a high
+  concurrency, handlers wait for each other there, not for the worker.
 
 ## Database
 

@@ -102,7 +102,7 @@ func run(ctx context.Context, args []string, getenv func(string) string, stdout,
 		return 1
 	}
 
-	code := runFunction(ctx, f, *port, logger)
+	code := runFunction(ctx, f, *port, getenv, logger)
 	if !runShutdownHooks(ctx, logger) && code == 0 {
 		code = 1
 	}
@@ -110,7 +110,7 @@ func run(ctx context.Context, args []string, getenv func(string) string, stdout,
 }
 
 // runFunction runs f until it's done and returns the exit code.
-func runFunction(ctx context.Context, f *function, port string, logger *log.Logger) int {
+func runFunction(ctx context.Context, f *function, port string, getenv func(string) string, logger *log.Logger) int {
 	switch f.kind {
 	case kindHTTP:
 		if err := serveHTTP(ctx, f, ":"+port, logger, nil); err != nil {
@@ -121,12 +121,7 @@ func runFunction(ctx context.Context, f *function, port string, logger *log.Logg
 	case kindSchedule:
 		return runSchedule(ctx, f, logger)
 	default:
-		p, err := Pool(ctx)
-		if err != nil {
-			logger.Print(err)
-			return 1
-		}
-		if err := runWorker(ctx, f, workerConfig{pool: p, logf: logger.Printf}); err != nil {
+		if err := runWorker(ctx, f, workerConfig{url: getenv("DATABASE_URL"), logf: logger.Printf}); err != nil {
 			logger.Printf("%s: %v", f.name, err)
 			return 1
 		}
