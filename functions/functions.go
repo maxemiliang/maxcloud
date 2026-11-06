@@ -73,15 +73,15 @@ func Public() Option { return func(o *options) { o.public = true } }
 // DNS record is proxied): WAF, caching, Cloudflare Access. Needs Public.
 func Proxied() Option { return func(o *options) { o.proxied = true } }
 
-// MemoryLimit lets an HTTP function's container use more memory than
+// MemoryLimit lets a function's container use more memory than
 // Memory (its request), for spikes, e.g. "1536Mi".
 func MemoryLimit(q string) Option { return func(o *options) { o.memoryLimit = q } }
 
-// User runs an HTTP function's container as this user id (and group), for
+// User runs a function's container as this user id (and group), for
 // an image whose Dockerfile has no non-root USER.
 func User(id int64) Option { return func(o *options) { o.user = &id } }
 
-// ReadOnlyRootFilesystem makes an HTTP function's root filesystem
+// ReadOnlyRootFilesystem makes a function's root filesystem
 // read-only; write to a Volume (and point TMPDIR at one).
 func ReadOnlyRootFilesystem() Option { return func(o *options) { o.readOnlyRoot = true } }
 
@@ -91,7 +91,7 @@ type volume struct {
 	Memory    bool   `json:"memory"`
 }
 
-// Volume mounts an empty scratch directory at path in an HTTP function's
+// Volume mounts an empty scratch directory at path in a function's
 // container, at most sizeLimit ("1Gi"; "" for no limit). Knative doesn't
 // allow /tmp.
 func Volume(path, sizeLimit string) Option {

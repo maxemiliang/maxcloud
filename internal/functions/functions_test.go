@@ -307,3 +307,35 @@ func TestHTTPOptionsRejected(t *testing.T) {
 		}
 	}
 }
+
+// A scheduled function from the same image (a Nuxt task) needs the same
+// container settings, or an image without USER can't start.
+func TestContainerOptionsOnScheduleAndQueue(t *testing.T) {
+	d, err := Parse([]byte(`{"functions":[
+		{"name":"task-cleanup","kind":"schedule","schedule":"0 3 * * *","user":1000,"readOnlyRootFilesystem":true,"memoryLimit":"1Gi","volumes":[{"path":"/scratch","sizeLimit":"1Gi"}]},
+		{"name":"resize","kind":"queue","queue":"images","backlogQuery":"SELECT 1","user":1000,"volumes":[{"path":"/dev/shm","memory":true}]}]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := Manifests(d, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := docs(t, out)
+	pod := get(m["CronJob/task-cleanup"], "spec", "jobTemplate", "spec", "template", "spec")
+	c := get(pod, "containers", 0)
+	sc := get(c, "securityContext").(map[string]any)
+	if sc["runAsUser"] != float64(1000) || sc["readOnlyRootFilesystem"] != true || sc["allowPrivilegeEscalation"] != false || sc["capabilities"] == nil {
+		t.Errorf("cronjob securityContext = %v (the options and the restricted hardening)", sc)
+	}
+	if get(c, "resources", "limits", "memory") != "1Gi" || get(pod, "volumes", 0, "emptyDir", "sizeLimit") != "1Gi" || get(c, "volumeMounts", 0, "mountPath") != "/scratch" {
+		t.Errorf("cronjob container %v, volumes %v", c, get(pod, "volumes"))
+	}
+	wpod := get(m["Deployment/resize"], "spec", "template", "spec")
+	if get(wpod, "volumes", 0, "emptyDir", "medium") != "Memory" || get(wpod, "containers", 0, "securityContext", "runAsUser") != float64(1000) {
+		t.Errorf("worker pod %v", wpod)
+	}
+	if _, err := Parse([]byte(`{"functions":[{"name":"x","kind":"schedule","schedule":"0 3 * * *","volumes":[{"path":"/tmp"}]}]}`)); err == nil {
+		t.Error("a volume on /tmp for a schedule: want an error")
+	}
+}

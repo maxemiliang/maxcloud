@@ -26,20 +26,21 @@ type describedBase struct {
 	Memory         *string `json:"memory"`
 	CPU            *string `json:"cpu"`
 	TimeoutSeconds float64 `json:"timeoutSeconds"`
-}
 
-type describedHTTP struct {
-	describedBase
-	Public                 bool     `json:"public"`
-	MinInstances           int      `json:"minInstances"`
-	MaxInstances           int      `json:"maxInstances"`
-	Concurrency            int      `json:"concurrency"`
-	Proxied                bool     `json:"proxied"`
 	MemoryLimit            *string  `json:"memoryLimit"`
 	User                   *int64   `json:"user"`
 	ReadOnlyRootFilesystem bool     `json:"readOnlyRootFilesystem"`
 	Volumes                []volume `json:"volumes"`
-	HealthPath             string   `json:"healthPath"`
+}
+
+type describedHTTP struct {
+	describedBase
+	Public       bool   `json:"public"`
+	MinInstances int    `json:"minInstances"`
+	MaxInstances int    `json:"maxInstances"`
+	Concurrency  int    `json:"concurrency"`
+	Proxied      bool   `json:"proxied"`
+	HealthPath   string `json:"healthPath"`
 }
 
 type describedSchedule struct {
@@ -102,18 +103,18 @@ func describe() description {
 	for _, n := range names {
 		f := registry[n]
 		o := f.opts
-		base := describedBase{Name: f.name, Export: f.name, Kind: f.kind, Memory: strPtr(o.memory), CPU: strPtr(o.cpu)}
+		vols := o.volumes
+		if vols == nil {
+			vols = []volume{}
+		}
+		base := describedBase{Name: f.name, Export: f.name, Kind: f.kind, Memory: strPtr(o.memory), CPU: strPtr(o.cpu),
+			MemoryLimit: strPtr(o.memoryLimit), User: o.user, ReadOnlyRootFilesystem: o.readOnlyRoot, Volumes: vols}
 		switch f.kind {
 		case kindHTTP:
 			base.TimeoutSeconds = f.timeoutSeconds(defaultHTTPTimeout)
-			vols := o.volumes
-			if vols == nil {
-				vols = []volume{}
-			}
 			d.Functions = append(d.Functions, describedHTTP{
 				describedBase: base, Public: o.public, MinInstances: o.minInstances, MaxInstances: or(o.maxInstances, 3), Concurrency: o.concurrency,
-				Proxied: o.proxied, MemoryLimit: strPtr(o.memoryLimit), User: o.user, ReadOnlyRootFilesystem: o.readOnlyRoot,
-				Volumes: vols, HealthPath: o.healthPath,
+				Proxied: o.proxied, HealthPath: o.healthPath,
 			})
 		case kindSchedule:
 			base.TimeoutSeconds = f.timeoutSeconds(defaultScheduleTimeout)
