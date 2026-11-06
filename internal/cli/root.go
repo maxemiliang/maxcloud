@@ -73,7 +73,7 @@ GitHub access uses $GH_TOKEN, else the GitHub CLI's login.`,
 	f.StringVar(&g.branch, "registry-branch", "main", "branch of the registry repo")
 	_ = f.MarkHidden("registry-branch")
 
-	root.AddCommand(initCmd(g), deployCmd(g), appsCmd(g), statusCmd(g), logsCmd(g), generateCmd(g), queueCmd(g), secretsCmd(g), dbCmd(g), loginCmd(g), logoutCmd(g), credentialCmd(g), kubeconfigCmd(g), doctorCmd(g))
+	root.AddCommand(initCmd(g), deployCmd(g), appsCmd(g), statusCmd(g), logsCmd(g), generateCmd(g), queueCmd(g), secretsCmd(g), dbCmd(g), loginCmd(g), logoutCmd(g), credentialCmd(g), kubeconfigCmd(g), doctorCmd(g), runCmd(g), callCmd(g))
 	return root
 }
 

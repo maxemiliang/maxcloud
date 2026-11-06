@@ -4,14 +4,18 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"os/signal"
 	"regexp"
 	"strconv"
 	"strings"
+	"syscall"
 	"text/tabwriter"
 	"time"
 
 	"github.com/spf13/cobra"
 
+	"github.com/maxemiliang/maxcloud/internal/functions"
 	"github.com/maxemiliang/maxcloud/internal/kube"
 )
 
@@ -24,7 +28,88 @@ func dbCmd(g *globals) *cobra.Command {
 mc-<app>--db; every restore starts a new one and leaves the older ones as
 they are.`,
 	}
-	c.AddCommand(dbRestoreCmd(g), dbRecoverCmd(g), dbBranchCmd(g))
+	c.AddCommand(dbPsqlCmd(g), dbProxyCmd(g), dbRestoreCmd(g), dbRecoverCmd(g), dbBranchCmd(g))
+	return c
+}
+
+// dbCluster is the CloudNativePG cluster of the app's database, or of one
+// of its branches.
+func dbCluster(branch string) string {
+	if branch == "" {
+		return functions.DatabaseName
+	}
+	return functions.DatabaseName + "-" + branch
+}
+
+func dbPsqlCmd(g *globals) *cobra.Command {
+	var branch string
+	c := &cobra.Command{
+		Use:   "psql [APP]",
+		Short: "Open psql in the app's database (or a branch's)",
+		Long: `Run psql in the database's primary, as the postgres superuser, in the app
+database. Interactive on a terminal; otherwise it runs what comes on
+stdin.`,
+		Example: `  mcloud db psql
+  mcloud db psql shop --branch try-migration
+  echo 'select count(*) from maxcloud_jobs' | mcloud db psql`,
+		Args: cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			name, err := appName(args)
+			if err != nil {
+				return err
+			}
+			k, err := g.kube()
+			if err != nil {
+				return err
+			}
+			cluster := dbCluster(branch)
+			pod, err := k.PrimaryPod(cmd.Context(), name, cluster)
+			if err != nil {
+				return err
+			}
+			return k.Exec(cmd.Context(), name, pod, "postgres", []string{"psql", "-d", "app"}, g.in, g.out, g.errOut)
+		},
+	}
+	c.Flags().StringVar(&branch, "branch", "", "a branch of the database (mcloud db branch list)")
+	return c
+}
+
+func dbProxyCmd(g *globals) *cobra.Command {
+	var branch string
+	var port int
+	c := &cobra.Command{
+		Use:   "proxy [APP]",
+		Short: "Reach the app's database (or a branch's) on localhost",
+		Long: `Forward a local port to the database's primary and print a DATABASE_URL
+for it, as the app's own user, until you stop it (Ctrl-C). For a GUI, a
+migration tool, or running the app locally (mcloud dev --db branch:NAME
+does that by itself).`,
+		Example: `  mcloud db proxy
+  mcloud db proxy shop --branch try-migration --port 5433`,
+		Args: cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			name, err := appName(args)
+			if err != nil {
+				return err
+			}
+			k, err := g.kube()
+			if err != nil {
+				return err
+			}
+			ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
+			defer stop()
+			url, err := k.ProxyDatabase(ctx, name, dbCluster(branch), port)
+			if err != nil {
+				return err
+			}
+			fmt.Fprintf(g.errOut, "Forwarding to %s's database%s. Ctrl-C stops it.\n", name, map[bool]string{true: " branch " + branch}[branch != ""])
+			fmt.Fprintf(g.out, "DATABASE_URL=%s\n", url)
+			<-ctx.Done()
+			return nil
+		},
+	}
+	c.Flags().StringVar(&branch, "branch", "", "a branch of the database (mcloud db branch list)")
+	c.Flags().IntVar(&port, "port", 0, "local port (default: any free one)")
 	return c
 }
 
@@ -238,7 +323,7 @@ func dbBranchCreateCmd(g *globals) *cobra.Command {
 				}
 				switch b.Phase {
 				case "Ready":
-					fmt.Fprintf(g.out, "Ready. Its URL: kubectl -n %s get secret db-%s-app -o jsonpath='{.data.uri}' | base64 -d\n", name, branch)
+					fmt.Fprintf(g.out, "Ready. mcloud db psql --branch %[1]s opens it; mcloud db proxy --branch %[1]s gives a local URL; mcloud dev --db branch:%[1]s runs the app on it.\n", branch)
 					return nil
 				case "Failed":
 					return errors.New(b.Message)
