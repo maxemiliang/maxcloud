@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -45,20 +46,47 @@ type Client struct {
 	config     *rest.Config
 }
 
-// New connects using kubeconfig if set, else $MCLOUD_KUBECONFIG, else the
-// usual $KUBECONFIG / ~/.kube/config.
+// OwnKubeconfig is the kubeconfig mcloud login writes: the cluster, with
+// you logged in through the identity provider.
+func OwnKubeconfig() string {
+	dir, err := os.UserConfigDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(dir, "mcloud", "kubeconfig")
+}
+
+// KubeconfigSource says which kubeconfig mcloud uses, and why: kubeconfig
+// if set (--kubeconfig), else $MCLOUD_KUBECONFIG, else the one mcloud
+// login wrote, else the usual $KUBECONFIG / ~/.kube/config ("" for path).
+func KubeconfigSource(kubeconfig string) (path, why string) {
+	if kubeconfig != "" {
+		return kubeconfig, "--kubeconfig"
+	}
+	if v := os.Getenv("MCLOUD_KUBECONFIG"); v != "" {
+		return v, "$MCLOUD_KUBECONFIG"
+	}
+	if own := OwnKubeconfig(); own != "" {
+		if _, err := os.Stat(own); err == nil {
+			return own, "mcloud login"
+		}
+	}
+	if v := os.Getenv("KUBECONFIG"); v != "" {
+		return "", "$KUBECONFIG"
+	}
+	return "", "~/.kube/config"
+}
+
+// New connects with the kubeconfig KubeconfigSource picks.
 func New(kubeconfig, kubeContext string) (*Client, error) {
 	rules := clientcmd.NewDefaultClientConfigLoadingRules()
-	if kubeconfig == "" {
-		kubeconfig = os.Getenv("MCLOUD_KUBECONFIG")
-	}
-	if kubeconfig != "" {
-		rules.ExplicitPath = kubeconfig
+	if path, _ := KubeconfigSource(kubeconfig); path != "" {
+		rules.ExplicitPath = path
 	}
 	cfg, err := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(rules,
 		&clientcmd.ConfigOverrides{CurrentContext: kubeContext}).ClientConfig()
 	if err != nil {
-		return nil, fmt.Errorf("kubeconfig: %w (set MCLOUD_KUBECONFIG to the homelab's kubeconfig)", err)
+		return nil, fmt.Errorf("kubeconfig: %w (log in with mcloud login)", err)
 	}
 	cfg.Timeout = 30 * time.Second
 	core, err := kubernetes.NewForConfig(cfg)
