@@ -50,6 +50,8 @@ type config struct {
 	postgresImage, dbStorageClass                                      string
 	publicDomain, publicGateway, namespace                             string
 	registryBucket                                                     string
+	imageRegistry                                                      string
+	pullTokenLifetime                                                  time.Duration
 	tokenExpires                                                       time.Time
 }
 
@@ -68,6 +70,15 @@ func configFromEnv() (config, error) {
 	c.dbStorageClass = os.Getenv("MAXCLOUD_DB_STORAGE_CLASS")
 	if c.registryBucket = os.Getenv("MAXCLOUD_REGISTRY_BUCKET"); c.registryBucket == "" {
 		c.registryBucket = "maxcloud-registry"
+	}
+	c.imageRegistry = os.Getenv("MAXCLOUD_IMAGE_REGISTRY")
+	c.pullTokenLifetime = 7 * 24 * time.Hour
+	if s := os.Getenv("MAXCLOUD_IMAGE_PULL_TOKEN_LIFETIME"); s != "" {
+		d, err := time.ParseDuration(s)
+		if err != nil || d < 10*time.Minute {
+			return c, fmt.Errorf("MAXCLOUD_IMAGE_PULL_TOKEN_LIFETIME %q: a duration of at least 10m", s)
+		}
+		c.pullTokenLifetime = d
 	}
 	c.publicDomain = os.Getenv("MAXCLOUD_PUBLIC_DOMAIN")
 	if c.publicGateway = os.Getenv("MAXCLOUD_PUBLIC_GATEWAY"); c.publicGateway == "" {
@@ -207,6 +218,17 @@ func run(metricsAddr, probeAddr string, leaderElect bool) error {
 		Client: mgr.GetClient(), Storage: storage, Objects: s3c, Bucket: cfg.registryBucket,
 	}).SetupWithManager(mgr); err != nil {
 		return fmt.Errorf("registry backup: %w", err)
+	}
+
+	// Apps pull their images from the maxcloud registry with tokens of their
+	// own ServiceAccount maxcloud-image-pull.
+	if cfg.imageRegistry != "" {
+		if err := (&controller.ImagePull{
+			Client: mgr.GetClient(), APIReader: mgr.GetAPIReader(),
+			Host: cfg.imageRegistry, Lifetime: cfg.pullTokenLifetime,
+		}).SetupWithManager(mgr); err != nil {
+			return fmt.Errorf("image pull: %w", err)
+		}
 	}
 
 	// GitOps apps' maxcloud.yaml reaches their registry entry through Flux.

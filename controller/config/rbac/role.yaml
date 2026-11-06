@@ -31,6 +31,24 @@ rules:
   - update
 - apiGroups:
   - ""
+  resources:
+  - serviceaccounts
+  verbs:
+  - create
+  - get
+  - list
+  - patch
+  - watch
+- apiGroups:
+  - ""
+  resourceNames:
+  - maxcloud-image-pull
+  resources:
+  - serviceaccounts/token
+  verbs:
+  - create
+- apiGroups:
+  - ""
   resourceNames:
   - maxcloud:app-sync
   resources:

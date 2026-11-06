@@ -23,4 +23,4 @@ resources:
 # The release workflow checks that this is the tag being released.
 images:
   - name: ghcr.io/maxemiliang/maxcloud-controller
-    newTag: 0.7.0
+    newTag: 0.8.0

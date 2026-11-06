@@ -112,6 +112,26 @@ itself from its backups. A finalizer on each entry deletes the copy first
 when the app is deleted on purpose, so a deleted app doesn't come back.
 Entries that live in the homelab repo aren't copied: git has them.
 
+### Pulling images from the maxcloud registry
+
+With `MAXCLOUD_IMAGE_REGISTRY` set (e.g. `registry.gronblom.dev`), every app
+namespace gets credentials for that registry, and no passwords exist:
+
+- a ServiceAccount `maxcloud-image-pull` that nothing runs as;
+- the Secret `maxcloud-registry` (a docker config) holding a token of that
+  ServiceAccount, with the registry's host as its audience. The controller
+  renews it at half its lifetime (asked for: 7 days,
+  `MAXCLOUD_IMAGE_PULL_TOKEN_LIFETIME`; the API server may grant less);
+- the namespace's `default` ServiceAccount lists the Secret in
+  `imagePullSecrets`, next to any it already had, so pods and Knative
+  services pull with it.
+
+The registry (zot in the homelab) trusts the cluster's ServiceAccount
+tokens for that audience, maps a `maxcloud-image-pull` token to its
+namespace, and lets it read `<host>/<namespace>/...` only: an app can't
+pull another app's images. The controller's RBAC lets it mint tokens for
+that ServiceAccount name and no other.
+
 ### maxcloud.yaml from the app's repo
 
 A GitOps app's `maxcloud.yaml` takes effect on push, with no credentials in
@@ -149,6 +169,8 @@ CRDs, RBAC and the Deployment. The cluster provides the namespace
   and `MAXCLOUD_DB_STORAGE_CLASS` for the databases' disks. Prefer a class
   that deletes its disks: a restore throws the old disk away (the bucket is
   what keeps the data), and a retaining class leaves one behind each time.
+
+`MAXCLOUD_IMAGE_REGISTRY` (optional) turns on the pull credentials above.
 
 For the sync from apps' repos the cluster also provides: a NetworkPolicy
 letting `maxcloud-system` reach source-controller in `flux-system`, and a
