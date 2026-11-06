@@ -127,6 +127,11 @@ app: %[1]s
 # A Postgres database (DATABASE_URL), backed up and restorable to a point in
 # time; queue functions need it:
 # db: true            # or {size: 2Gi, instances: 2}
+# Hostnames of your own for a function or Knative service (it can stay
+# private). Only ones an admin allowed this app (homelab
+# infrastructure/configs/run/domains.yaml); proxied: behind Cloudflare.
+# domains:
+#   - {host: shop.gronblom.dev, service: web, proxied: true}
 `,
 	".github/workflows/deploy.yaml": `# Every push to main deploys this app to maxcloud (maxemiliang/maxcloud,
 # .github/workflows/run-deploy.yaml): builds the image, writes the

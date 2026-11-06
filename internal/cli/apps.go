@@ -94,6 +94,7 @@ func entryFlags(f *pflag.FlagSet, e *registry.Entry) {
 	f.Lookup("db").NoOptDefVal = "true"
 	f.StringVar(&e.DBInstances, "db-instances", "", "database instances: 1 (default), or 2 for a replica on the other node")
 	f.StringVar(&e.DBSize, "db-size", "", "database disk per instance (default 1Gi; can grow, not shrink)")
+	f.StringVar(&e.Domains, "domains", "", "custom hostnames, comma-separated <host>:<service>[:proxied] (paja.lankkupelit.fi:web:proxied); only those an admin allowed the app")
 }
 
 type confirmFlags struct {
@@ -211,16 +212,16 @@ Use it for what the file leaves out, for apps without one, and to switch
 			name := args[0]
 			ctx := cmd.Context()
 			changed := map[string]*string{}
-			for flag, v := range map[string]*string{"repo": &flags.Repo, "path": &flags.Path, "branch": &flags.Branch, "cpu": &flags.CPU, "memory": &flags.Memory, "pods": &flags.Pods, "deploy": &flags.Deploy, "buckets": &flags.Buckets, "db": &flags.DB, "db-instances": &flags.DBInstances, "db-size": &flags.DBSize} {
+			for flag, v := range map[string]*string{"repo": &flags.Repo, "path": &flags.Path, "branch": &flags.Branch, "cpu": &flags.CPU, "memory": &flags.Memory, "pods": &flags.Pods, "deploy": &flags.Deploy, "buckets": &flags.Buckets, "db": &flags.DB, "db-instances": &flags.DBInstances, "db-size": &flags.DBSize, "domains": &flags.Domains} {
 				if cmd.Flags().Changed(flag) {
 					changed[flag] = v
 				}
 			}
 			if len(changed) == 0 {
-				return errors.New("nothing to change: pass --cpu, --memory, --pods, --repo, --path, --branch, --deploy, --buckets or --db")
+				return errors.New("nothing to change: pass --cpu, --memory, --pods, --repo, --path, --branch, --deploy, --buckets, --db or --domains")
 			}
 			apply := func(e *registry.Entry) {
-				fields := map[string]*string{"repo": &e.Repo, "path": &e.Path, "branch": &e.Branch, "cpu": &e.CPU, "memory": &e.Memory, "pods": &e.Pods, "deploy": &e.Deploy, "buckets": &e.Buckets, "db": &e.DB, "db-instances": &e.DBInstances, "db-size": &e.DBSize}
+				fields := map[string]*string{"repo": &e.Repo, "path": &e.Path, "branch": &e.Branch, "cpu": &e.CPU, "memory": &e.Memory, "pods": &e.Pods, "deploy": &e.Deploy, "buckets": &e.Buckets, "db": &e.DB, "db-instances": &e.DBInstances, "db-size": &e.DBSize, "domains": &e.Domains}
 				for flag, v := range changed {
 					*fields[flag] = *v
 				}
@@ -285,6 +286,7 @@ func diffEntries(a, b *registry.Entry) []string {
 		{"db", a.DB, b.DB, "none"},
 		{"db-instances", a.DBInstances, b.DBInstances, "1"},
 		{"db-size", a.DBSize, b.DBSize, "1Gi"},
+		{"domains", a.Domains, b.Domains, "none"},
 	} {
 		if f.a != f.b {
 			out = append(out, fmt.Sprintf("%s %s -> %s", f.name, show(f.a, f.def), show(f.b, f.def)))
@@ -341,7 +343,7 @@ func (g *globals) explainSwitch(e *registry.Entry) {
 
 // entryKeys maps mcloud apps set's flags to registry keys, for the fields
 // an app's maxcloud.yaml can own.
-var entryKeys = map[string]string{"cpu": "cpu", "memory": "memory", "pods": "pods", "buckets": "buckets", "db": "db", "db-size": "dbSize", "db-instances": "dbInstances"}
+var entryKeys = map[string]string{"cpu": "cpu", "memory": "memory", "pods": "pods", "buckets": "buckets", "db": "db", "db-size": "dbSize", "db-instances": "dbInstances", "domains": "domains"}
 
 func appsDeleteCmd(g *globals) *cobra.Command {
 	var cf confirmFlags

@@ -167,6 +167,17 @@ func TestProjectEntry(t *testing.T) {
 	if e := read("app: quick\ndeploy: direct\n").entry(&registry.Entry{Name: "quick", Repo: "o/q"}); e.Repo != "" || !e.Direct() {
 		t.Errorf("direct = %+v", e)
 	}
+	// Domains: written in the registry's form; [] removes them all.
+	p = read("app: paja\ndomains:\n  - {host: paja.lankkupelit.fi, service: web, proxied: true}\n  - {host: api.lankkupelit.fi, service: api}\n")
+	if e := p.entry(&registry.Entry{Name: "paja", Repo: "o/p", Domains: "old.example.com:web"}); e.Domains != "paja.lankkupelit.fi:web:proxied,api.lankkupelit.fi:api" {
+		t.Errorf("domains = %q", e.Domains)
+	}
+	if e := read("app: paja\ndomains: []\n").entry(&registry.Entry{Name: "paja", Repo: "o/p", Domains: "old.example.com:web"}); e.Domains != "" {
+		t.Errorf("domains: [] = %q", e.Domains)
+	}
+	if e := read("app: paja\n").entry(&registry.Entry{Name: "paja", Repo: "o/p", Domains: "old.example.com:web"}); e.Domains != "old.example.com:web" {
+		t.Errorf("no domains: = %q", e.Domains)
+	}
 	// Bad db value.
 	var bad project
 	if err := yaml.Unmarshal([]byte("app: x\ndb: maybe\n"), &bad); err == nil {
@@ -232,6 +243,10 @@ func TestSyncedFields(t *testing.T) {
 	}
 	p = &project{DB: &projectDB{Enabled: false}}
 	if got := strings.Join(p.syncedFields(), ","); got != "db,dbInstances,dbSize" {
+		t.Errorf("got %s", got)
+	}
+	p = &project{Domains: []registry.Domain{}}
+	if got := strings.Join(p.syncedFields(), ","); got != "domains" {
 		t.Errorf("got %s", got)
 	}
 	if got := (&project{}).syncedFields(); len(got) != 0 {
