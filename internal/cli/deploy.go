@@ -15,7 +15,7 @@ import (
 )
 
 func deployCmd(g *globals) *cobra.Command {
-	var rebuild, noPush, direct bool
+	var rebuild, noPush, direct, yes bool
 	var timeout time.Duration
 	c := &cobra.Command{
 		Use:   "deploy",
@@ -58,7 +58,7 @@ needs pack.`,
 			defer cancel()
 			// The app's registry entry comes from maxcloud.yaml: registered on
 			// the first deploy, kept in line after that. No homelab commit.
-			created, err := g.syncApp(ctx, k, p)
+			created, err := g.syncApp(ctx, k, p, yes)
 			if err != nil {
 				return err
 			}
@@ -127,6 +127,7 @@ needs pack.`,
 	f.BoolVar(&noPush, "no-push", false, "don't push; follow the deploy of what's already pushed")
 	f.BoolVar(&direct, "direct", false, "deploy a direct app: build here and apply, without git (default for deploy: direct in maxcloud.yaml)")
 	f.DurationVar(&timeout, "timeout", 15*time.Minute, "give up following after this long")
+	f.BoolVarP(&yes, "yes", "y", false, "don't ask before switching between gitops and direct (deploy: in maxcloud.yaml)")
 	return c
 }
 

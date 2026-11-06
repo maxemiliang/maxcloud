@@ -2,11 +2,14 @@ package kube
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"strings"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/types"
 
 	"github.com/maxemiliang/maxcloud/internal/registry"
 )
@@ -19,7 +22,15 @@ type RegistryEntry struct {
 	// InGit: Flux applied it from the homelab repo (the platform's own apps,
 	// like run-demo). Those change in git, not with mcloud.
 	InGit bool
+	// SyncedFields are the registry keys (cpu, memory, pods, buckets, db,
+	// dbSize, dbInstances) the app's maxcloud.yaml declares, which it owns.
+	SyncedFields []string
 }
+
+// SyncedFieldsAnnotation on a registry entry lists the keys the app's
+// maxcloud.yaml declares (the maxcloud controller's AppSync and mcloud
+// deploy write it).
+const SyncedFieldsAnnotation = "maxcloud.gronblom.dev/synced-fields"
 
 // GetRegistryEntry returns the app's entry, or nil if it has none.
 func (c *Client) GetRegistryEntry(ctx context.Context, name string) (*RegistryEntry, error) {
@@ -37,7 +48,11 @@ func (c *Client) GetRegistryEntry(ctx context.Context, name string) (*RegistryEn
 	if err != nil {
 		return nil, fmt.Errorf("registry entry %s: %w", name, err)
 	}
-	return &RegistryEntry{Entry: e, InGit: o.GetLabels()[registry.FluxOwnerLabel] != ""}, nil
+	r := &RegistryEntry{Entry: e, InGit: o.GetLabels()[registry.FluxOwnerLabel] != ""}
+	if v := o.GetAnnotations()[SyncedFieldsAnnotation]; v != "" {
+		r.SyncedFields = strings.Split(v, ",")
+	}
+	return r, nil
 }
 
 // PutRegistryEntry creates the app's entry, or replaces its values. An entry
@@ -66,6 +81,21 @@ func (c *Client) PutRegistryEntry(ctx context.Context, e *registry.Entry) error 
 	}
 	cur.SetLabels(labels)
 	_, err = res.Update(ctx, cur, metav1.UpdateOptions{FieldManager: FieldManager, DryRun: c.dryRun()})
+	return err
+}
+
+// SetSyncedFields records which keys the app's maxcloud.yaml owns.
+func (c *Client) SetSyncedFields(ctx context.Context, name string, fields []string) error {
+	var v any
+	if len(fields) > 0 {
+		v = strings.Join(fields, ",")
+	}
+	patch, err := json.Marshal(map[string]any{"metadata": map[string]any{"annotations": map[string]any{SyncedFieldsAnnotation: v}}})
+	if err != nil {
+		return err
+	}
+	_, err = c.Dyn.Resource(gvrProvider).Namespace(FluxNamespace).Patch(ctx, name, types.MergePatchType, patch,
+		metav1.PatchOptions{FieldManager: FieldManager, DryRun: c.dryRun()})
 	return err
 }
 

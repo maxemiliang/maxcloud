@@ -32,7 +32,7 @@ func (g *globals) deployDirect(ctx context.Context, k *kube.Client, p *project) 
 	case st.Entry == nil:
 		return fmt.Errorf("%s isn't registered; register it for direct deploys with `mcloud apps create %s --deploy direct`", name, name)
 	case !st.Entry.Direct():
-		return fmt.Errorf("%s deploys from git (Flux would undo a direct deploy); switch it with `mcloud apps set %s --deploy direct`", name, name)
+		return fmt.Errorf("%s deploys from git (Flux would undo a direct deploy); switch it with deploy: direct in maxcloud.yaml (or `mcloud apps set %s --deploy direct`)", name, name)
 	case st.Applied:
 		return fmt.Errorf("%s still has a Flux deploy on the cluster; wait a minute for the registry to remove it", name)
 	}

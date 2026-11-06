@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
+	"sort"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -195,9 +197,14 @@ func appsSetCmd(g *globals) *cobra.Command {
 	var cf confirmFlags
 	c := &cobra.Command{
 		Use:   "set NAME",
-		Short: "Change an app's quota or source",
+		Short: "Change a registered app by hand (apps with a maxcloud.yaml: edit that)",
 		Long: `Change fields of a registered app. Only the flags you pass change; pass an
-empty value (--cpu "") to go back to the default.`,
+empty value (--cpu "") to go back to the default.
+
+An app's maxcloud.yaml owns what it declares (quota, buckets, db): change
+those in the file. This refuses them, since the next push would undo them.
+Use it for what the file leaves out, for apps without one, and to switch
+--deploy between gitops and direct.`,
 		Example: `  mcloud apps set shop --cpu 500m --memory 2Gi
   mcloud apps set shop --buckets uploads,assets:public
   mcloud apps set shop --db --db-size 2Gi`,
@@ -233,6 +240,18 @@ empty value (--cpu "") to go back to the default.`,
 			}
 			if cur.InGit {
 				return fmt.Errorf("%s is registered in the homelab repo: change apps/maxcloud/apps/%s.yaml there", name, name)
+			}
+			// What the app's maxcloud.yaml declares is its to change: a value
+			// set here would be undone by the next push.
+			var owned []string
+			for flag := range changed {
+				if key, ok := entryKeys[flag]; ok && slices.Contains(cur.SyncedFields, key) {
+					owned = append(owned, "--"+flag)
+				}
+			}
+			if len(owned) > 0 {
+				sort.Strings(owned)
+				return fmt.Errorf("%s's maxcloud.yaml sets %s: change it there and push (or mcloud deploy)", name, strings.Join(owned, ", "))
 			}
 			old := cur.Entry
 			e := *old
@@ -289,12 +308,8 @@ func (g *globals) changeApp(ctx context.Context, k *kube.Client, old, e *registr
 		fmt.Fprintf(g.out, "  %s\n", d)
 	}
 	if old.Direct() != e.Direct() {
-		fmt.Fprintf(g.out, "\nSwitching how %s deploys replaces its workloads: ", e.Name)
-		if e.Direct() {
-			fmt.Fprintln(g.out, "Flux removes everything it applied from the app's repo, and the app is down until `mcloud deploy` applies it again.")
-		} else {
-			fmt.Fprintln(g.out, "Flux applies the app from git and takes over objects of the same name; delete any that mcloud applied and git doesn't have.")
-		}
+		fmt.Fprintln(g.out)
+		g.explainSwitch(e)
 	}
 	if old.DB == "true" && e.DB != "true" {
 		fmt.Fprintln(g.out, "\nRemoving the database deletes it; its backups stay in Object Storage.")
@@ -315,6 +330,20 @@ func (g *globals) changeApp(ctx context.Context, k *kube.Client, old, e *registr
 	fmt.Fprintln(g.out, "Changed.")
 	return nil
 }
+
+// explainSwitch says what switching between gitops and direct does.
+func (g *globals) explainSwitch(e *registry.Entry) {
+	fmt.Fprintf(g.out, "Switching how %s deploys replaces its workloads: ", e.Name)
+	if e.Direct() {
+		fmt.Fprintln(g.out, "Flux removes everything it applied from the app's repo, and the app is down until `mcloud deploy` applies it again.")
+	} else {
+		fmt.Fprintln(g.out, "Flux applies the app from git and takes over objects of the same name; delete any that mcloud applied and git doesn't have.")
+	}
+}
+
+// entryKeys maps mcloud apps set's flags to registry keys, for the fields
+// an app's maxcloud.yaml can own.
+var entryKeys = map[string]string{"cpu": "cpu", "memory": "memory", "pods": "pods", "buckets": "buckets", "db": "db", "db-size": "dbSize", "db-instances": "dbInstances"}
 
 func appsDeleteCmd(g *globals) *cobra.Command {
 	var cf confirmFlags

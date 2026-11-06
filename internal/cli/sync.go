@@ -3,6 +3,8 @@ package cli
 import (
 	"context"
 	"fmt"
+	"slices"
+	"sort"
 	"strings"
 
 	"github.com/maxemiliang/maxcloud/internal/kube"
@@ -58,9 +60,35 @@ func (p *project) entry(base *registry.Entry) registry.Entry {
 	return e
 }
 
+// syncedFields are the registry keys maxcloud.yaml declares, which it owns
+// (the same rule as the controller's AppSync).
+func (p *project) syncedFields() []string {
+	var out []string
+	if q := p.Quota; q != nil {
+		if q.CPU != "" {
+			out = append(out, "cpu")
+		}
+		if q.Memory != "" {
+			out = append(out, "memory")
+		}
+		if q.Pods != "" {
+			out = append(out, "pods")
+		}
+	}
+	if p.Buckets != nil {
+		out = append(out, "buckets")
+	}
+	if p.DB != nil {
+		out = append(out, "db", "dbInstances", "dbSize")
+	}
+	sort.Strings(out)
+	return out
+}
+
 // syncApp registers the app from maxcloud.yaml, or brings its entry in line
-// with it. Returns whether the app was new.
-func (g *globals) syncApp(ctx context.Context, k *kube.Client, p *project) (bool, error) {
+// with it. Returns whether the app was new. Switching between gitops and
+// direct asks first, unless yes.
+func (g *globals) syncApp(ctx context.Context, k *kube.Client, p *project, yes bool) (bool, error) {
 	cur, err := k.GetRegistryEntry(ctx, p.App)
 	if err != nil {
 		return false, err
@@ -85,10 +113,18 @@ func (g *globals) syncApp(ctx context.Context, k *kube.Client, p *project) (bool
 		if err := k.PutRegistryEntry(ctx, &e); err != nil {
 			return false, err
 		}
+		if err := k.SetSyncedFields(ctx, e.Name, p.syncedFields()); err != nil {
+			return false, err
+		}
 		if !e.Direct() {
 			fmt.Fprintf(g.out, "For Flux to read %s, the homelab's Flux GitHub App needs access to it (GitHub, Settings, Applications, the Flux app, Repository access).\n", e.Repo)
 		}
 		return true, nil
+	}
+	if fields := p.syncedFields(); !slices.Equal(fields, cur.SyncedFields) {
+		if err := k.SetSyncedFields(ctx, e.Name, fields); err != nil {
+			return false, err
+		}
 	}
 	diff := diffEntries(base, &e)
 	if len(diff) == 0 {
@@ -96,7 +132,13 @@ func (g *globals) syncApp(ctx context.Context, k *kube.Client, p *project) (bool
 	}
 	fmt.Fprintf(g.out, "Updating %s from %s: %s\n", e.Name, ProjectFile, strings.Join(diff, ", "))
 	if base.Direct() != e.Direct() {
-		return false, fmt.Errorf("%s changes how %s deploys (gitops/direct): do that on purpose with `mcloud apps set %s --deploy ...`", ProjectFile, e.Name, e.Name)
+		g.explainSwitch(&e)
+		if !yes {
+			ok, err := g.confirm("Switch it?")
+			if err != nil || !ok {
+				return false, orAborted(err)
+			}
+		}
 	}
 	return false, k.PutRegistryEntry(ctx, &e)
 }

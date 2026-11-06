@@ -224,3 +224,17 @@ func TestCaretAllows(t *testing.T) {
 		}
 	}
 }
+
+func TestSyncedFields(t *testing.T) {
+	p := &project{Quota: &projectQuota{CPU: "1"}, Buckets: []string{}}
+	if got := strings.Join(p.syncedFields(), ","); got != "buckets,cpu" {
+		t.Errorf("got %s", got)
+	}
+	p = &project{DB: &projectDB{Enabled: false}}
+	if got := strings.Join(p.syncedFields(), ","); got != "db,dbInstances,dbSize" {
+		t.Errorf("got %s", got)
+	}
+	if got := (&project{}).syncedFields(); len(got) != 0 {
+		t.Errorf("got %v", got)
+	}
+}
