@@ -141,8 +141,8 @@ permissions: {}
 jobs:
   deploy:
     permissions:
-      contents: write
-      packages: write
+      contents: write # the deploy commit
+      id-token: write # pushing to the maxcloud registry, as this repo
     uses: maxemiliang/maxcloud/.github/workflows/run-deploy.yaml@main
     with:
       functions: true

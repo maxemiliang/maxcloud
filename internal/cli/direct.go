@@ -42,12 +42,16 @@ func (g *globals) deployDirect(ctx context.Context, k *kube.Client, p *project) 
 		return fmt.Errorf("namespace %s doesn't exist yet; Flux creates it within a minute of registering", name)
 	}
 
+	// The maxcloud registry, unless maxcloud.yaml names another (whose
+	// login is then up to you).
+	registry := imageRegistry()
 	repo := p.Image
 	if repo == "" {
-		if r := originRepo(); r != "" {
-			repo = "ghcr.io/" + strings.ToLower(r)
-		} else {
-			return fmt.Errorf("no image repository: set image: (e.g. ghcr.io/<you>/%s) in %s", name, ProjectFile)
+		repo = registry + "/" + name + "/" + name
+	}
+	if strings.HasPrefix(repo, registry+"/") {
+		if err := g.registryLogin(ctx, k, name, registry); err != nil {
+			return err
 		}
 	}
 	ref := repo + ":direct-" + time.Now().UTC().Format("20060102-150405")
@@ -103,6 +107,30 @@ func (g *globals) deployDirect(ctx context.Context, k *kube.Client, p *project) 
 		return err
 	}
 	return g.followServices(ctx, k, name)
+}
+
+// imageRegistry is the maxcloud registry's host.
+func imageRegistry() string {
+	return envOr("MCLOUD_IMAGE_REGISTRY", "registry.gronblom.dev")
+}
+
+// registryLogin logs docker in to the maxcloud registry as the app's push
+// ServiceAccount, with a token that lasts an hour: long enough for a build,
+// and useless soon after. The cluster decides who may get one (whoever may
+// manage the app's namespace).
+func (g *globals) registryLogin(ctx context.Context, k *kube.Client, app, registry string) error {
+	token, _, err := k.RegistryPushToken(ctx, app, registry, time.Hour)
+	if err != nil {
+		return err
+	}
+	cmd := exec.CommandContext(ctx, "docker", "login", registry, "--username", "maxcloud", "--password-stdin")
+	cmd.Stdin = strings.NewReader(token)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("docker login %s: %w: %s", registry, err, strings.TrimSpace(stderr.String()))
+	}
+	return nil
 }
 
 // build makes the image from dir and pushes it: with the Dockerfile if

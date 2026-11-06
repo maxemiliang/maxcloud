@@ -35,8 +35,10 @@ registry entry in line. No commit to the homelab repo.
 
 A direct app (deploy: direct in maxcloud.yaml) is deployed without git: mcloud builds the working tree,
 uncommitted changes included, pushes the image, and applies the functions'
-manifests with your kubeconfig. Pushing to GHCR needs docker login ghcr.io
-(a token with write:packages); building without a Dockerfile needs pack.`,
+manifests with your kubeconfig. The image goes to the maxcloud registry
+(registry.gronblom.dev/<app>/<app>), with a short-lived token of the app's
+push ServiceAccount: nothing to log in to. Building without a Dockerfile
+needs pack.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			ctx := cmd.Context()
@@ -250,12 +252,11 @@ func (g *globals) followServices(ctx context.Context, k *kube.Client, name strin
 	}
 }
 
-// pullHint explains an image the cluster can't pull: usually a GHCR package
-// that's still private.
+// pullHint explains an image the cluster can't pull.
 func pullHint(st *kube.Status) string {
 	for _, p := range st.Problems {
 		if strings.Contains(p, "ImagePull") || strings.Contains(p, "ErrImagePull") {
-			return "\n(the cluster can't pull the image: a GHCR package pushed from your machine starts private; make it public in the package's settings on GitHub)"
+			return "\n(the cluster can't pull the image: from the maxcloud registry an app pulls only its own images, registry.gronblom.dev/<app>/...; a private GHCR package needs making public in its settings on GitHub)"
 		}
 	}
 	return ""

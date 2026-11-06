@@ -4,7 +4,12 @@
 #   1. Builds the repo into an image, with its Dockerfile if it has one,
 #      otherwise with Cloud Native Buildpacks (Paketo: Go, Node.js, Python,
 #      Java, .NET, Ruby, PHP, ...).
-#   2. Pushes it to ghcr.io/<owner>/<repo>, tagged with the commit SHA.
+#   2. Pushes it to the maxcloud registry, registry.gronblom.dev/<app>/<app>
+#      (app: from maxcloud.yaml), tagged with the commit SHA. It logs in as
+#      the repo itself, with GitHub Actions' OIDC tokens: the caller grants
+#      `id-token: write`, and the app's registry entry names this repo.
+#      Callers that don't grant it yet push to ghcr.io/<owner>/<repo> as
+#      before (with `packages: write`).
 #   3. For an app written with maxcloud functions (`functions: true`), asks
 #      the image what its functions are and writes their manifests
 #      (mcloud generate: functions.yaml, and database.yaml for queues).
@@ -37,15 +42,21 @@ on:
           generate its manifests from the image on every deploy.
         type: boolean
         default: false
+      app:
+        description: The app's name on maxcloud; default, `app:` in maxcloud.yaml.
+        type: string
+        default: ""
+      registry:
+        description: The maxcloud registry's host.
+        type: string
+        default: registry.gronblom.dev
 
-permissions: {}
-
+# No permissions here: the job gets the caller's (contents: write, and
+# id-token: write for the maxcloud registry or packages: write for GHCR), so
+# both kinds of callers work while apps move to the maxcloud registry.
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write # the deploy commit
-      packages: write # pushing to GHCR
     # One deploy at a time per repo; a newer push waits rather than racing
     # the deploy commit of an older one.
     concurrency:
@@ -64,9 +75,28 @@ jobs:
 
       - name: Image name
         id: image
+        env:
+          APP: ${{ inputs.app }}
+          REGISTRY: ${{ inputs.registry }}
         run: |
-          # GHCR names must be lowercase.
-          repo=$(echo "ghcr.io/${GITHUB_REPOSITORY}" | tr '[:upper:]' '[:lower:]')
+          # ACTIONS_ID_TOKEN_REQUEST_URL is there when the caller granted
+          # id-token: write.
+          if [ -n "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ]; then
+            if [ -z "$APP" ] && [ -f maxcloud.yaml ]; then
+              APP=$(yq -r '.app // ""' maxcloud.yaml)
+            fi
+            if [ -z "$APP" ]; then
+              echo "::error::No app name: set app: in maxcloud.yaml, or the app input."
+              exit 1
+            fi
+            repo="${REGISTRY}/${APP}/${APP}"
+            echo "registry=maxcloud" >>"$GITHUB_OUTPUT"
+          else
+            echo "::warning::Pushing to GHCR: grant id-token: write in this repo's deploy workflow to use the maxcloud registry (mcloud init writes it)."
+            # GHCR names must be lowercase.
+            repo=$(echo "ghcr.io/${GITHUB_REPOSITORY}" | tr '[:upper:]' '[:lower:]')
+            echo "registry=ghcr" >>"$GITHUB_OUTPUT"
+          fi
           echo "ref=${repo}:${GITHUB_SHA}" >>"$GITHUB_OUTPUT"
           echo "repo=${repo}" >>"$GITHUB_OUTPUT"
           if [ -f "${{ inputs.context }}/Dockerfile" ]; then
@@ -75,7 +105,40 @@ jobs:
             echo "builder=buildpacks" >>"$GITHUB_OUTPUT"
           fi
 
-      - uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
+      # The maxcloud registry takes this repo's GitHub Actions OIDC tokens
+      # (audience: the registry's host). They last about 5 minutes, less
+      # than a build, so docker asks this credential helper for a fresh one
+      # each time it needs to log in.
+      - name: Log in to the maxcloud registry
+        if: steps.image.outputs.registry == 'maxcloud'
+        env:
+          REGISTRY: ${{ inputs.registry }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/bin" ~/.docker
+          helper="$RUNNER_TEMP/bin/docker-credential-maxcloud-oidc"
+          cat >"$helper" <<'EOF'
+          #!/bin/sh
+          # Docker credential helper: a new GitHub Actions OIDC token on every get.
+          case "$1" in
+          get)
+            read -r server
+            token=$(curl -sSf -H "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
+              "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=${MAXCLOUD_REGISTRY}" | jq -r .value) || exit 1
+            jq -n --arg s "$server" --arg t "$token" '{ServerURL: $s, Username: "maxcloud", Secret: $t}'
+            ;;
+          list) echo '{}' ;;
+          *) ;; # store, erase: nothing is stored
+          esac
+          EOF
+          chmod +x "$helper"
+          echo "$RUNNER_TEMP/bin" >>"$GITHUB_PATH"
+          echo "MAXCLOUD_REGISTRY=${REGISTRY}" >>"$GITHUB_ENV"
+          cfg=~/.docker/config.json
+          [ -f "$cfg" ] || echo '{}' >"$cfg"
+          jq --arg r "$REGISTRY" '.credHelpers[$r] = "maxcloud-oidc"' "$cfg" >"$cfg.new" && mv "$cfg.new" "$cfg"
+
+      - if: steps.image.outputs.registry == 'ghcr'
+        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
