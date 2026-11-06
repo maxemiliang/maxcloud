@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { functionEntry, scheduledTasks, taskExport, wrapEntry } from "./entry.ts";
+import { envModule, functionEntry, scheduledTasks, taskExport, wrapEntry } from "./entry.ts";
 
 const paths = { env: "#maxcloud/env", functions: "/x/functions/dist/index.js" };
 
@@ -41,4 +41,9 @@ test("wrapEntry maps the environment before Nitro's own entry", () => {
   const code = wrapEntry({ env: "#maxcloud/env" }, "/n/node-server.mjs");
   assert.equal(code.split("\n")[0], 'import "#maxcloud/env";');
   assert.match(code, /export \* from "\/n\/node-server\.mjs"/);
+});
+
+test("the SDK's startup migrations are off unless asked for", () => {
+  assert.match(envModule("/e.js", {}), /process\.env\.MAXCLOUD_MIGRATE \?\?= "0";/);
+  assert.doesNotMatch(envModule("/e.js", {}, true), /MAXCLOUD_MIGRATE/);
 });

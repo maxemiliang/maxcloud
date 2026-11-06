@@ -82,6 +82,10 @@ ones: `public`, `proxied`, `minInstances`, `maxInstances`, `concurrency`,
   image for its functions (`MAXCLOUD_DESCRIBE=1`).
 - On SIGTERM it finishes the requests in flight, then calls Nitro's
   `close` hook, then exits 0.
+- `@max-cloud/functions` applies `migrations/*.sql` when a function starts;
+  in a Nuxt build that's off (`MAXCLOUD_MIGRATE=0`), since Nuxt apps
+  migrate in a Nitro plugin, often from a drizzle-kit `migrations/` folder
+  with the same file names. `migrations: true` turns it on.
 
 The image runs it either way:
 

@@ -27,6 +27,12 @@ export interface ModuleOptions {
   buckets?: string[];
   /** Build the server as a maxcloud function (onRequest options, and its name). */
   function?: FunctionOptions | boolean;
+  /**
+   * Let @max-cloud/functions apply migrations/*.sql when the server starts
+   * (its own runner). Default false: Nuxt apps usually migrate in a Nitro
+   * plugin; MAXCLOUD_MIGRATE=1 turns it on without a rebuild.
+   */
+  migrations?: boolean;
 }
 
 interface NitroOptions {
@@ -71,7 +77,7 @@ export default defineNuxtModule<ModuleOptions>({
 
     nuxt.hook("nitro:config", (config) => {
       config.virtual ??= {};
-      config.virtual[ENV_MODULE] = envModule(envFile, byEnvName(map));
+      config.virtual[ENV_MODULE] = envModule(envFile, byEnvName(map), options.migrations);
     });
 
     nuxt.hook("nitro:init", (nitro) => {

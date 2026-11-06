@@ -59,6 +59,9 @@ func (g *globals) deployDirect(ctx context.Context, k *kube.Client, p *project, 
 			g.UI().Note("%s", functions.NeedsDatabaseHint(name))
 		}
 	}
+	if w := imageMigrationsWarning(d); w != "" {
+		g.UI().Warn("%s", w)
+	}
 	objs := functions.Objects(d, functions.Options{
 		Image:  image,
 		App:    name,

@@ -7,6 +7,7 @@
 //
 // It exits the process when the function is done (SIGTERM for HTTP).
 
+import { migrate } from "./migrate.ts";
 import { DESCRIBE_TAG, describe, findFunctions, run, type Found } from "./runtime.ts";
 
 export interface StartOptions {
@@ -49,6 +50,19 @@ export async function runFound(found: Found[], opts: StartOptions & { describe?:
     console.error(`maxcloud-functions: no function ${target} (found: ${names})`);
     return 2;
   }
+  // Apply the app's pending migrations first: an HTTP function isn't
+  // ready (and a new revision takes no traffic) until the schema is what
+  // its code expects. Dev mode leaves them to mcloud dev.
+  if (process.env.MAXCLOUD_MIGRATE !== "0") {
+    try {
+      const applied = await migrate({ log: (m) => console.log(`migrations: ${m}`) });
+      if (applied.length > 0) console.log(`migrations: applied ${applied.length}`);
+    } catch (err) {
+      console.error(`maxcloud-functions: migrations: ${err instanceof Error ? err.message : err}`);
+      return 1;
+    }
+  }
+
   // Finish cleanly and exit 0, so pods don't end in Error.
   const port = opts.port ?? Number(process.env.PORT ?? 8080);
   const code = await run(f, { port, signal: stopSignal() });

@@ -31,7 +31,7 @@ const devSDKMin = "0.4.0"
 func devCmd(g *globals) *cobra.Command {
 	var db, secrets, entry string
 	var port int
-	var remoteBuckets bool
+	var remoteBuckets, migrations bool
 	c := &cobra.Command{
 		Use:   "dev",
 		Short: "Run the app here, all its functions in one process",
@@ -43,7 +43,9 @@ maxcloud:
     functions run with POST http://localhost:8080/_run/<name>;
   - DATABASE_URL: a local Postgres in Docker (--db local, the default when
     maxcloud.yaml has db:), a branch of the app's database through a
-    port-forward (--db branch:NAME, see mcloud db branch), or none;
+    port-forward (--db branch:NAME, see mcloud db branch), or none; the
+    pending migrations in migrations/ are applied to it first (see mcloud
+    db migrate);
   - MAXCLOUD_APP, so bucketName() works;
   - secrets from .env in the repo (keep it out of git), or the app's own
     from the cluster (--secrets remote);
@@ -141,6 +143,12 @@ same environment.`,
 				return fmt.Errorf("--db %q: local, branch:NAME or none", db)
 			}
 
+			if migrations {
+				if err := g.devMigrate(ctx, p, env["DATABASE_URL"]); err != nil {
+					return err
+				}
+			}
+
 			run, err := devCommand(ctx, p.Dir, entry, port)
 			if err != nil {
 				return err
@@ -166,6 +174,7 @@ same environment.`,
 	f.StringVar(&db, "db", "", "local, branch:NAME or none (default: local if maxcloud.yaml has db:, else none)")
 	f.StringVar(&secrets, "secrets", "local", "local (.env) or remote (the app's secrets on the cluster, and .env)")
 	f.BoolVar(&remoteBuckets, "buckets", false, "use the app's real buckets (its S3 credentials from the cluster)")
+	f.BoolVar(&migrations, "migrate", true, "apply the pending migrations in migrations/ to the database first")
 	f.IntVar(&port, "port", 8080, "port to serve the HTTP functions on")
 	f.StringVar(&entry, "entry", "", "TypeScript: the module exporting the functions (default src/index.ts, else package.json main)")
 	return c

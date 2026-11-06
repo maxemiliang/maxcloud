@@ -24,11 +24,16 @@ export interface EntryPaths {
   functions: string;
 }
 
-/** The env module: sets the NUXT_* variables before anything reads them. */
-export function envModule(envFile: string, map: Record<string, string>): string {
+/**
+ * The env module: sets the NUXT_* variables before anything reads them.
+ * Unless `migrations`, it also turns off @max-cloud/functions' migrations
+ * at startup: a Nuxt app migrates in its own Nitro plugin (drizzle's
+ * migrator, say), often from a migrations/ folder the SDK would read too.
+ */
+export function envModule(envFile: string, map: Record<string, string>, migrations = false): string {
   return `import { applyMaxcloudEnv } from ${JSON.stringify(envFile)};
 applyMaxcloudEnv(${JSON.stringify(map)});
-`;
+${migrations ? "" : 'process.env.MAXCLOUD_MIGRATE ??= "0";\n'}`;
 }
 
 /**

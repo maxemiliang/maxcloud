@@ -211,4 +211,5 @@ func reset() {
 	mu.Lock()
 	defer mu.Unlock()
 	registry = map[string]*function{}
+	migrationsFS = nil
 }

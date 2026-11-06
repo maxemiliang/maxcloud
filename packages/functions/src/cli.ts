@@ -18,7 +18,8 @@ const usage = `usage: maxcloud-functions [--target NAME] [--source FILE] [--port
 
 Runs one of the app's functions: the HTTP server, a scheduled run, or a queue
 worker. NAME defaults to $FUNCTION_TARGET, FILE to package.json's "main", the
-port to $PORT or 8080.
+port to $PORT or 8080. First it applies the pending SQL migrations in
+./migrations to $DATABASE_URL (MAXCLOUD_MIGRATE=0 skips that).
 
 dev runs the whole app on 127.0.0.1: http://<name>.localhost:<port>/ reaches
 an HTTP function, GET / lists them, POST /_run/<name> runs a schedule once,

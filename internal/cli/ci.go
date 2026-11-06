@@ -89,6 +89,9 @@ func (g *globals) ciBuild(ctx context.Context, o ciOptions) error {
 			// Shown on the workflow run's summary page.
 			fmt.Fprintln(g.errOut, "::notice title=Queue functions need a database::"+functions.NeedsDatabaseHint(app))
 		}
+		if w := imageMigrationsWarning(desc); w != "" {
+			fmt.Fprintln(g.errOut, "::warning title=Migrations the image won't apply::"+w)
+		}
 	}
 
 	// Pin the image; kustomize is on GitHub's runners.

@@ -115,6 +115,34 @@ const { rows } = await db().query("SELECT id, name FROM users WHERE id = $1", [i
 
 It throws if `DATABASE_URL` isn't set.
 
+### Migrations
+
+Put SQL migrations in `migrations/` at the app's root (next to
+`package.json`), named `NUMBER_DESCRIPTION.sql` with numbers of one width:
+`0001_init.sql`, `0002_add_orders.sql`. Before `maxcloud-functions` runs a
+function, it applies the ones the database hasn't had: each once, in name
+order, in its own transaction, recorded in the table
+`maxcloud_migrations`. Only one process applies them at a time; the others
+wait, so no function starts on an older schema than its code expects. A
+migration that fails, a file edited after it was applied, or migrations
+without a `DATABASE_URL` stop the process (exit 1). `MAXCLOUD_MIGRATE=0`
+in the environment turns it off.
+
+It reads `./migrations` from the working directory. Buildpacks keep the
+whole app in the image; with your own Dockerfile, copy `migrations/` in
+next to `package.json`. `--describe` lists the files, and the deploy warns
+when the image is missing any.
+
+Dev mode leaves them to `mcloud dev`, which applies them before it starts
+the app; `mcloud db migrate` applies them by hand (the root README's
+"Migrations" has the rules). For a script or a test:
+
+```ts
+import { migrate } from "@max-cloud/functions";
+
+await migrate({ url: process.env.TEST_DATABASE_URL }); // ./migrations; resolves to the names applied
+```
+
 ## Buckets
 
 An app's S3 buckets are listed in its `maxcloud.yaml`:
@@ -196,7 +224,8 @@ The container runs `maxcloud-functions`, which starts the function named in
 - **Schedule:** one run, then it exits.
 - **Queue:** the worker loop.
 
-On SIGTERM it finishes what's in flight and exits 0, so pods don't end in
+First it applies the app's pending migrations (see Migrations). On SIGTERM
+it finishes what's in flight and exits 0, so pods don't end in
 `Error`. Your app's `package.json` needs:
 
 ```json
