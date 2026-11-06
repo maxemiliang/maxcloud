@@ -103,6 +103,23 @@ func TestDescribeHTTPOptions(t *testing.T) {
 	}
 }
 
+// The description says the backoff the worker uses, sub-second part too.
+func TestDescribeSubSecondBackoff(t *testing.T) {
+	t.Cleanup(reset)
+	Queue("q", "q", func(context.Context, *Job) error { return nil }, Backoff(1500*time.Millisecond))
+	var out bytes.Buffer
+	if code := run(context.Background(), []string{"--describe"}, env(nil), &out, io.Discard); code != 0 {
+		t.Fatalf("exit %d", code)
+	}
+	var d struct{ Functions []map[string]any }
+	if err := json.Unmarshal(out.Bytes(), &d); err != nil {
+		t.Fatal(err)
+	}
+	if got := d.Functions[0]["backoffSeconds"]; got != 1.5 {
+		t.Errorf("backoffSeconds = %v, want 1.5", got)
+	}
+}
+
 func TestUnknownTarget(t *testing.T) {
 	t.Cleanup(reset)
 	HTTPFunc("hello", func(http.ResponseWriter, *http.Request) {})

@@ -66,7 +66,7 @@ answers 500.
 | `TimeZone(tz)` | schedule | UTC |
 | `Retries(n)` | schedule | 0 |
 | `MaxAttempts(n)` | queue | 5 |
-| `Backoff(d)` | queue: first retry's delay, doubled each time | 10s |
+| `Backoff(d)` | queue: first retry's delay, doubled each time (fractions of a second too) | 10s |
 | `Proxied()` | HTTP: the public hostname behind Cloudflare (WAF, caching, Access); needs `Public()` | off |
 | `HealthPath(p)` | HTTP: a path that answers 2xx when an instance can take requests (readiness, and a liveness probe that restarts a stuck one) | none |
 | `MemoryLimit(q)` | all: memory above `Memory` (the request), for spikes | `Memory` |

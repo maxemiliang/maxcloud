@@ -70,10 +70,10 @@ type Function struct {
 	Retries  int    `json:"retries"`
 
 	// queue (also MaxInstances, Concurrency)
-	Queue          string `json:"queue"`
-	MaxAttempts    int    `json:"maxAttempts"`
-	BackoffSeconds int    `json:"backoffSeconds"`
-	BacklogQuery   string `json:"backlogQuery"`
+	Queue          string  `json:"queue"`
+	MaxAttempts    int     `json:"maxAttempts"`
+	BackoffSeconds float64 `json:"backoffSeconds"`
+	BacklogQuery   string  `json:"backlogQuery"`
 }
 
 // Volume is a scratch directory for an HTTP function.
