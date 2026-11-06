@@ -50,7 +50,7 @@ type config struct {
 	postgresImage, dbStorageClass                                      string
 	publicDomain, publicGateway, namespace                             string
 	registryBucket                                                     string
-	imageRegistry                                                      string
+	imageRegistry, zotNamespace                                        string
 	pullTokenLifetime                                                  time.Duration
 	tokenExpires                                                       time.Time
 }
@@ -72,6 +72,7 @@ func configFromEnv() (config, error) {
 		c.registryBucket = "maxcloud-registry"
 	}
 	c.imageRegistry = os.Getenv("MAXCLOUD_IMAGE_REGISTRY")
+	c.zotNamespace = os.Getenv("MAXCLOUD_ZOT_NAMESPACE")
 	c.pullTokenLifetime = 7 * 24 * time.Hour
 	if s := os.Getenv("MAXCLOUD_IMAGE_PULL_TOKEN_LIFETIME"); s != "" {
 		d, err := time.ParseDuration(s)
@@ -228,6 +229,14 @@ func run(metricsAddr, probeAddr string, leaderElect bool) error {
 			Host: cfg.imageRegistry, Lifetime: cfg.pullTokenLifetime,
 		}).SetupWithManager(mgr); err != nil {
 			return fmt.Errorf("image pull: %w", err)
+		}
+	}
+	// The registry's access rules: one per app, from the app registry.
+	if cfg.zotNamespace != "" {
+		if err := (&controller.ZotAccess{
+			Client: mgr.GetClient(), APIReader: mgr.GetAPIReader(), Namespace: cfg.zotNamespace,
+		}).SetupWithManager(mgr); err != nil {
+			return fmt.Errorf("registry access: %w", err)
 		}
 	}
 

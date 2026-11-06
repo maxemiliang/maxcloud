@@ -80,7 +80,12 @@ func (r *ImagePull) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resul
 	}
 	app := ns.Name
 
-	if err := r.ensureServiceAccount(ctx, app); err != nil {
+	if err := r.ensureServiceAccount(ctx, app, PullServiceAccount,
+		"pulls this app's images from the maxcloud registry; nothing runs as it"); err != nil {
+		return ctrl.Result{}, err
+	}
+	if err := r.ensureServiceAccount(ctx, app, PushServiceAccount,
+		"pushes this app's images to the maxcloud registry (mcloud deploy); nothing runs as it"); err != nil {
 		return ctrl.Result{}, err
 	}
 
@@ -136,20 +141,18 @@ func (r *ImagePull) forHost(s *corev1.Secret) bool {
 	return ok && len(cfg.Auths) == 1
 }
 
-func (r *ImagePull) ensureServiceAccount(ctx context.Context, app string) error {
+func (r *ImagePull) ensureServiceAccount(ctx context.Context, app, name, purpose string) error {
 	var sa corev1.ServiceAccount
-	err := r.Get(ctx, types.NamespacedName{Namespace: app, Name: PullServiceAccount}, &sa)
+	err := r.Get(ctx, types.NamespacedName{Namespace: app, Name: name}, &sa)
 	if err == nil || !apierrors.IsNotFound(err) {
 		return err
 	}
 	no := false
 	sa = corev1.ServiceAccount{
 		ObjectMeta: metav1.ObjectMeta{
-			Name: PullServiceAccount, Namespace: app,
-			Labels: map[string]string{"app.kubernetes.io/managed-by": "maxcloud-controller"},
-			Annotations: map[string]string{
-				"maxcloud.gronblom.dev/purpose": "pulls this app's images from the maxcloud registry; nothing runs as it",
-			},
+			Name: name, Namespace: app,
+			Labels:      map[string]string{"app.kubernetes.io/managed-by": "maxcloud-controller"},
+			Annotations: map[string]string{"maxcloud.gronblom.dev/purpose": purpose},
 		},
 		AutomountServiceAccountToken: &no,
 	}

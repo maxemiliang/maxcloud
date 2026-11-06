@@ -126,11 +126,38 @@ namespace gets credentials for that registry, and no passwords exist:
   `imagePullSecrets`, next to any it already had, so pods and Knative
   services pull with it.
 
+Each app also gets a ServiceAccount `maxcloud-image-push`: mcloud pushes a
+direct app's images with a token of it, which only someone who may manage
+the app's namespace can get (Kubernetes' `admin` and `edit` roles may
+create ServiceAccount tokens).
+
 The registry (zot in the homelab) trusts the cluster's ServiceAccount
-tokens for that audience, maps a `maxcloud-image-pull` token to its
-namespace, and lets it read `<host>/<namespace>/...` only: an app can't
-pull another app's images. The controller's RBAC lets it mint tokens for
-that ServiceAccount name and no other.
+tokens for that audience and calls them `<app>:pull` and `<app>:push`. The
+controller's RBAC lets it mint tokens for `maxcloud-image-pull` and no
+other ServiceAccount.
+
+### The registry's access rules
+
+With `MAXCLOUD_ZOT_NAMESPACE` set (e.g. `registry`), the controller writes
+zot's configuration: the base from the ConfigMap `zot-base` there (which
+the cluster's repo owns), plus one rule per app in the app registry:
+
+| `<app>/**` | read | push |
+| --- | --- | --- |
+| `<app>:pull` (the app's pull Secret) | yes | |
+| `<app>:push` (mcloud, direct deploys) | yes | yes |
+| `github:<repo>` (GitHub Actions in the entry's repo) | yes | yes |
+
+into the ConfigMap `zot-config`, which zot runs with. So a repo can push
+only to the apps whose registry entry names it, and an app reads only its
+own images. zot reloads the rules by itself. A change to the base (logins,
+storage) it reads only at start: the controller then restarts zot, by a
+hash of the base on the Deployment's pod template. A rule in the base for
+an app's pattern wins over the generated one.
+
+The cluster provides a Role in that namespace for the controller: get the
+ConfigMaps, create and update `zot-config`, get and patch the Deployment
+`zot`.
 
 ### maxcloud.yaml from the app's repo
 
