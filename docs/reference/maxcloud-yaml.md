@@ -33,4 +33,5 @@ For completion and checking in an editor with the YAML language server, start th
 | `domains[].host` | string, required |  | The hostname: lowercase, no wildcards. E.g. `shop.gronblom.dev` |
 | `domains[].service` | string, required |  | The Knative service it routes to: an HTTP function's name. It can stay private. |
 | `domains[].proxied` | boolean | `false` | Behind Cloudflare's proxy (WAF, caching, Access). Not for \*.lab.gronblom.dev. |
+| `env` | object |  | Plain environment variables (not secrets) for every function, e.g. {LOG\_LEVEL: info}. The deploy writes them into the functions' manifests, so a change ships with the next deploy. Each value is taken exactly as written (0.10 stays 0.10). They win over mcloud env set, which refuses the names declared here. Names are A-Z, 0-9 and \_, not starting with a digit; the platform's own (DATABASE\_URL, PORT, AWS\_\*, MAXCLOUD\_\*, K\_\*) are refused. Apps with their own manifests don't get them. |
 

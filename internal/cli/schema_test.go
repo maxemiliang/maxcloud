@@ -52,7 +52,8 @@ func TestSchemaMatchesProject(t *testing.T) {
 			t.Errorf("%s: schema has %v, mcloud reads %v", what, got, want)
 		}
 	}
-	check("maxcloud.yaml", root.Properties, jsonFields(project{}))
+	// parseProjectEnv reads env, outside the struct (project.Env is json:"-").
+	check("maxcloud.yaml", root.Properties, append(jsonFields(project{}), "env"))
 	check("quota", sub("quota").Properties, jsonFields(projectQuota{}))
 	check("domains", sub("domains").Items.Properties, jsonFields(registry.Domain{}))
 	db := sub("db")

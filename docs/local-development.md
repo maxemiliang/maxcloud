@@ -10,9 +10,10 @@ maxcloud:
   default when `maxcloud.yaml` has `db:`), or a branch of the app's
   database through a port-forward (`--db branch:NAME`), with the pending
   migrations applied;
-- `MAXCLOUD_APP`, and secrets from `.env` (keep it out of git), or the
-  app's own (`--secrets remote`); the app's real buckets only with
-  `--buckets`.
+- `MAXCLOUD_APP`, `maxcloud.yaml`'s `env:`, and secrets from `.env` (keep
+  it out of git; it overrides `env:` here), or the app's own secrets and
+  [`mcloud env`](environment.md) values (`--secrets remote`); the app's
+  real buckets only with `--buckets`.
 
 It sets `MAXCLOUD_DEV=1`, and reads `.env` from the repo's root and from
 `source:` (`--secrets remote` values win over both).

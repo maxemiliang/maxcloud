@@ -46,6 +46,7 @@ Guides:
 - [Buckets](docs/buckets.md), public ones included
 - [Databases](docs/databases.md): backups, restores, branches, migrations
 - [Custom domains](docs/domains.md)
+- [Environment variables](docs/environment.md): `env:` and `mcloud env`
 - [Secrets and key-value storage](docs/secrets.md)
 - [mcloud](docs/mcloud.md): installing, logging in, which app a command
   acts on

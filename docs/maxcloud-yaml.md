@@ -12,6 +12,8 @@ buckets: [uploads, assets:public]
 db: {size: 2Gi}          # or db: true
 domains:                 # hostnames of your own, within what an admin allowed
   - {host: shop.gronblom.dev, service: web, proxied: true}
+env:                     # plain variables for every function (environment.md)
+  LOG_LEVEL: info
 # source: worker         # build the app from this folder, not the repo's root
 # deploy: direct         # mcloud deploy builds and applies from here, no git
 ```
@@ -36,8 +38,10 @@ about first. Without `deploy:`, the app keeps the mode it has: GitOps for
 a new app, or what `mcloud deploy --direct` or `mcloud apps set --deploy`
 last switched it to. `repo`, `path` and `branch` also take effect on the
 next `mcloud deploy` only, and `mcloud apps set` can still change them.
-`source` and `image` are only read by
-mcloud when it builds. The deploy workflow `mcloud init` writes runs on
+`env` reaches the functions with the next deploy (it's written into their
+manifests), and `mcloud env set` refuses the names it declares
+([environment variables](environment.md)). `source` and `image` are only
+read by mcloud when it builds. The deploy workflow `mcloud init` writes runs on
 pushes to `main`: with another `branch:`, change its trigger too.
 
 A `maxcloud.yaml` asking for more than a developer may have is refused.
