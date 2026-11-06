@@ -37,5 +37,5 @@ Flags:
 | `--client-id` string | `kubernetes` | its client for the cluster, the API server's audience ($MCLOUD\_OIDC\_CLIENT\_ID) |
 | `--issuer` string | `https://auth.lab.gronblom.dev` | OpenID Connect provider the cluster trusts ($MCLOUD\_OIDC\_ISSUER) |
 | `--name` string | `homelab` | cluster and context name in it |
-| `--out` string | `/home/maxemilian/.config/mcloud/kubeconfig` | where to write it |
+| `--out` string | `~/.config/mcloud/kubeconfig` | where to write it |
 

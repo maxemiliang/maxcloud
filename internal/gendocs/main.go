@@ -172,7 +172,7 @@ func flagTable(fs *pflag.FlagSet) string {
 		}
 		def := ""
 		if f.DefValue != "" && f.DefValue != "false" && f.DefValue != "[]" && f.DefValue != "0" {
-			def = "`" + f.DefValue + "`"
+			def = "`" + portable(f.DefValue) + "`"
 		}
 		rows = append(rows, fmt.Sprintf("| %s | %s | %s |", name, def, cell(usage)))
 	})
@@ -180,6 +180,23 @@ func flagTable(fs *pflag.FlagSet) string {
 		return ""
 	}
 	return "| Flag | Default | |\n| --- | --- | --- |\n" + strings.Join(rows, "\n") + "\n\n"
+}
+
+// portable writes a default that holds a path under this machine's config
+// or home directory the way it reads on Linux (~/.config/..., ~/...), so
+// the reference doesn't depend on who ran gendocs, or where.
+func portable(def string) string {
+	if dir, err := os.UserConfigDir(); err == nil && dir != "" {
+		if rest, ok := strings.CutPrefix(def, dir); ok {
+			return "~/.config" + filepath.ToSlash(rest)
+		}
+	}
+	if home, err := os.UserHomeDir(); err == nil && home != "" {
+		if rest, ok := strings.CutPrefix(def, home); ok {
+			return "~" + filepath.ToSlash(rest)
+		}
+	}
+	return def
 }
 
 // --- maxcloud.yaml ---
