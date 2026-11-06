@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"slices"
+	"strings"
 	"sync"
 
 	corev1 "k8s.io/api/core/v1"
@@ -84,7 +85,11 @@ func (i *Identity) Ensure(ctx context.Context, app string) error {
 		log.FromContext(ctx).Info("new access key", "app", app, "user", user, "accessKeyID", id)
 	}
 
-	want := i.secretData(app, id, secretKey)
+	buckets, _, err := i.live(ctx, app)
+	if err != nil {
+		return err
+	}
+	want := i.secretData(app, id, secretKey, buckets)
 	if exists && sameData(secret.Data, want) && secret.Labels[ManagedByLabel] == managedBy {
 		return nil
 	}
@@ -104,9 +109,11 @@ func (i *Identity) Ensure(ctx context.Context, app string) error {
 // secretData is the app's Secret: environment variables every AWS SDK
 // reads, so `envFrom: [{secretRef: {name: maxcloud-s3}}]` is all an app
 // needs, plus MAXCLOUD_APP, from which the SDKs' bucketName("uploads")
-// makes mc-<app>--uploads. The database's ObjectStore reads its keys too.
-func (i *Identity) secretData(app, id, secret string) map[string][]byte {
-	return map[string][]byte{
+// makes mc-<app>--uploads, and each bucket's full name as
+// MAXCLOUD_BUCKET_<NAME> (for frameworks that configure a bucket from an
+// environment variable). The database's ObjectStore reads its keys too.
+func (i *Identity) secretData(app, id, secret string, buckets []string) map[string][]byte {
+	data := map[string][]byte{
 		"MAXCLOUD_APP":          []byte(app),
 		"AWS_ACCESS_KEY_ID":     []byte(id),
 		"AWS_SECRET_ACCESS_KEY": []byte(secret),
@@ -116,6 +123,62 @@ func (i *Identity) secretData(app, id, secret string) map[string][]byte {
 		"AWS_REQUEST_CHECKSUM_CALCULATION": []byte("when_required"),
 		"AWS_RESPONSE_CHECKSUM_VALIDATION": []byte("when_required"),
 	}
+	for _, b := range buckets {
+		if full, err := naming.Bucket(app, b); err == nil {
+			data[BucketEnv(b)] = []byte(full)
+		}
+	}
+	return data
+}
+
+// BucketEnv is the variable holding a bucket's full name:
+// MAXCLOUD_BUCKET_UPLOADS for uploads, MAXCLOUD_BUCKET_USER_FILES for
+// user-files. Bucket names have no underscores, so two can't collide.
+func BucketEnv(bucket string) string {
+	return "MAXCLOUD_BUCKET_" + strings.ToUpper(strings.ReplaceAll(bucket, "-", "_"))
+}
+
+// live is the app's Buckets (names) and Databases that aren't being
+// deleted.
+func (i *Identity) live(ctx context.Context, app string) ([]string, int, error) {
+	var buckets v1.BucketList
+	if err := i.Client.List(ctx, &buckets, client.InNamespace(app)); err != nil {
+		return nil, 0, err
+	}
+	var names []string
+	for _, o := range buckets.Items {
+		if o.DeletionTimestamp.IsZero() {
+			names = append(names, o.Name)
+		}
+	}
+	slices.Sort(names)
+	var dbs v1.DatabaseList
+	if err := i.Client.List(ctx, &dbs, client.InNamespace(app)); err != nil {
+		return nil, 0, err
+	}
+	n := 0
+	for _, o := range dbs.Items {
+		if o.DeletionTimestamp.IsZero() {
+			n++
+		}
+	}
+	return names, n, nil
+}
+
+// syncBucketEnv brings the bucket variables in the app's Secret in line
+// with its Buckets, if the Secret exists.
+func (i *Identity) syncBucketEnv(ctx context.Context, app string, buckets []string) error {
+	var secret corev1.Secret
+	err := i.APIReader.Get(ctx, types.NamespacedName{Namespace: app, Name: naming.SecretName}, &secret)
+	if err != nil {
+		return client.IgnoreNotFound(err)
+	}
+	want := i.secretData(app, string(secret.Data["AWS_ACCESS_KEY_ID"]), string(secret.Data["AWS_SECRET_ACCESS_KEY"]), buckets)
+	if sameData(secret.Data, want) {
+		return nil
+	}
+	secret.Data = want
+	return i.Client.Update(ctx, &secret)
 }
 
 // ReleaseIfUnused removes the app's identity when no Bucket or Database in
@@ -125,23 +188,13 @@ func (i *Identity) ReleaseIfUnused(ctx context.Context, app string) error {
 	i.mu.Lock()
 	defer i.mu.Unlock()
 
-	var buckets v1.BucketList
-	if err := i.Client.List(ctx, &buckets, client.InNamespace(app)); err != nil {
+	buckets, dbs, err := i.live(ctx, app)
+	if err != nil {
 		return err
 	}
-	for _, o := range buckets.Items {
-		if o.DeletionTimestamp.IsZero() {
-			return nil
-		}
-	}
-	var dbs v1.DatabaseList
-	if err := i.Client.List(ctx, &dbs, client.InNamespace(app)); err != nil {
-		return err
-	}
-	for _, o := range dbs.Items {
-		if o.DeletionTimestamp.IsZero() {
-			return nil
-		}
+	if len(buckets) > 0 || dbs > 0 {
+		// Still needed; a deleted bucket's variable goes.
+		return i.syncBucketEnv(ctx, app, buckets)
 	}
 
 	user := naming.User(app)

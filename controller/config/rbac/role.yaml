@@ -6,6 +6,12 @@ metadata:
 rules:
 - apiGroups:
   - ""
+  resources:
+  - configmaps
+  verbs:
+  - get
+- apiGroups:
+  - ""
   resourceNames:
   - kube-root-ca.crt
   resources:
@@ -105,12 +111,20 @@ rules:
 - apiGroups:
   - gateway.networking.k8s.io
   resources:
+  - gateways
+  verbs:
+  - get
+- apiGroups:
+  - gateway.networking.k8s.io
+  resources:
   - httproutes
   verbs:
   - create
   - delete
   - get
+  - list
   - update
+  - watch
 - apiGroups:
   - maxcloud.gronblom.dev
   resources:
@@ -136,10 +150,19 @@ rules:
   - buckets/status
   - databasebranches/status
   - databases/status
+  - domains/status
   verbs:
   - get
   - patch
   - update
+- apiGroups:
+  - maxcloud.gronblom.dev
+  resources:
+  - domains
+  verbs:
+  - get
+  - list
+  - watch
 - apiGroups:
   - postgresql.cnpg.io
   resources:

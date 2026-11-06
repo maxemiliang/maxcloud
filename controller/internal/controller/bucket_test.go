@@ -303,6 +303,33 @@ func TestSecondBucketReusesTheKey(t *testing.T) {
 	}
 }
 
+func TestBucketNamesInTheSecret(t *testing.T) {
+	e := newEnv(t, tenantNS("shop"), bucket("shop", "uploads"), bucket("shop", "user-files"))
+	e.mustReconcile("shop", "uploads")
+	e.mustReconcile("shop", "user-files")
+	s, _ := e.secret("shop")
+	if got := string(s.Data["MAXCLOUD_BUCKET_UPLOADS"]); got != "mc-shop--uploads" {
+		t.Errorf("MAXCLOUD_BUCKET_UPLOADS = %q", got)
+	}
+	if got := string(s.Data["MAXCLOUD_BUCKET_USER_FILES"]); got != "mc-shop--user-files" {
+		t.Errorf("MAXCLOUD_BUCKET_USER_FILES = %q", got)
+	}
+
+	// Removing one takes its variable out; the app keeps its key.
+	e.delete("shop", "user-files")
+	e.mustReconcile("shop", "user-files")
+	s, ok := e.secret("shop")
+	if !ok {
+		t.Fatal("the Secret went with one of two buckets")
+	}
+	if _, ok := s.Data["MAXCLOUD_BUCKET_USER_FILES"]; ok {
+		t.Error("the deleted bucket's variable is still there")
+	}
+	if string(s.Data["MAXCLOUD_BUCKET_UPLOADS"]) != "mc-shop--uploads" || string(s.Data["AWS_ACCESS_KEY_ID"]) != "KEY1" {
+		t.Errorf("Secret = %v", s.Data)
+	}
+}
+
 func TestLostSecretGetsANewKey(t *testing.T) {
 	e := newEnv(t, tenantNS("shop"), bucket("shop", "uploads"))
 	e.mustReconcile("shop", "uploads")

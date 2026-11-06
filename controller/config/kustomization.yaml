@@ -7,11 +7,14 @@
 #   - ConfigMap maxcloud-controller: MAXCLOUD_OBJECT_STORAGE_ID,
 #     MAXCLOUD_S3_ENDPOINT (and optionally MAXCLOUD_S3_REGION,
 #     MAXCLOUD_POSTGRES_IMAGE, MAXCLOUD_DB_STORAGE_CLASS, MAXCLOUD_PUBLIC_DOMAIN,
-#     MAXCLOUD_PUBLIC_GATEWAY, and for the discovery document
+#     MAXCLOUD_PUBLIC_GATEWAY, MAXCLOUD_DOMAINS_GATEWAY,
+#     MAXCLOUD_DOMAINS_ALLOWLIST, and for the discovery document
 #     MAXCLOUD_API_SERVER, MAXCLOUD_OIDC_ISSUER, MAXCLOUD_OIDC_CLIENT_ID,
 #     MAXCLOUD_MIN_MCLOUD_VERSION)
 #   - the public route to the Service maxcloud-controller's port discovery,
 #     if it serves the discovery document
+#   - ConfigMap maxcloud-domains (MAXCLOUD_DOMAINS_ALLOWLIST): the hostnames
+#     each app may have, for Domains; without it, no app gets one
 # Databases need CloudNativePG and its barman-cloud plugin in the cluster.
 # The homelab's are in its infrastructure/controllers/maxcloud.
 apiVersion: kustomize.config.k8s.io/v1beta1
@@ -21,6 +24,7 @@ resources:
   - crd/maxcloud.gronblom.dev_buckets.yaml
   - crd/maxcloud.gronblom.dev_databases.yaml
   - crd/maxcloud.gronblom.dev_databasebranches.yaml
+  - crd/maxcloud.gronblom.dev_domains.yaml
   - rbac/role.yaml
   - rbac/role_binding.yaml
   - rbac/leader_election.yaml
