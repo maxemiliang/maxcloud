@@ -137,7 +137,7 @@ changes (node --watch); Go apps run with go run (restart it yourself).`,
 				return fmt.Errorf("--db %q: local, branch:NAME or none", db)
 			}
 
-			run, err := devCommand(p.Dir, entry, port)
+			run, err := devCommand(ctx, p.Dir, entry, port)
 			if err != nil {
 				return err
 			}
@@ -168,9 +168,9 @@ changes (node --watch); Go apps run with go run (restart it yourself).`,
 }
 
 // devCommand is the SDK's dev mode for the app in dir.
-func devCommand(dir, entry string, port int) (*exec.Cmd, error) {
+func devCommand(ctx context.Context, dir, entry string, port int) (*exec.Cmd, error) {
 	if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
-		cmd := exec.Command("go", "run", ".")
+		cmd := exec.CommandContext(ctx, "go", "run", ".")
 		cmd.Dir = dir
 		return cmd, nil
 	}
@@ -193,7 +193,7 @@ func devCommand(dir, entry string, port int) (*exec.Cmd, error) {
 	if entry != "" {
 		args = append(args, "--entry", entry)
 	}
-	cmd := exec.Command("node", args...)
+	cmd := exec.CommandContext(ctx, "node", args...)
 	cmd.Dir = dir
 	return cmd, nil
 }
