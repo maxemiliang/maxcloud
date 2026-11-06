@@ -125,7 +125,9 @@ app: %[1]s
 # ":public" lets anyone read one, at https://<bucket>--<app>.gronblom.dev/:
 # buckets: [uploads, assets:public]
 # A Postgres database (DATABASE_URL), backed up and restorable to a point in
-# time; queue functions need it:
+# time; queue functions need it. SQL migrations go in migrations/
+# (0001_init.sql, ...): the app applies them when it starts, mcloud dev
+# before it runs the app, and mcloud db migrate by hand:
 # db: true            # or {size: 2Gi, instances: 2}
 `,
 	".github/workflows/deploy.yaml": `# Every push to main deploys this app to maxcloud (maxemiliang/maxcloud,

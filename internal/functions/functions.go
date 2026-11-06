@@ -29,6 +29,9 @@ type Description struct {
 	SDK       string     `json:"sdk"`
 	Version   string     `json:"version"`
 	Functions []Function `json:"functions"`
+	// Migrations are the SQL migrations the image applies when it starts
+	// (their file names). nil: an SDK from before migrations.
+	Migrations []string `json:"migrations"`
 }
 
 type Function struct {

@@ -9,6 +9,7 @@
 
 import { parseArgs } from "node:util";
 import { startDev } from "./dev.ts";
+import { migrate } from "./migrate.ts";
 import { DESCRIBE_TAG, describe, devEntryPath, load, run, sourcePath } from "./runtime.ts";
 
 const usage = `usage: maxcloud-functions [--target NAME] [--source FILE] [--port N]
@@ -17,7 +18,8 @@ const usage = `usage: maxcloud-functions [--target NAME] [--source FILE] [--port
 
 Runs one of the app's functions: the HTTP server, a scheduled run, or a queue
 worker. NAME defaults to $FUNCTION_TARGET, FILE to package.json's "main", the
-port to $PORT or 8080.
+port to $PORT or 8080. First it applies the pending SQL migrations in
+./migrations to $DATABASE_URL (MAXCLOUD_MIGRATE=0 skips that).
 
 dev runs the whole app on 127.0.0.1: http://<name>.localhost:<port>/ reaches
 an HTTP function, GET / lists them, POST /_run/<name> runs a schedule once,
@@ -95,6 +97,19 @@ async function main(): Promise<number> {
   if (!f) {
     console.error(`maxcloud-functions: no function ${target} (found: ${names})`);
     return 2;
+  }
+
+  // Apply the app's pending migrations first: an HTTP function isn't
+  // ready (and a new revision takes no traffic) until the schema is what
+  // its code expects. Dev mode leaves them to mcloud dev.
+  if (process.env.MAXCLOUD_MIGRATE !== "0") {
+    try {
+      const applied = await migrate({ log: (m) => console.log(`migrations: ${m}`) });
+      if (applied.length > 0) console.log(`migrations: applied ${applied.length}`);
+    } catch (err) {
+      console.error(`maxcloud-functions: migrations: ${err instanceof Error ? err.message : err}`);
+      return 1;
+    }
   }
 
   // Finish cleanly and exit 0, so pods don't end in Error.

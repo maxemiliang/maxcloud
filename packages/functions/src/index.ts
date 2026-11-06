@@ -22,3 +22,13 @@ export { bucketName } from "./storage.ts";
 export { kv, type KVSetOptions, type KVListOptions, type KVList } from "./kv.ts";
 export { secret } from "./secrets.ts";
 export { db } from "./db.ts";
+export {
+  migrate,
+  loadMigrations,
+  migrationStatus,
+  applyMigrations,
+  type Migration,
+  type MigrationEntry,
+  type MigrationState,
+  type MigrateOptions,
+} from "./migrate.ts";

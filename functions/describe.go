@@ -17,6 +17,8 @@ type description struct {
 	SDK       string `json:"sdk"`
 	Version   string `json:"version"`
 	Functions []any  `json:"functions"`
+	// The SQL migrations Start applies (file names).
+	Migrations []string `json:"migrations"`
 }
 
 type describedBase struct {
