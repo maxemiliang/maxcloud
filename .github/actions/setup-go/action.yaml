@@ -1,0 +1,33 @@
+name: setup-go
+description: >-
+  Go from the root go.mod, with a build and module cache for one CI job.
+
+  setup-go's own cache keys on one go.sum and has no fallback: a changed
+  go.sum meant a cold cache and a full rebuild of every dependency (Kubernetes
+  ones included), and the controller's and the SDK's go.sum never counted at
+  all. This keys on the job's own module and falls back to the job's last
+  cache, so a dependency bump only rebuilds what changed.
+
+inputs:
+  module:
+    description: Directory of the job's Go module (holds its go.sum).
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - id: go
+      uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      with:
+        # One Go for every module, as before the jobs were split.
+        go-version-file: go.mod
+        cache: false
+    # Per job, not per module: vet builds the dependencies plain, test -race
+    # builds them again instrumented, so the two jobs' caches don't overlap.
+    - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: |
+          ~/.cache/go-build
+          ~/go/pkg/mod
+        key: go-${{ runner.os }}-${{ steps.go.outputs.go-version }}-${{ github.job }}-${{ hashFiles(format('{0}/go.sum', inputs.module)) }}
+        restore-keys: go-${{ runner.os }}-${{ steps.go.outputs.go-version }}-${{ github.job }}-

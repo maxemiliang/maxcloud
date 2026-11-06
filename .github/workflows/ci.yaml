@@ -11,11 +11,29 @@ permissions:
   contents: read
 
 jobs:
-  go:
+  # The Go checks run as separate jobs, in parallel: the three modules don't
+  # depend on each other, and vet and test -race each compile every dependency
+  # (test -race with instrumentation), so in one job they wait on each other.
+  # Each job keeps its own cache (.github/actions/setup-go).
+
+  mcloud:
     runs-on: ubuntu-latest
-    # The Go SDK's queue tests run against a real Postgres.
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/setup-go
+        with:
+          module: .
+      # The whole repository: functions/ and controller/ too.
+      - name: gofmt
+        run: test -z "$(gofmt -l .)" || { gofmt -l .; exit 1; }
+      - run: go vet ./...
+      - run: go build ./cmd/mcloud
+
+  mcloud-test:
+    runs-on: ubuntu-latest
+    # The migration tests run against a real Postgres.
     services:
-      postgres:
+      postgres: &postgres
         image: postgres:18
         env:
           POSTGRES_PASSWORD: test
@@ -26,36 +44,62 @@ jobs:
       TEST_DATABASE_URL: postgres://postgres:test@localhost:5432/postgres
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      - uses: ./.github/actions/setup-go
         with:
-          go-version-file: go.mod
-      - name: gofmt
-        run: test -z "$(gofmt -l .)" || { gofmt -l .; exit 1; }
+          module: .
+      - run: go test -race ./...
+
+  # The Go SDK is its own module (functions/), so apps don't pull in mcloud's
+  # dependencies. Small enough that vet and test share a job.
+  sdk:
+    runs-on: ubuntu-latest
+    # The queue tests run against a real Postgres.
+    services:
+      postgres: *postgres
+    env:
+      TEST_DATABASE_URL: postgres://postgres:test@localhost:5432/postgres
+    defaults:
+      run:
+        working-directory: functions
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/setup-go
+        with:
+          module: functions
       - run: go vet ./...
       - run: go test -race ./...
-      - run: go build ./cmd/mcloud
-      # The Go SDK is its own module (functions/), so apps don't pull in mcloud's dependencies.
-      - name: Go SDK
-        working-directory: functions
-        run: |
-          test -z "$(gofmt -l .)" || { gofmt -l .; exit 1; }
-          go vet ./...
-          go test -race ./...
-      # The controller is its own module too (controller/): Kubernetes and
-      # AWS libraries stay out of mcloud and the SDK.
-      - name: Controller
+
+  # The controller is its own module too (controller/): Kubernetes and AWS
+  # libraries stay out of mcloud and the SDK.
+  controller:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
         working-directory: controller
-        run: |
-          test -z "$(gofmt -l .)" || { gofmt -l .; exit 1; }
-          go vet ./...
-          go test -race ./...
-          go build ./cmd/maxcloud-controller
-      - name: Controller's generated files are up to date
-        working-directory: controller
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/setup-go
+        with:
+          module: controller
+      - run: go vet ./...
+      - run: go build ./cmd/maxcloud-controller
+      - name: Generated files are up to date
         run: |
           go tool controller-gen object paths=./api/...
           go tool controller-gen crd rbac:roleName=maxcloud-controller paths=./... output:crd:dir=config/crd output:rbac:dir=config/rbac
           git diff --exit-code -- . || { echo "::error::run the controller-gen commands in controller/README.md and commit"; exit 1; }
+
+  controller-test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: controller
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/setup-go
+        with:
+          module: controller
+      - run: go test -race ./...
 
   node:
     runs-on: ubuntu-latest
