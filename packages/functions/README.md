@@ -26,13 +26,17 @@ export const resize = onQueue<{ key: string }>("images", async (job) => {
 ```
 
 The export's name becomes the function's: `resizeImage` is deployed as
-`resize-image`.
+`resize-image` (an underscore becomes a dash too). It must start with a
+letter and be at most 40 characters, and a function can't be the default
+export.
 
 ## HTTP functions
 
 `onRequest(handler)` or `onRequest(options, handler)`. The handler takes a
 standard `Request` and returns a `Response`, so fetch-style frameworks work
-as they are: `onRequest(app.fetch)` with Hono, for example.
+as they are: `onRequest(app.fetch)` with Hono, for example. Its second
+argument is `{ signal }`, aborted when the client goes away or the server
+shuts down. A handler that throws answers 500.
 
 | Option | Default | |
 | --- | --- | --- |
@@ -40,7 +44,7 @@ as they are: `onRequest(app.fetch)` with Hono, for example.
 | `minInstances` | `0` | Instances kept running when idle. |
 | `maxInstances` | `3` | |
 | `concurrency` | `0` | Requests one instance handles before another starts (0: no limit). |
-| `timeoutSeconds` | `300` | Per request. |
+| `timeoutSeconds` | `300` | Per request; at most 600 (Knative's limit, checked at deploy). |
 | `memory` | the namespace's default | Memory the container requests and is limited to, e.g. `"256Mi"`. |
 | `cpu` | the namespace's default | CPU the container requests, e.g. `"100m"`. |
 | `proxied` | `false` | Put the public hostname behind Cloudflare (WAF, caching, Cloudflare Access). Needs `public`. |
@@ -74,14 +78,20 @@ in tests (through a local server).
 
 `onSchedule("0 3 * * *", handler)`, or `onSchedule(options, handler)` with
 `schedule`, `timeZone` (default UTC), `retries` (default 0),
-`timeoutSeconds` (default 3600), `memory` and `cpu`. A run that throws
-exits 1, and Kubernetes retries it `retries` times.
+`timeoutSeconds` (default 3600, for the whole run), and the container
+options above. The handler gets `{ signal, startedAt }`; `signal` aborts
+at the timeout or on SIGTERM. A run that throws or times out exits 1, and
+Kubernetes retries it `retries` times. Runs don't overlap: a tick that
+comes while the last run is still going is skipped.
 
 ## Queues
 
-`onQueue(queue, handler)` or `onQueue(options, handler)`. `enqueue(queue,
-payload)` adds a job from anywhere in the app. Jobs live in the app's
-Postgres database (`DATABASE_URL`; the app gets one with `db: true` in its
+`onQueue(queue, handler)` or `onQueue(options, handler)`. A queue's name is
+lowercase letters, digits, dashes and underscores. `enqueue(queue,
+payload)` adds a job from anywhere in the app and resolves to its id;
+`enqueue(resize, payload)` takes the queue function itself and checks the
+payload's type. Payloads are JSON. Jobs live in the app's Postgres
+database (`DATABASE_URL`; the app gets one with `db: true` in its
 `maxcloud.yaml`), in a table the SDK creates (`maxcloud_jobs`).
 
 | Option | Default | |
@@ -93,13 +103,22 @@ Postgres database (`DATABASE_URL`; the app gets one with `db: true` in its
 | `timeoutSeconds` | `300` | Per job. A job past it is aborted and retried. |
 | `memory`, `cpu` | the namespace's defaults | As for HTTP functions. |
 
-- **Retries:** a job that throws is retried, and so is one whose worker
-  died, once its lease runs out. A job can run more than once, so make
-  handlers safe to repeat.
+- **Retries:** a job that throws or times out is retried, and so is one
+  whose worker died, once its lease (the timeout plus 30 seconds) runs
+  out. A job can run more than once, so make handlers safe to repeat.
+- **Return when `signal` aborts.** The handler gets `(job, { signal })`;
+  `signal` aborts at the timeout or when the worker shuts down. A handler
+  that ignores it keeps running after its job has been counted as failed.
+- **Shutting down:** on SIGTERM the worker takes no new jobs, gives the
+  ones in hand 25 seconds, then puts them back without counting the
+  attempt.
 - **Enqueue in your own transaction:** pass `{ client }`, and the job exists
   only if your transaction commits:
-  `await enqueue("mail", msg, { client: tx })`.
+  `await enqueue("mail", msg, { client: tx })`. The table must exist by
+  then (a worker or an earlier `enqueue` creates it).
 - **Delay a job** with `{ delaySeconds }`.
+- **Cleanup:** a worker deletes jobs that finished more than 7 days ago
+  when it starts. Failed jobs stay, with the error in `last_error`.
 
 ## Database
 
@@ -122,11 +141,15 @@ Put SQL migrations in `migrations/` at the app's root (next to
 `0001_init.sql`, `0002_add_orders.sql`. Before `maxcloud-functions` runs a
 function, it applies the ones the database hasn't had: each once, in name
 order, in its own transaction, recorded in the table
-`maxcloud_migrations`. Only one process applies them at a time; the others
-wait, so no function starts on an older schema than its code expects. A
-migration that fails, a file edited after it was applied, or migrations
-without a `DATABASE_URL` stop the process (exit 1). `MAXCLOUD_MIGRATE=0`
-in the environment turns it off.
+`public.maxcloud_migrations`. Only one process applies them at a time; the
+others wait, so no function starts on an older schema than its code
+expects. A migration that fails, a file edited after it was applied, or
+migrations without a `DATABASE_URL` stop the process (exit 1). A
+migration the database has but the folder doesn't is left alone.
+`MAXCLOUD_MIGRATE=0` in the environment turns it off.
+
+A `migrations/` folder made by drizzle-kit (it has `meta/_journal.json`)
+is skipped: drizzle's migrator applies it, and records it, itself.
 
 It reads `./migrations` from the working directory. Buildpacks keep the
 whole app in the image; with your own Dockerfile, copy `migrations/` in
@@ -134,14 +157,19 @@ next to `package.json`. `--describe` lists the files, and the deploy warns
 when the image is missing any.
 
 Dev mode leaves them to `mcloud dev`, which applies them before it starts
-the app; `mcloud db migrate` applies them by hand (the root README's
-"Migrations" has the rules). For a script or a test:
+the app; `mcloud db migrate` applies them by hand ([the
+rules](https://github.com/maxemiliang/maxcloud/blob/main/docs/databases.md#migrations)). For a script or a test:
 
 ```ts
 import { migrate } from "@max-cloud/functions";
 
 await migrate({ url: process.env.TEST_DATABASE_URL }); // ./migrations; resolves to the names applied
 ```
+
+`migrate({ url, dir, log })` defaults to `DATABASE_URL` and
+`./migrations`. For tooling there are also `loadMigrations(dir)`,
+`migrationStatus(client, files)` (applied, pending, changed or missing,
+without changing anything) and `applyMigrations(client, files)`.
 
 ## Buckets
 
@@ -150,7 +178,11 @@ An app's S3 buckets are listed in its `maxcloud.yaml`:
 in UpCloud Object Storage as `mc-<app>--<bucket>`, and every function gets
 the app's credentials as the `AWS_*` environment variables any S3 client
 reads. `MAXCLOUD_APP`, the app's name, is set on every function. So the AWS
-SDK needs no configuration, only the bucket's full name:
+SDK needs no configuration, only the bucket's full name, which
+`bucketName` gives. Each bucket's full name is also in
+`MAXCLOUD_BUCKET_<NAME>` (`MAXCLOUD_BUCKET_UPLOADS`, `MAXCLOUD_BUCKET_USER_FILES`
+for `user-files`), for libraries configured by environment; a pod started
+before the bucket existed doesn't have it.
 
 ```ts
 import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
@@ -194,7 +226,8 @@ The objects are also readable straight from Object Storage, at
 
 `kv` is a key-value store (like Workers KV) in the app's Postgres
 database (`DATABASE_URL`, so the app needs `db: true` in its
-`maxcloud.yaml`). Values are JSON; reads see writes right away.
+`maxcloud.yaml`). Values are JSON; reads see writes right away. Keys are
+1 to 512 characters.
 
 ```ts
 import { kv } from "@max-cloud/functions";
@@ -205,28 +238,37 @@ await kv.delete("session:42");
 const { keys, cursor } = await kv.list({ prefix: "session:", limit: 100 });
 ```
 
+`delete` resolves to whether the key was there. `list` gives keys in
+order, `limit` at a time (default 100, at most 1000), with a `cursor` to
+pass back while there are more. `set` with `undefined` throws; use
+`delete`.
+
 It's one table, `maxcloud_kv`, made on first use. Pass `{ client }` to
-`set` or `delete` to write in your own transaction.
+`set` or `delete` to write in your own transaction (the table must exist
+by then).
 
 ## Secrets
 
 `mcloud secrets set STRIPE_KEY` (in the app's repo) stores a secret; every
 function gets it as an environment variable. `secret("STRIPE_KEY")` reads
-it, and throws a helpful error if it isn't set. Read secrets in handlers,
+it, and throws an error that says how to set it if it isn't set (or is
+empty). Read secrets in handlers,
 not at module load: `--describe` loads the module without them.
 
 ## Running
 
-The container runs `maxcloud-functions`, which starts the function named in
-`FUNCTION_TARGET`:
+The container runs `maxcloud-functions`, which loads package.json's
+`main` (or `--source FILE`, or `$FUNCTION_SOURCE`) and starts the function
+named in `FUNCTION_TARGET` (or `--target`; the export's name works too):
 
-- **HTTP:** a server on `$PORT`.
+- **HTTP:** a server on `$PORT` (or `--port`, else 8080).
 - **Schedule:** one run, then it exits.
 - **Queue:** the worker loop.
 
 First it applies the app's pending migrations (see Migrations). On SIGTERM
-it finishes what's in flight and exits 0, so pods don't end in
-`Error`. Your app's `package.json` needs:
+an HTTP server or worker finishes what's in flight (up to 25 seconds) and
+exits 0, so pods don't end in `Error`; a scheduled run is aborted. Your
+app's `package.json` needs:
 
 ```json
 {
@@ -236,13 +278,20 @@ it finishes what's in flight and exits 0, so pods don't end in
 }
 ```
 
-`maxcloud-functions --describe` prints the app's functions and their
-settings as JSON; `mcloud` deploys from that. While it runs,
-`MAXCLOUD_DESCRIBE=1` is set, so module-level code can skip connecting to
-things.
+`maxcloud-functions --describe` prints the app's functions, their
+settings and the migrations it found as JSON. With `MAXCLOUD_DESCRIBE=1`
+in the environment it prints the same as one line,
+`maxcloud:describe:{...}`. That's how the deploy asks the built image: it
+runs it with that variable and its own start command, and reads the line.
+`mcloud generate` runs `npx maxcloud-functions --describe` in the app's
+folder instead. Either way `MAXCLOUD_DESCRIBE=1` is set while the module
+loads, without the database or secrets, so module-level code can skip
+connecting to things.
 
 `onShutdown(fn)` runs `fn` after SIGTERM, once the requests or jobs in
 flight are done and before the process exits: close a pool, flush logs.
+Hooks run in order, for at most 10 seconds together; one that fails or
+runs over makes the process exit 1.
 
 A bundled server can be its own entrypoint instead of package.json's
 `main` (`@max-cloud/nuxt` builds Nuxt this way): `start(exports)` does what
@@ -258,8 +307,8 @@ if (await isEntrypoint(import.meta.url)) start({ web });
 
 Run `mcloud dev` in the app's repo. It starts a local Postgres (in Docker)
 or port-forwards to a database branch, sets `DATABASE_URL`, `MAXCLOUD_APP`
-and the secrets in the gitignored `.env`, and runs the app in dev mode
-under `node --watch`, so edits reload.
+and the secrets from `.env` (keep it out of git), and runs the app in dev
+mode under `node --watch`, so edits reload.
 
 Dev mode is `maxcloud-functions dev [--entry FILE] [--port N]`. It runs the
 whole app in one process, with `MAXCLOUD_DEV=1` set:
@@ -320,7 +369,7 @@ before(async () => { if (!skip) t = await testDatabase(); });
 after(() => t?.drop());
 
 test("signup", { skip }, async () => {
-  await db().query("CREATE TABLE users (email text PRIMARY KEY)"); // or run your migrations
+  await db().query("CREATE TABLE users (email text PRIMARY KEY)"); // or your migrations, below
   await kv.set("welcome", true);
   assert.equal(await kv.get("welcome"), true);
 });
@@ -339,6 +388,12 @@ is only reachable as `public.<name>`. `t.url`, `t.pool` and `t.schema` are
 there for your own connections. `testDatabase({ use: false })` makes the
 schema without touching `db()` or `DATABASE_URL`. A schema left behind by a
 crashed run can be dropped by hand; they all start with `maxcloud_test_`.
+
+To set up a schema from `migrations/`, run the files yourself:
+`for (const m of loadMigrations("migrations")) await t.pool.query(m.sql)`.
+`migrate()` doesn't fit here: it records what it applied in
+`public.maxcloud_migrations`, outside the test schema, so the next run
+finds them applied and skips them.
 
 ### In-memory buckets
 

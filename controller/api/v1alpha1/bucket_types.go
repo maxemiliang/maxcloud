@@ -17,12 +17,14 @@ const (
 )
 
 // BucketSpec is what the app gets: a bucket named mc-<namespace>--<name> in
-// the maxcloud-apps Object Storage, readable and writable with the app's
-// credentials (the Secret maxcloud-s3 in its namespace).
+// the controller's Object Storage instance, readable and writable with the
+// app's credentials (the Secret maxcloud-s3 in its namespace, which also
+// holds the bucket's full name as MAXCLOUD_BUCKET_<NAME>).
 type BucketSpec struct {
 	// Public lets anyone read the bucket's objects without credentials
 	// (s3:GetObject for everyone). Listing and writing still need the app's
-	// credentials.
+	// credentials. If the cluster gives public buckets hostnames, the bucket
+	// is also served at status.url.
 	// +optional
 	Public bool `json:"public,omitempty"`
 
@@ -48,10 +50,12 @@ type BucketStatus struct {
 	// +optional
 	URL string `json:"url,omitempty"`
 
-	// SizeBytes and Objects are UpCloud's bucket metrics, refreshed every
-	// few minutes.
+	// SizeBytes is the bytes stored in the bucket, from UpCloud's bucket
+	// metrics, refreshed every few minutes.
 	// +optional
 	SizeBytes *int64 `json:"sizeBytes,omitempty"`
+	// Objects is the number of objects in the bucket, from UpCloud's bucket
+	// metrics, refreshed every few minutes.
 	// +optional
 	Objects *int64 `json:"objects,omitempty"`
 
@@ -59,7 +63,9 @@ type BucketStatus struct {
 	// +optional
 	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
 
-	// Conditions: Ready.
+	// Conditions: Ready. When it's False, its reason is NotATenant (the
+	// namespace isn't an app's), InvalidName or APIError, and its message
+	// says why.
 	// +listType=map
 	// +listMapKey=type
 	// +optional

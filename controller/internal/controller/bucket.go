@@ -1,4 +1,6 @@
-// Package controller has the reconcilers: Bucket (and later Database).
+// Package controller has the reconcilers: Bucket, Database, DatabaseBranch
+// and Domain, and the loops that keep the registry, secrets, image pull
+// credentials and zot's rules in line.
 package controller
 
 import (

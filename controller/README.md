@@ -8,6 +8,11 @@ Cloudflare gives a Worker its R2 bucket and D1 database:
   continuously to the app's own bucket, and restored from those backups by
   itself when its cluster is gone.
 
+Around those it also routes apps' custom domains, keeps copies of the app
+registry and of apps' secrets in a bucket, gives apps credentials for the
+image registry, writes the registry's access rules, syncs GitOps apps'
+`maxcloud.yaml`, and serves a discovery document for logging in.
+
 It's a separate Go module, so mcloud and the SDKs don't pull in Kubernetes
 and AWS libraries.
 
@@ -30,12 +35,15 @@ For it, the controller makes:
 
 | | Name | |
 | --- | --- | --- |
-| Bucket | `mc-shop--uploads` | in the `maxcloud-apps` Object Storage instance |
-| S3 user and policy | `mc-shop` | read/write objects in `mc-shop--*`; can't create, delete or reconfigure buckets |
-| Secret | `maxcloud-s3` in `shop` | `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_ENDPOINT_URL_S3`, `AWS_REGION`, UpCloud's checksum settings, `MAXCLOUD_APP`, and each bucket's full name as `MAXCLOUD_BUCKET_<NAME>` (`MAXCLOUD_BUCKET_UPLOADS=mc-shop--uploads`) |
+| Bucket | `mc-shop--uploads` | in the Object Storage instance `MAXCLOUD_OBJECT_STORAGE_ID` names (`maxcloud-apps` in the homelab) |
+| S3 user and policy | `mc-shop` | read/write objects in `mc-shop--*`; can't create, delete or reconfigure buckets, or write the database's restore marker |
+| Secret | `maxcloud-s3` in `shop` | `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_ENDPOINT_URL_S3`, `AWS_REGION`, UpCloud's checksum settings (`AWS_REQUEST_CHECKSUM_CALCULATION` and `AWS_RESPONSE_CHECKSUM_VALIDATION`, both `when_required`), `MAXCLOUD_APP`, and each bucket's full name as `MAXCLOUD_BUCKET_<NAME>`, upper case with hyphens as underscores (`MAXCLOUD_BUCKET_UPLOADS=mc-shop--uploads`) |
 
 The user and the Secret belong to the app, not to one bucket: the first
-`Bucket` creates them, the last one to go removes them. Since the Secret
+`Bucket` or `Database` creates them, the last of them to go removes them.
+If the Secret is deleted, or its key no longer exists in UpCloud, the
+controller deletes the user's keys and makes a new one (within the
+5-minute resync). Since the Secret
 holds the variables every AWS SDK reads, a pod only needs
 `envFrom: [{secretRef: {name: maxcloud-s3}}]`.
 
@@ -43,26 +51,36 @@ holds the variables every AWS SDK reads, a pod only needs
 `mc-shop--*` (the app's policy) can't match the buckets of an app called
 `shop-x` (`mc-shop-x--*`). With a single hyphen it would.
 
-`kubectl get maxcloud -A` shows each bucket's name, size and readiness
-(not `kubectl get buckets`: in a cluster with Flux, that's Flux's Bucket
-kind; `buckets.maxcloud.gronblom.dev` also works). A
-Bucket that isn't Ready says why in its `Ready` condition.
+A `Bucket`'s name is lowercase letters, digits and single hyphens, and not
+`db` (the database's backups go to `mc-<app>--db`); the API server refuses
+anything else. The controller also refuses a name ending in `-s3alias`, or
+a full name over S3's 63 characters (`InvalidName`).
+
+`kubectl get maxcloud -A` shows each bucket's name, public URL, size and
+readiness (not `kubectl get buckets`: in a cluster with Flux, that's
+Flux's Bucket kind; `buckets.maxcloud.gronblom.dev` also works). A Bucket
+that isn't Ready says why in its `Ready` condition.
 
 ### Public buckets on their own hostname
 
 With `MAXCLOUD_PUBLIC_DOMAIN` set, a `public: true` bucket also gets
-`https://<bucket>--<app>.<domain>/` (in `status.url`), on the cluster's
-Gateway: behind the CDN in front of the cluster, with its wildcard
-certificate. GET and HEAD only. The Gateway API can't route to a host
-outside the cluster (Traefik refuses ExternalName Services as HTTPRoute
-backends), so the route goes through Traefik's own objects, all in the
-controller's namespace:
+`https://<bucket>--<app>.<domain>/` (in `status.url`), on the Gateway
+listener `MAXCLOUD_PUBLIC_GATEWAY` (`namespace/gateway/listener`, default
+`traefik/public/https-public`): behind the CDN in front of the cluster (the
+route has external-dns's `cloudflare-proxied` annotation), with its
+wildcard certificate. GET and HEAD only. The Gateway API can't route to a
+host outside the cluster (Traefik refuses ExternalName Services as
+HTTPRoute backends), so the route goes through Traefik's own objects, all
+in the controller's namespace and named after the bucket's full name
+(`mc-shop--uploads`):
 
 ```
-HTTPRoute <bucket>--<app>.<domain>, GET/HEAD
-  -> TraefikService (https, passHostHeader: false)
-    -> Service type ExternalName <bucket>.<S3 host>:443
+HTTPRoute mc-<app>--<bucket>: host <bucket>--<app>.<domain>, GET/HEAD
+  -> TraefikService mc-<app>--<bucket> (https, passHostHeader: false)
+    -> Service mc-<app>--<bucket>, type ExternalName mc-<app>--<bucket>.<S3 host>:443
 ```
+
+Making the bucket private again, or deleting it, removes the three.
 
 Traefik needs `providers.kubernetesCRD.allowExternalNameServices: true`,
 `providers.kubernetesCRD.safeNaming: false` (the route names the
@@ -104,15 +122,16 @@ It routes a hostname only while:
 - the allowlist ConfigMap (`MAXCLOUD_DOMAINS_ALLOWLIST` in the
   controller's namespace, default `maxcloud-domains`) has it under the
   app's key: comma-separated hostnames, or `*.zone` for one level below
-  zone. Admission checks the same list when the entry is written; this
-  takes the route down when an admin removes a hostname later (within
-  the 5-minute resync);
+  zone (else `NotAllowed`). Admission checks the same list when the entry
+  is written; this takes the route down when an admin removes a hostname
+  later (within the 5-minute resync);
 - a listener covers it (else `NoListener`);
 - the service has a route (else `ServiceNotFound`);
 - no other HTTPRoute on the Gateway has the hostname (else `HostInUse`,
   looked at again every minute): the Gateway API gives a hostname to the
   oldest route, so a second one would silently get nothing.
 
+In a namespace without the tenant label the reason is `NotATenant`.
 `status.url`, `status.listener` and `status.revisions` show where it
 routes. Why not a Knative DomainMapping: it needs a cluster-scoped
 ClusterDomainClaim per hostname, and it rewrites the Host to the
@@ -128,20 +147,26 @@ apiVersion: maxcloud.gronblom.dev/v1alpha1
 kind: Database
 metadata: {name: db, namespace: shop}
 spec:
-  instances: 1           # 2: a replica on the other node
+  instances: 1           # 2: a replica, on another node if it can
   size: 1Gi              # can grow, never shrink
-  backup: {schedule: "0 0 5 * * *", retention: 7d}
+  backup: {schedule: "0 0 5 * * *", retention: 7d}  # cron with seconds; 7d, 2w, 1m
   reclaimPolicy: Retain  # what happens to the backups when this goes
+  # resources: default 20m CPU and 128Mi requested, 512Mi limit
 ```
+
+The values shown are the defaults.
 
 The controller turns it into a CloudNativePG `Cluster` `db` (so
 `DATABASE_URL` comes from the Secret `db-app`, as for any CloudNativePG
-database), an `ObjectStore` writing WAL and base backups to the bucket
-`mc-shop--db` with the app's credentials, a daily `ScheduledBackup`, and a
-first `Backup` for every new generation. It won't take over a `Cluster` db
-it didn't create (say, from a `database.yaml` mcloud wrote before
-v0.5.0): it
-stops with a Blocked condition instead.
+database), an `ObjectStore` `db-backups` writing WAL and base backups to
+the bucket `mc-shop--db` with the app's credentials, a `ScheduledBackup`
+`db-daily` on `backup.schedule`, and a first `Backup` `db-gen-<N>` for
+every new generation. WAL is archived at least every 5 minutes, so that's
+the most a restore of a lost database loses. With 2 instances the
+`Cluster` gets a PodDisruptionBudget; with 1 it doesn't, so it never
+blocks a node drain. It won't take over a `Cluster` db it didn't create
+(say, from a `database.yaml` mcloud wrote before v0.5.0): it stops with a
+Blocked condition instead.
 
 `kubectl get maxcloud -A` shows the phase (Creating, Restoring, Ready,
 Blocked) and the backup generation.
@@ -149,12 +174,14 @@ Blocked) and the backup generation.
 ### The app registry's copy
 
 mcloud registers apps in the cluster (ResourceSetInputProviders in
-`flux-system`, labelled `app.kubernetes.io/managed-by: mcloud`), not in
-git. So that a rebuilt cluster gets them back, the controller copies each
-one to the bucket `maxcloud-registry` (`apps/<name>.yaml`) and, when it
-starts and every 15 minutes, creates any entry that has a copy but isn't in
-the cluster. The registry then recreates the app, and its database restores
-itself from its backups. A finalizer on each entry deletes the copy first
+`flux-system`, labelled `run.gronblom.dev/app: "true"` and
+`app.kubernetes.io/managed-by: mcloud`), not in git. So that a rebuilt
+cluster gets them back, the controller copies each one (its labels and
+spec) to the bucket `maxcloud-registry` (`MAXCLOUD_REGISTRY_BUCKET`),
+as `apps/<name>.yaml`, and, when it starts and every 15 minutes (on the
+leader), creates any entry that has a copy but isn't in the cluster. The
+registry then recreates the app, and its database restores itself from
+its backups. A finalizer on each entry deletes the copy first
 when the app is deleted on purpose, so a deleted app doesn't come back.
 Entries that live in the homelab repo aren't copied: git has them.
 
@@ -196,8 +223,10 @@ namespace gets credentials for that registry, and no passwords exist:
 - a ServiceAccount `maxcloud-image-pull` that nothing runs as;
 - the Secret `maxcloud-registry` (a docker config) holding a token of that
   ServiceAccount, with the registry's host as its audience. The controller
-  renews it at half its lifetime (asked for: 7 days,
-  `MAXCLOUD_IMAGE_PULL_TOKEN_LIFETIME`; the API server may grant less);
+  renews it at half its lifetime (asked for: 7 days, or
+  `MAXCLOUD_IMAGE_PULL_TOKEN_LIFETIME`, a Go duration of at least `10m`;
+  the API server may grant less), and looks at least hourly, so a deleted
+  Secret comes back within the hour;
 - the namespace's `default` ServiceAccount lists the Secret in
   `imagePullSecrets`, next to any it already had, so pods and Knative
   services pull with it.
@@ -222,14 +251,17 @@ the cluster's repo owns), plus one rule per app in the app registry:
 | --- | --- | --- |
 | `<app>:pull` (the app's pull Secret) | yes | |
 | `<app>:push` (mcloud, direct deploys) | yes | yes |
-| `github:<repo>` (GitHub Actions in the entry's repo) | yes | yes |
+| `github:<repo>` (GitHub Actions in the entry's repo; not for direct-deploy apps) | yes | yes |
 
-into the ConfigMap `zot-config`, which zot runs with. So a repo can push
-only to the apps whose registry entry names it, and an app reads only its
-own images. zot reloads the rules by itself. A change to the base (logins,
-storage) it reads only at start: the controller then restarts zot, by a
-hash of the base on the Deployment's pod template. A rule in the base for
-an app's pattern wins over the generated one.
+into the ConfigMap `zot-config`, which zot runs with. `<app>` is the
+entry's `name` value, else the entry's name; every entry labelled
+`run.gronblom.dev/app: "true"` counts, the homelab repo's too. So a repo
+can push only to the apps whose registry entry names it, and an app reads
+only its own images. zot reloads the rules by itself. The controller
+reads the base again every 2 minutes. A change to the base (logins,
+storage) zot reads only at start: the controller then restarts zot, by a
+hash of the base on the Deployment's pod template. A rule in the base for an app's pattern
+wins over the generated one.
 
 The cluster provides a Role in that namespace for the controller: get the
 ConfigMaps, create and update `zot-config`, get and patch the Deployment
@@ -239,11 +271,14 @@ ConfigMaps, create and update `zot-config`, get and patch the Deployment
 
 A GitOps app's `maxcloud.yaml` takes effect on push, with no credentials in
 CI: Flux already fetches the app's repo (the GitRepository its entry
-generates, which has to include `/maxcloud.yaml`). When its revision
-changes, the controller downloads the artifact from Flux's
+generates in `flux-system`, named like the entry and labelled
+`app.kubernetes.io/part-of: maxcloud`, which has to include
+`/maxcloud.yaml`). When its revision changes, the controller downloads
+the artifact from Flux's
 source-controller, checks its digest, and writes the file's quota, buckets,
 database and domains into the app's entry. The rest of the entry (repo, path,
-deploy mode) stays what mcloud registered.
+deploy mode) stays what mcloud registered. A file whose `app` names a
+different app is refused.
 
 It writes as the user `maxcloud:app-sync` (impersonated), not as itself,
 so the cluster's limits on what a developer may ask for apply: a
@@ -265,7 +300,7 @@ it as it was.
 ### The discovery document
 
 So that a new machine can log in without an admin kubeconfig, the
-controller serves `GET /.well-known/maxcloud.json` on `:8082`
+controller serves `GET` (and `HEAD`) `/.well-known/maxcloud.json` on `:8082`
 (`MAXCLOUD_DISCOVERY_ADDR`), the Service `maxcloud-controller`'s port
 `discovery`. It's public and holds nothing secret:
 
@@ -286,18 +321,20 @@ minutes. `oidc` comes from `MAXCLOUD_OIDC_ISSUER` and
 `MAXCLOUD_OIDC_CLIENT_ID` (left out without an issuer), `imageRegistry`
 from `MAXCLOUD_IMAGE_REGISTRY`, and `mcloud.minVersion` from
 `MAXCLOUD_MIN_MCLOUD_VERSION` (left out if unset). Clients may cache it
-for 5 minutes. The public route to it lives in the cluster's repo.
+for 5 minutes (`Cache-Control: max-age=300`). If the CA can't be read and
+none was read before, it answers 503. The public route to it lives in the
+cluster's repo.
 
 ## Running it
 
 From a tag, a cluster applies [`config/`](config/kustomization.yaml): the
-CRDs, RBAC and the Deployment. The cluster provides the namespace
-`maxcloud-system` and, in it:
+CRDs, RBAC, the Deployment (one replica) and the Service for the discovery
+document. The cluster provides the namespace `maxcloud-system` and, in it:
 
 - Secret `maxcloud-controller`:
   - `UPCLOUD_TOKEN`: an API token of a sub-account whose only permission is
     the Object Storage instance;
-  - `UPCLOUD_TOKEN_EXPIRES_AT` (RFC 3339), published as
+  - optionally `UPCLOUD_TOKEN_EXPIRES_AT` (RFC 3339), published as
     `maxcloud_upcloud_token_expiry_timestamp_seconds` so an alert can warn
     before it runs out;
   - `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`: the controller's own S3
@@ -305,31 +342,59 @@ CRDs, RBAC and the Deployment. The cluster provides the namespace
   - optionally `MAXCLOUD_SECRETS_AGE_KEY`, which turns on the
     [app secrets' copies](#app-secrets).
 - ConfigMap `maxcloud-controller`: `MAXCLOUD_OBJECT_STORAGE_ID` (the
-  instance's UUID), `MAXCLOUD_S3_ENDPOINT` (`https://...`) and optionally
-  `MAXCLOUD_S3_REGION` (default `europe-1`), `MAXCLOUD_POSTGRES_IMAGE`,
-  and `MAXCLOUD_DB_STORAGE_CLASS` for the databases' disks. Prefer a class
-  that deletes its disks: a restore throws the old disk away (the bucket is
-  what keeps the data), and a retaining class leaves one behind each time.
+  instance's UUID), `MAXCLOUD_S3_ENDPOINT` (must start with `https://`) and
+  optionally `MAXCLOUD_S3_REGION` (default `europe-1`),
+  `MAXCLOUD_POSTGRES_IMAGE` (default: `DefaultPostgresImage` in
+  `internal/controller/database.go`, which Renovate keeps current), and
+  `MAXCLOUD_DB_STORAGE_CLASS` for the databases' disks (default: the
+  cluster's default class). Prefer a class that deletes its disks: a
+  restore throws the old disk away (the bucket is what keeps the data), and
+  a retaining class leaves one behind each time.
 
-For [custom domains](#custom-domains): the ConfigMap `maxcloud-domains`
-(without it no Domain is routed), and optionally
-`MAXCLOUD_DOMAINS_GATEWAY` and `MAXCLOUD_DOMAINS_ALLOWLIST` in the
-ConfigMap above.
+The rest is optional, also in that ConfigMap, each turning on or adjusting
+one part:
 
-`MAXCLOUD_IMAGE_REGISTRY` (optional) turns on the pull credentials above.
-`MAXCLOUD_API_SERVER`, `MAXCLOUD_OIDC_ISSUER`, `MAXCLOUD_OIDC_CLIENT_ID`
-and `MAXCLOUD_MIN_MCLOUD_VERSION` (all optional) make the
-[discovery document](#the-discovery-document).
+| Variable | Default | |
+| --- | --- | --- |
+| `MAXCLOUD_PUBLIC_DOMAIN` | unset: off | [public buckets' hostnames](#public-buckets-on-their-own-hostname) |
+| `MAXCLOUD_PUBLIC_GATEWAY` | `traefik/public/https-public` | their Gateway listener, `namespace/gateway/listener` |
+| `MAXCLOUD_DOMAINS_GATEWAY` | `traefik/public` | the Gateway for [custom domains](#custom-domains), `namespace/gateway` |
+| `MAXCLOUD_DOMAINS_ALLOWLIST` | `maxcloud-domains` | the allowlist ConfigMap; without it no Domain is routed |
+| `MAXCLOUD_REGISTRY_BUCKET` | `maxcloud-registry` | the bucket for the [registry's copy](#the-app-registrys-copy) and the secrets' copies |
+| `MAXCLOUD_IMAGE_REGISTRY` | unset: off | the registry's host: [pull credentials](#pulling-images-from-the-maxcloud-registry) |
+| `MAXCLOUD_IMAGE_PULL_TOKEN_LIFETIME` | `168h` | the pull tokens' lifetime asked for, at least `10m` |
+| `MAXCLOUD_ZOT_NAMESPACE` | unset: off | zot's namespace: [its access rules](#the-registrys-access-rules) |
+| `MAXCLOUD_API_SERVER` | unset: off | the API server's external URL: the [discovery document](#the-discovery-document) |
+| `MAXCLOUD_DISCOVERY_ADDR` | `:8082` | where that's served |
+| `MAXCLOUD_OIDC_ISSUER`, `MAXCLOUD_OIDC_CLIENT_ID`, `MAXCLOUD_MIN_MCLOUD_VERSION` | unset | in the discovery document |
+
+The Deployment sets `POD_NAMESPACE` (default `maxcloud-system`): the
+controller's namespace, where the public buckets' route objects go and the
+allowlist and `kube-root-ca.crt` are read. The controller won't start
+without a required variable, or with one it can't read (a gateway with the
+wrong number of parts, a bad age key, lifetime or expiry time).
 
 For the sync from apps' repos the cluster also provides: a NetworkPolicy
 letting `maxcloud-system` reach source-controller in `flux-system`, and a
 Role there for the user `maxcloud:app-sync` to update
-ResourceSetInputProviders.
+ResourceSetInputProviders. Databases need CloudNativePG and its
+barman-cloud plugin in the cluster.
 
-It acts only in namespaces labelled `run.gronblom.dev/tenant: "true"`.
-Metrics are on `:8080/metrics`, probes on `:8081`, the discovery document
-on `:8082`. Metrics: `maxcloud_bucket_size_bytes`,
-`maxcloud_bucket_objects` and the token's expiry.
+It acts on apps only in namespaces labelled `run.gronblom.dev/tenant:
+"true"`. Metrics are on `:8080/metrics` (`--metrics-bind-address`), probes
+(`/healthz`, `/readyz`) on `:8081` (`--health-probe-bind-address`), the
+discovery document on `:8082`. Metrics:
+
+- `maxcloud_bucket_size_bytes` and `maxcloud_bucket_objects` (labels `app`,
+  `bucket`), from UpCloud's bucket metrics;
+- `maxcloud_database_phase` (labels `app`, `phase`): 1 for the database's
+  current phase, 0 for the others;
+- `maxcloud_database_generation` (label `app`): its backup generation;
+- `maxcloud_upcloud_token_expiry_timestamp_seconds`.
+
+`--leader-elect` (on by default) uses the Lease `maxcloud-controller`: only
+the leader reconciles and runs the restore loop; every replica serves the
+discovery document.
 
 The controller isn't on the data path: if it's down, buckets and
 credentials keep working; only changes wait.
@@ -351,14 +416,14 @@ on the cluster like the deployed one would, so scale that one to 0 first.
 
 ## Releasing
 
-release-please does it (the root README, Releasing): its release PR bumps
+release-please does it ([CONTRIBUTING.md](../CONTRIBUTING.md#releasing)): its release PR bumps
 `newTag` in `config/kustomization.yaml`, and merging it tags
-`controller/v0.11.0` and runs `release-controller.yaml`, which builds and
-pushes `ghcr.io/maxemiliang/maxcloud-controller:0.11.0` (and refuses if
+`controller/vX.Y.Z` and runs `release-controller.yaml`, which builds and
+pushes `ghcr.io/maxemiliang/maxcloud-controller:X.Y.Z` (and refuses if
 `newTag` doesn't match). Clusters pick the tag in their `GitRepository`.
 
 By hand: bump `newTag`, commit, then
-`git tag controller/v0.11.0 && git push origin controller/v0.11.0`.
+`git tag controller/vX.Y.Z && git push origin controller/vX.Y.Z`.
 
 ## How a database comes back
 
@@ -371,10 +436,12 @@ whole namespace, or whole Kubernetes cluster is gone comes back by itself:
 
 | `Cluster` db is missing, and | The controller |
 | --- | --- |
-| there's no bucket, or it's empty | a new database: generation 1, `initdb` |
+| there's no bucket, or it's empty (or holds only the marker) | a new database: generation 1, `initdb` |
+| a new database's generation never archived anything | `initdb` again, in the same generation |
 | the marker's generation has a finished base backup | restores it into the next generation |
-| a restore was under way and never archived anything | tries that restore again |
-| the bucket has objects but no marker; or the marker's generation has WAL but no base backup; or the marker is unreadable | **Blocked**: never `initdb` over data it can't account for |
+| a restore was under way and never archived anything | tries that restore again, to the same target time if it had one |
+| a restore was under way and archived WAL but no base backup | restores the same source again, into a new generation |
+| the bucket has objects but no marker; or a new database's generation has WAL but no base backup; or neither a restore's generation nor its source has a base backup; or the marker says ready but there's no base backup; or the marker is unreadable | **Blocked**: never `initdb` over data it can't account for |
 
 A generation counts as restorable once barman's `backup.info` in
 `db-N/base/` says `status=DONE`; the controller takes that first base
@@ -388,7 +455,10 @@ kubectl -n shop annotate database db maxcloud.gronblom.dev/recover-from=2
 ```
 
 It restores that generation into a new one and removes the annotation
-(`mcloud db recover --from 2` does this).
+(`mcloud db recover --from 2` does this). A generation without a finished
+base backup stays Blocked. The annotation is read only while the
+`Cluster` is missing: a Database Blocked by a `Cluster` `db` it doesn't
+own needs that `Cluster` removed first.
 
 ## Restoring to a point in time
 
@@ -398,13 +468,16 @@ kubectl -n shop annotate database db maxcloud.gronblom.dev/restore-to=2026-11-05
 ```
 
 The controller finds the newest generation with a finished base backup
-from before that time, writes the plan (new generation, source, target
+that ended before that time, writes the plan (new generation, source, target
 time) to the marker, takes the `Cluster` down, and restores the source up
 to that time into the new generation. With the plan in the marker, an
 interruption anywhere carries on with the same restore. Everything written
 after the target is gone from the database, but still in the older
-generation's backups. A time before the oldest backup (or in the future)
-is refused: the `Restore` condition says why, and nothing is touched.
+generation's backups. A time it can't read (RFC 3339), one in the future,
+or one before the oldest finished base backup is refused: the annotation
+is removed, the `Restore` condition (reason `Refused`) says why, and
+nothing is touched. A restore that goes ahead sets `Restore` to True
+(reason `Restored`) and `status.restoredTo`.
 
 One gap: a time in the minute or two after an earlier restore, before the
 new generation's first base backup, can't be reached. The old
@@ -417,10 +490,27 @@ A `DatabaseBranch` is a throwaway copy of the database: restored from its
 backups (the latest, or `spec.at`) into a `Cluster` `db-<branch>` with one
 instance, no PDB and **no WAL archiving**, so it never writes into the
 database's backups or marker. Its URL is in the Secret
-`db-<branch>-app`. Apps may create these themselves (they count against
-the app's quota); deleting the branch deletes its `Cluster`. A branch is
-restored once: its spec can't change, and if its `Cluster` is deleted it
-fails rather than coming back.
+`db-<branch>-app` (key `uri`). Apps may create these themselves (they
+count against the app's quota); deleting the branch deletes its
+`Cluster`. A branch is restored once: its spec can't change, and if its
+`Cluster` is deleted it fails rather than coming back.
+
+```yaml
+apiVersion: maxcloud.gronblom.dev/v1alpha1
+kind: DatabaseBranch
+metadata: {name: try-migration, namespace: shop}   # at most 30 characters
+spec:
+  database: db                   # the default
+  at: "2026-11-05T10:00:00Z"     # optional; default the latest
+  size: 2Gi                      # optional; default the database's size
+```
+
+Its phase is Creating, Ready or Failed; the `Ready` condition says why it
+failed (`NoDatabase`, retried every minute; `NoBackupBefore`, when the
+database has no finished base backup from before `at` yet, which also
+happens to a branch of a database made minutes ago; `ClusterGone`).
+Except for `NoDatabase`, a failed branch isn't tried again: delete it and
+make a new one.
 
 ```fish
 mcloud db branch create shop try-migration          # latest

@@ -1,0 +1,130 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://raw.githubusercontent.com/maxemiliang/maxcloud/main/maxcloud.schema.json",
+  "title": "maxcloud.yaml",
+  "description": "An app on maxcloud: the whole app's definition, like a wrangler.toml. mcloud deploy keeps the app's registry entry in line with it, and for a GitOps app a push does too (quota, buckets, db and domains). Fields left out keep what the entry has, or the defaults.",
+  "type": "object",
+  "required": ["app"],
+  "additionalProperties": false,
+  "properties": {
+    "app": {
+      "description": "The app's name: its namespace, and part of its hostnames (<service>-<app>.gronblom.dev) and bucket names (mc-<app>--<bucket>). Lowercase letters, digits and single dashes, starting with a letter, at most 30 characters. Platform namespaces (flux-system, traefik, kube-*, ...) are reserved.",
+      "type": "string",
+      "pattern": "^[a-z]([a-z0-9]|-[a-z0-9])*$",
+      "maxLength": 30
+    },
+    "deploy": {
+      "description": "gitops: a push to the repo deploys, through Flux. direct: mcloud deploy builds here and applies the manifests itself, nothing from git. Changing it switches the app on the next mcloud deploy, which asks first.",
+      "type": "string",
+      "enum": ["gitops", "direct"],
+      "default": "gitops"
+    },
+    "source": {
+      "description": "The folder the app is built from and mcloud dev runs in, relative to maxcloud.yaml. A Dockerfile, project.toml and migrations/ are looked for there. A directory inside the repo, without '..'. The manifests stay at the root (path).",
+      "type": "string",
+      "default": "."
+    },
+    "image": {
+      "description": "Where mcloud build and local direct builds push the image, instead of the maxcloud registry; log in to it yourself. The cluster has to be able to pull from it. --build cluster refuses it and the GitOps deploy workflow ignores it: those push to the maxcloud registry.",
+      "type": "string",
+      "default": "registry.gronblom.dev/<app>/<app>"
+    },
+    "repo": {
+      "description": "GitOps: the GitHub repo Flux deploys from, <owner>/<repo>. Default: the repo's origin remote. Ignored for direct apps.",
+      "type": "string",
+      "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?/[A-Za-z0-9._-]+$"
+    },
+    "path": {
+      "description": "GitOps: the directory of manifests in the repo that Flux applies. A relative path. Ignored for direct apps.",
+      "type": "string",
+      "default": "deploy/k8s"
+    },
+    "branch": {
+      "description": "GitOps: the branch Flux deploys. Ignored for direct apps.",
+      "type": "string",
+      "default": "main"
+    },
+    "quota": {
+      "description": "What the app's namespace may request in total. The platform caps what a developer may ask for; more takes an admin.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "cpu": {
+          "description": "CPU requested by all the app's pods together, a Kubernetes quantity.",
+          "type": ["string", "number"],
+          "default": "200m",
+          "examples": ["500m", 1]
+        },
+        "memory": {
+          "description": "Memory requested by all the app's pods together, a Kubernetes quantity.",
+          "type": "string",
+          "default": "1Gi",
+          "examples": ["2Gi"]
+        },
+        "pods": {
+          "description": "How many pods the app may have.",
+          "type": ["integer", "string"],
+          "default": 20
+        }
+      }
+    },
+    "buckets": {
+      "description": "The app's S3 buckets. Each becomes mc-<app>--<name>, with the app's credentials in every function's environment. Add :public to make a bucket's objects readable by anyone at https://<name>--<app>.gronblom.dev/. Removing a bucket from the list keeps it and its objects. An empty list declares that the app has none.",
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z0-9]([a-z0-9]|-[a-z0-9])*(:public)?$",
+        "examples": ["uploads", "assets:public"]
+      },
+      "uniqueItems": true
+    },
+    "db": {
+      "description": "A Postgres database (CloudNativePG), backed up continuously to the bucket mc-<app>--db; every function gets DATABASE_URL. true, or its settings. false removes the database and keeps its backups.",
+      "oneOf": [
+        { "type": "boolean" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "size": {
+              "description": "Disk per instance, a Kubernetes quantity. Can grow, never shrink.",
+              "type": "string",
+              "default": "1Gi"
+            },
+            "instances": {
+              "description": "1, or 2 for a replica on the other node.",
+              "type": ["integer", "string"],
+              "enum": [1, 2, "1", "2"],
+              "default": 1
+            }
+          }
+        }
+      ]
+    },
+    "domains": {
+      "description": "Hostnames of the app's own for its Knative services, besides <service>-<app>.gronblom.dev. Only the hostnames an admin allowed the app (the homelab repo's infrastructure/configs/run/domains.yaml), in zones the cluster has certificates for. Removing one removes its route and DNS record.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["host", "service"],
+        "additionalProperties": false,
+        "properties": {
+          "host": {
+            "description": "The hostname: lowercase, no wildcards.",
+            "type": "string",
+            "examples": ["shop.gronblom.dev"]
+          },
+          "service": {
+            "description": "The Knative service it routes to: an HTTP function's name. It can stay private.",
+            "type": "string"
+          },
+          "proxied": {
+            "description": "Behind Cloudflare's proxy (WAF, caching, Access). Not for *.lab.gronblom.dev.",
+            "type": "boolean",
+            "default": false
+          }
+        }
+      }
+    }
+  }
+}

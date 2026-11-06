@@ -69,13 +69,15 @@ spec:
               proxied:
                 description: |-
                   Proxied puts the hostname behind Cloudflare (its DNS record is
-                  proxied): WAF, caching, Cloudflare Access. Cloudflare's free edge
+                  proxied, through external-dns's cloudflare-proxied annotation on the
+                  route): WAF, caching, Cloudflare Access. Cloudflare's free edge
                   certificate only covers names one level below the zone.
                 type: boolean
               service:
                 description: |-
                   Service is the Knative service in this namespace (for a function,
-                  the function's name).
+                  the function's name). Until Knative has a route for it, the Domain
+                  isn't Ready (ServiceNotFound).
                 maxLength: 63
                 pattern: ^[a-z]([-a-z0-9]*[a-z0-9])?$
                 type: string
@@ -86,7 +88,12 @@ spec:
             description: DomainStatus is what the controller last saw.
             properties:
               conditions:
-                description: 'Conditions: Ready.'
+                description: |-
+                  Conditions: Ready. When it's False, the hostname isn't routed, and
+                  the reason is NotAllowed (not on the admin's allowlist for the app),
+                  NoListener (no HTTPS listener covers it), ServiceNotFound (Knative
+                  has no route for the service), HostInUse (another HTTPRoute on the
+                  Gateway has the hostname; checked again every minute) or NotATenant.
                 items:
                   description: Condition contains details for one aspect of the current
                     state of this API Resource.
@@ -148,7 +155,8 @@ spec:
               listener:
                 description: |-
                   Listener is the Gateway listener (and so the certificate) serving
-                  the hostname.
+                  the hostname: the HTTPS listener for exactly that name, else the
+                  longest wildcard that covers it one level deep.
                 type: string
               observedGeneration:
                 description: ObservedGeneration is the spec generation the conditions
@@ -163,7 +171,9 @@ spec:
                   type: string
                 type: array
               url:
-                description: URL the service is reached at on this hostname.
+                description: |-
+                  URL the service is reached at on this hostname. Empty while the
+                  Domain isn't Ready.
                 type: string
             type: object
         required:

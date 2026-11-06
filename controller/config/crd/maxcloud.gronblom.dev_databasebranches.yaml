@@ -57,22 +57,29 @@ spec:
           metadata:
             type: object
           spec:
-            description: 'The spec can''t change: a branch is restored once. Make
-              a new one.'
+            description: |-
+              Spec is what to copy: which database, from when, and how big a disk.
+              It can't change: a branch is restored once. Make a new one.
             properties:
               at:
-                description: 'At: the point in time to branch from. Empty: the latest.'
+                description: |-
+                  At: the point in time to branch from (RFC 3339). Empty: the latest.
+                  It can't be before the end of the oldest finished base backup the
+                  database still has.
                 format: date-time
                 type: string
               database:
                 default: db
-                description: Database to branch, in the same namespace.
+                description: |-
+                  Database to branch, in the same namespace. It needs at least one
+                  finished base backup.
                 type: string
               size:
                 anyOf:
                 - type: integer
                 - type: string
-                description: 'Size of the branch''s disk (default: the database''s).'
+                description: 'Size of the branch''s disk (default: the database''s
+                  spec.size).'
                 pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
                 x-kubernetes-int-or-string: true
             type: object
@@ -80,6 +87,7 @@ spec:
             - message: a branch can't be changed; delete it and make a new one
               rule: self == oldSelf
           status:
+            description: DatabaseBranchStatus is what the controller last saw.
             properties:
               cluster:
                 description: |-
@@ -87,7 +95,10 @@ spec:
                   are in the Secret <Cluster>-app (key uri).
                 type: string
               conditions:
-                description: 'Conditions: Ready.'
+                description: |-
+                  Conditions: Ready. When the branch failed, its reason is one of
+                  NoDatabase, NoBackupBefore, ClusterGone, Blocked (a Cluster of that
+                  name that isn't the branch's) or NotATenant.
                 items:
                   description: Condition contains details for one aspect of the current
                     state of this API Resource.
@@ -152,9 +163,12 @@ spec:
                 format: int64
                 type: integer
               observedGeneration:
+                description: ObservedGeneration is the spec generation the conditions
+                  describe.
                 format: int64
                 type: integer
               phase:
+                description: 'Phase is where the branch is: Creating, Ready or Failed.'
                 type: string
             type: object
         type: object

@@ -29,6 +29,21 @@ jobs:
       - run: go vet ./...
       - run: go build ./cmd/mcloud
 
+  # docs/reference is generated from the commands' help, maxcloud.schema.json
+  # and the controller's CRDs (CONTRIBUTING.md, Docs).
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/setup-go
+        with:
+          module: .
+      - run: go run ./internal/gendocs
+      - name: docs/reference is up to date
+        run: |
+          git add -N docs/reference
+          git diff --exit-code -- docs/reference || { echo "::error::run go run ./internal/gendocs and commit"; exit 1; }
+
   mcloud-test:
     runs-on: ubuntu-latest
     # The migration tests run against a real Postgres.

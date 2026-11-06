@@ -43,7 +43,11 @@ export default defineNuxtConfig({
 | `app` | `MAXCLOUD_APP` (at build time: `maxcloud.yaml`'s `app`) |
 | `databaseUrl` | `DATABASE_URL` |
 | `s3.endpoint`, `s3.region`, `s3.accessKeyId`, `s3.secretAccessKey` | `AWS_ENDPOINT_URL_S3`, `AWS_REGION`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` |
-| `buckets.<name>` | the bucket's full name, `mc-<app>--<name>`, for each bucket in `maxcloud.yaml` |
+| `buckets.<name>` | the bucket's full name, for each bucket in `maxcloud.yaml`: `MAXCLOUD_BUCKET_<NAME>`, else `mc-<app>--<name>` |
+
+`maxcloud.yaml` is read at build time, from the Nuxt root or a folder
+above it. The module option `buckets: ["uploads"]` lists the buckets
+instead.
 
 `maxcloud.runtimeConfig` fills the app's own keys (dotted paths) from:
 
@@ -52,13 +56,17 @@ export default defineNuxtConfig({
 | `"app"` | the app's name |
 | `"database"` | the database's URL |
 | `"s3.endpoint"`, `"s3.region"`, `"s3.accessKeyId"`, `"s3.secretAccessKey"` | the credentials |
-| `"bucket:<name>"` | a bucket's full name |
+| `"bucket:<name>"` | a bucket's full name, as for `buckets.<name>` |
 | `"s3:<bucket>"` | on an object key: `endpoint`, `region`, `accessKeyId`, `secretAccessKey` and `bucket` under it |
 | `"env:<NAME>"` | any environment variable |
 
 A `NUXT_*` variable you set yourself wins. Without Object Storage
 credentials (`mcloud dev` without `--buckets`) bucket names stay empty, so
 the app can tell S3 isn't there.
+
+This needs Nitro's `node-server` preset (Nuxt's default). With another
+preset the module only warns, and the `NUXT_*` variables are yours to
+set.
 
 ## As a function
 
@@ -73,19 +81,25 @@ ones: `public`, `proxied`, `minInstances`, `maxInstances`, `concurrency`,
 - `web` (the name): the Nitro app as a Node.js request listener. Responses
   stream, the app sees the request's own `Host`, static files and
   `/_nuxt/` are served as by Nitro's own server.
-- `task-<name>` for each task in `nitro.scheduledTasks`: a scheduled
-  function (a CronJob) that runs the task once, with the web function's
-  container settings (`user`, `volumes`, memory). Nitro's own task runner
-  doesn't run: a function scales to zero. `tasks: false` leaves them out.
-- Nitro plugins run when the server starts, before it takes requests
-  (database migrations, storage mounts), but not when mcloud only asks the
-  image for its functions (`MAXCLOUD_DESCRIBE=1`).
+- `task-<name>` for each task in `nitro.scheduledTasks` (`db:cleanup`
+  becomes `task-db-cleanup`): a scheduled function (a CronJob) that runs
+  the task once, with the web function's container settings (`memory`,
+  `memoryLimit`, `cpu`, `user`, `readOnlyRootFilesystem`, `volumes`). A
+  task on several schedules gets a function for each. Nitro's own task
+  runner doesn't run: a function scales to zero. `tasks: false` leaves
+  them out.
+- Nitro plugins run when the module loads, before the server takes
+  requests or a task runs (database migrations, storage mounts), but not
+  when mcloud only asks the image for its functions
+  (`MAXCLOUD_DESCRIBE=1`).
 - On SIGTERM it finishes the requests in flight, then calls Nitro's
-  `close` hook, then exits 0.
+  `close` hook (for at most 10 seconds), then exits 0.
 - `@max-cloud/functions` applies `migrations/*.sql` when a function starts;
   in a Nuxt build that's off (`MAXCLOUD_MIGRATE=0`), since Nuxt apps
   migrate in a Nitro plugin, often from a drizzle-kit `migrations/` folder
-  with the same file names. `migrations: true` turns it on.
+  with the same file names. `migrations: true` turns it on, and so does
+  setting `MAXCLOUD_MIGRATE` (to anything but `0`) in the environment,
+  without a rebuild.
 
 The image runs it either way:
 
@@ -120,8 +134,12 @@ export default defineNitroPlugin(async () => {
 const db = await drizzleDb(schema);
 ```
 
-They need `unstorage` and `drizzle-orm` installed; `bucketName` and `db`
-are re-exported from `@max-cloud/functions`.
+`s3Driver(bucket, { region })` takes the bucket's name from
+`MAXCLOUD_BUCKET_<NAME>`, else `bucketName`, and the endpoint, keys and
+region from the `AWS_*` variables (region default `auto`); it throws
+without them. `drizzleDb(schema)` is Drizzle's node-postgres driver on
+`db()`. They need `unstorage` and `drizzle-orm` installed; `bucketName`
+and `db` are re-exported from `@max-cloud/functions`.
 
 ## How it works, and why
 

@@ -49,7 +49,7 @@ maxcloud:
   - MAXCLOUD_APP, so bucketName() works;
   - secrets from .env in the repo and in source: (keep them out of git),
     or the app's own from the cluster (--secrets remote);
-  - the app's real buckets with --buckets remote (careful: real data).
+  - the app's real buckets with --buckets (careful: real data).
 
 It runs in the app's folder: source: in maxcloud.yaml, else the folder
 maxcloud.yaml is in. TypeScript runs your source with Node's type
@@ -59,7 +59,7 @@ port instead, at http://localhost:8080/; @max-cloud/nuxt fills its
 runtimeConfig from the same environment.`,
 		Example: `  mcloud dev
   mcloud dev --db branch:try-migration
-  mcloud dev --secrets remote --buckets remote`,
+  mcloud dev --secrets remote --buckets`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			p, err := loadProject()

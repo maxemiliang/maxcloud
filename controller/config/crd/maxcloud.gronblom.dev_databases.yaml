@@ -66,26 +66,34 @@ spec:
               mc-<app>--db.
             properties:
               backup:
-                description: Backup settings.
+                description: |-
+                  Backup settings: when base backups are taken and how long backups
+                  are kept.
                 properties:
                   retention:
                     default: 7d
-                    description: 'Retention of backups and WAL, e.g. 7d: how far back
-                      a restore can go.'
+                    description: |-
+                      Retention of backups and WAL: a number of days, weeks or months
+                      (7d, 2w, 1m). It's how far back a restore can go.
                     pattern: ^[1-9][0-9]*[dwm]$
                     type: string
                   schedule:
                     default: 0 0 5 * * *
                     description: |-
                       Schedule of the base backups, CloudNativePG's six-field cron
-                      (seconds first). WAL is archived continuously in between.
+                      (seconds first); the default is daily at 05:00. WAL is archived
+                      continuously in between, at least every 5 minutes. Each new backup
+                      generation also gets a base backup of its own as soon as its Cluster
+                      is ready.
                     type: string
                 type: object
               instances:
                 default: 1
                 description: |-
-                  Instances: 1, or 2 for a streaming replica on the other node, so a
-                  node drain fails over instead of taking the database down.
+                  Instances: 1, or 2 for a streaming replica (on another node when
+                  CloudNativePG can place it there), so a node drain fails over instead
+                  of taking the database down. With 2 the Cluster gets a
+                  PodDisruptionBudget; with 1 it doesn't, so it never blocks a drain.
                 format: int32
                 maximum: 2
                 minimum: 1
@@ -93,8 +101,9 @@ spec:
               reclaimPolicy:
                 default: Retain
                 description: |-
-                  ReclaimPolicy of the backup bucket: Retain (default) keeps the
-                  backups when this object is deleted; Delete deletes them.
+                  ReclaimPolicy of the backup bucket mc-<app>--db: Retain (default)
+                  keeps the backups when this object is deleted; Delete deletes the
+                  bucket and every backup in it.
                 enum:
                 - Retain
                 - Delete
@@ -102,7 +111,8 @@ spec:
               resources:
                 description: |-
                   Resources of each Postgres instance (default: 20m CPU and 128Mi
-                  requested, 512Mi limit).
+                  memory requested, 512Mi memory limit). Set, it replaces the default
+                  as a whole; only requests and limits are used.
                 properties:
                   claims:
                     description: |-
@@ -165,17 +175,24 @@ spec:
                 - type: integer
                 - type: string
                 default: 1Gi
-                description: Size of each instance's disk. It can grow, never shrink.
+                description: |-
+                  Size of each instance's disk. It can grow (the disks are resized in
+                  place), never shrink: a smaller value than the Cluster has is ignored.
                 pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
                 x-kubernetes-int-or-string: true
             type: object
           status:
+            description: DatabaseStatus is what the controller last saw.
             properties:
               bucket:
-                description: Bucket holding the backups.
+                description: Bucket holding the backups (mc-<app>--db).
                 type: string
               conditions:
-                description: 'Conditions: Ready, Blocked.'
+                description: |-
+                  Conditions: Ready; Blocked (True while the controller won't act
+                  until a person decides, with why in its message); Restore (the last
+                  restore: True with reason Restored, or False with reason Refused
+                  when a restore-to time couldn't be used).
                 items:
                   description: Condition contains details for one aspect of the current
                     state of this API Resource.
@@ -243,14 +260,19 @@ spec:
                 format: int64
                 type: integer
               observedGeneration:
+                description: ObservedGeneration is the spec generation the conditions
+                  describe.
                 format: int64
                 type: integer
               phase:
-                description: DatabasePhase is where the database is in its life.
+                description: |-
+                  Phase is where the database is: Creating, Restoring, Ready or
+                  Blocked.
                 type: string
               restoredFrom:
-                description: RestoredFrom is the generation the current one was restored
-                  from.
+                description: |-
+                  RestoredFrom is the generation the current one was restored from;
+                  unset for a database that started empty.
                 format: int64
                 type: integer
               restoredTo:

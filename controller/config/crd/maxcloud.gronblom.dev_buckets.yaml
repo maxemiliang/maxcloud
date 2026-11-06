@@ -66,14 +66,16 @@ spec:
           spec:
             description: |-
               BucketSpec is what the app gets: a bucket named mc-<namespace>--<name> in
-              the maxcloud-apps Object Storage, readable and writable with the app's
-              credentials (the Secret maxcloud-s3 in its namespace).
+              the controller's Object Storage instance, readable and writable with the
+              app's credentials (the Secret maxcloud-s3 in its namespace, which also
+              holds the bucket's full name as MAXCLOUD_BUCKET_<NAME>).
             properties:
               public:
                 description: |-
                   Public lets anyone read the bucket's objects without credentials
                   (s3:GetObject for everyone). Listing and writing still need the app's
-                  credentials.
+                  credentials. If the cluster gives public buckets hostnames, the bucket
+                  is also served at status.url.
                 type: boolean
               reclaimPolicy:
                 default: Retain
@@ -92,7 +94,10 @@ spec:
                 description: BucketName is the bucket's name in Object Storage.
                 type: string
               conditions:
-                description: 'Conditions: Ready.'
+                description: |-
+                  Conditions: Ready. When it's False, its reason is NotATenant (the
+                  namespace isn't an app's), InvalidName or APIError, and its message
+                  says why.
                 items:
                   description: Condition contains details for one aspect of the current
                     state of this API Resource.
@@ -155,6 +160,9 @@ spec:
                 description: Endpoint is the S3 endpoint the bucket is reached at.
                 type: string
               objects:
+                description: |-
+                  Objects is the number of objects in the bucket, from UpCloud's bucket
+                  metrics, refreshed every few minutes.
                 format: int64
                 type: integer
               observedGeneration:
@@ -164,8 +172,8 @@ spec:
                 type: integer
               sizeBytes:
                 description: |-
-                  SizeBytes and Objects are UpCloud's bucket metrics, refreshed every
-                  few minutes.
+                  SizeBytes is the bytes stored in the bucket, from UpCloud's bucket
+                  metrics, refreshed every few minutes.
                 format: int64
                 type: integer
               url:

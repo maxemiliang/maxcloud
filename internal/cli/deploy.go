@@ -19,7 +19,7 @@ func deployCmd(g *globals) *cobra.Command {
 	var timeout time.Duration
 	c := &cobra.Command{
 		Use:   "deploy",
-		Short: "Push this repo and follow the build and the rollout",
+		Short: "Push this repo and follow the build and the rollout (direct apps: build here and apply)",
 		Long: `Deploy the app in the current repo: push the branch, then follow the
 deploy workflow (build, manifests, deploy commit), Flux applying the deploy
 commit, and the app's services becoming ready.
@@ -29,7 +29,7 @@ and mcloud deploy only follows along. Uncommitted changes aren't deployed.
 With nothing new to push, --rebuild runs the workflow again (e.g. after a
 change in the homelab platform).
 
-The app's settings (quota, buckets, database, source) come from
+The app's settings (quota, buckets, database, domains, deploy) come from
 maxcloud.yaml: the first deploy registers the app, later ones bring its
 registry entry in line. No commit to the homelab repo.
 
@@ -133,7 +133,7 @@ namespace, with the source streamed to it.`,
 	f := c.Flags()
 	f.BoolVar(&rebuild, "rebuild", false, "run the deploy workflow again even with nothing new to push")
 	f.BoolVar(&noPush, "no-push", false, "don't push; follow the deploy of what's already pushed")
-	f.BoolVar(&direct, "direct", false, "deploy a direct app: build here and apply, without git (default for deploy: direct in maxcloud.yaml)")
+	f.BoolVar(&direct, "direct", false, "build here and apply, without git, as deploy: direct in maxcloud.yaml does; switches a GitOps app to direct (asks first)")
 	f.DurationVar(&timeout, "timeout", 15*time.Minute, "give up following after this long")
 	f.StringVar(&g.buildMode, "build", "auto", "direct apps: where to build: local (docker, pack), cluster (buildpacks in the app's namespace, no docker needed), or auto (local if docker is installed)")
 	f.BoolVarP(&yes, "yes", "y", false, "don't ask before switching between gitops and direct (deploy: in maxcloud.yaml)")

@@ -108,7 +108,7 @@ export async function runShutdownHooks(timeoutMs = 10_000): Promise<boolean> {
  *
  * ```ts
  * export const web = onRequest({ public: true }, { node: listener });
- * if (isEntrypoint(import.meta.url)) start({ web });
+ * if (await isEntrypoint(import.meta.url)) start({ web });
  * ```
  */
 export function start(mod: Record<string, unknown>, opts: StartOptions = {}): void {
