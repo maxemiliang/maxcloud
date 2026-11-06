@@ -212,4 +212,7 @@ func reset() {
 	defer mu.Unlock()
 	registry = map[string]*function{}
 	migrationsFS = nil
+	shutdownMu.Lock()
+	shutdownHooks = nil
+	shutdownMu.Unlock()
 }

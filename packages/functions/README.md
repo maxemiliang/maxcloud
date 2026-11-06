@@ -291,8 +291,8 @@ connecting to things.
 
 `onShutdown(fn)` runs `fn` after SIGTERM, once the requests or jobs in
 flight are done and before the process exits: close a pool, flush logs.
-Hooks run in order, for at most 10 seconds together; one that fails or
-runs over makes the process exit 1.
+Hooks run in order, for at most 10 seconds together; if one throws, or
+they're still running after 10 seconds, the process exits 1.
 
 A bundled server can be its own entrypoint instead of package.json's
 `main` (`@max-cloud/nuxt` builds Nuxt this way): `start(exports)` does what

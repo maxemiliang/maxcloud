@@ -226,7 +226,21 @@ reads it, with an error that says how to set it when it's missing.
 First it applies the app's pending migrations (see Migrations). On SIGTERM
 an HTTP server or worker finishes what's in flight (up to 25 seconds) and
 exits 0; a scheduled run's `ctx` is cancelled. `Start` doesn't return: it
-exits the process, so deferred calls in `main` don't run.
+exits the process, so deferred calls in `main` don't run. Put cleanup in `functions.OnShutdown` instead: it runs after the function
+stops (after SIGTERM, once what was in flight is done; after a schedule's
+run) and before the process exits.
+
+```go
+functions.OnShutdown(func(ctx context.Context) error {
+	return tracer.Shutdown(ctx) // close a pool, flush logs
+})
+```
+
+Hooks run in the order they were registered, for at most 10 seconds
+together (`ctx` ends then). One that fails (an error or a panic) is logged
+and the rest still run. If one failed, or they're still running after 10
+seconds, the process exits 1. The TypeScript SDK's `onShutdown` works the
+same way.
 
 With `--describe` it prints the registered functions, their settings and
 the embedded migrations as JSON instead. With `MAXCLOUD_DESCRIBE=1` in the
