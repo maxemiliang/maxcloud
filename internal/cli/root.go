@@ -59,17 +59,19 @@ reconciler that applies the app's own repo. mcloud deploy registers an app
 the first time and keeps the entry in line with maxcloud.yaml; mcloud apps
 changes it by hand. Neither is a commit anywhere.
 
-Cluster access uses $MCLOUD_KUBECONFIG, else the usual $KUBECONFIG.
-GitHub access uses $GH_TOKEN, else the GitHub CLI's login.`,
+Start with mcloud login (then mcloud doctor if anything's off). Cluster
+access uses --kubeconfig, else $MCLOUD_KUBECONFIG, else the kubeconfig
+mcloud login writes, else the usual $KUBECONFIG. GitHub access uses
+$GH_TOKEN, else the GitHub CLI's login.`,
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		Version:       version(),
 	}
 	f := root.PersistentFlags()
-	f.StringVar(&g.kubeconfig, "kubeconfig", "", "kubeconfig file (default $MCLOUD_KUBECONFIG, else $KUBECONFIG)")
+	f.StringVar(&g.kubeconfig, "kubeconfig", "", "kubeconfig file (default $MCLOUD_KUBECONFIG, else mcloud login's, else $KUBECONFIG)")
 	f.StringVar(&g.kubeContext, "context", "", "kubeconfig context")
 
-	root.AddCommand(initCmd(g), deployCmd(g), appsCmd(g), statusCmd(g), logsCmd(g), generateCmd(g), buildCmd(g), queueCmd(g), secretsCmd(g), dbCmd(g), loginCmd(g), logoutCmd(g), credentialCmd(g), kubeconfigCmd(g), doctorCmd(g), runCmd(g), callCmd(g))
+	root.AddCommand(initCmd(g), deployCmd(g), appsCmd(g), statusCmd(g), logsCmd(g), generateCmd(g), buildCmd(g), devCmd(g), queueCmd(g), secretsCmd(g), dbCmd(g), loginCmd(g), logoutCmd(g), credentialCmd(g), kubeconfigCmd(g), doctorCmd(g), runCmd(g), callCmd(g))
 	return root
 }
 
