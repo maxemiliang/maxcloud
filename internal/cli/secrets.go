@@ -15,6 +15,7 @@ import (
 	"golang.org/x/term"
 
 	"github.com/maxemiliang/maxcloud/internal/functions"
+	"github.com/maxemiliang/maxcloud/internal/kube"
 	"github.com/maxemiliang/maxcloud/internal/kustomize"
 	"github.com/maxemiliang/maxcloud/internal/registry"
 )
@@ -23,13 +24,24 @@ import (
 // moved to the cluster: SOPS-encrypted in the manifests directory.
 const legacySecretsFile = "secrets.sops.yaml"
 
-var secretNameRe = regexp.MustCompile(`^[A-Z_][A-Z0-9_]*$`)
+var envNameRe = regexp.MustCompile(`^[A-Z_][A-Z0-9_]*$`)
 
-// reservedSecret: names the platform sets itself, which a secret would
-// shadow or be shadowed by.
-func reservedSecret(name string) bool {
+// reservedEnv: names the platform sets itself, which a secret or variable
+// would shadow or be shadowed by.
+func reservedEnv(name string) bool {
 	return name == "DATABASE_URL" || name == "FUNCTION_TARGET" || name == "PORT" ||
 		strings.HasPrefix(name, "AWS_") || strings.HasPrefix(name, "MAXCLOUD_") || strings.HasPrefix(name, "K_")
+}
+
+// checkEnvName: name can be a secret or variable of the app's.
+func checkEnvName(name string) error {
+	if !envNameRe.MatchString(name) {
+		return fmt.Errorf("%q: use an environment variable name: A-Z, 0-9 and _, not starting with a digit", name)
+	}
+	if reservedEnv(name) {
+		return fmt.Errorf("%s: the platform sets that one itself", name)
+	}
+	return nil
 }
 
 func secretsCmd(g *globals) *cobra.Command {
@@ -74,17 +86,30 @@ func secretsSetCmd(g *globals) *cobra.Command {
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name := args[0]
-			if !secretNameRe.MatchString(name) {
-				return fmt.Errorf("secret %q: use an environment variable name: A-Z, 0-9 and _, not starting with a digit", name)
+			if err := checkEnvName(name); err != nil {
+				return fmt.Errorf("secret %w", err)
 			}
-			if reservedSecret(name) {
-				return fmt.Errorf("secret %q: the platform sets that one itself", name)
+			app, err := appName(nonEmpty(f.app))
+			if err != nil {
+				return err
+			}
+			if _, ok := projectEnvFor(app)[name]; ok {
+				return fmt.Errorf("%s is in %s's env, which wins over a secret: take it out of there first", name, ProjectFile)
 			}
 			value, err := readSecretValue(g, name)
 			if err != nil {
 				return err
 			}
-			return g.editSecrets(cmd.Context(), f, func(s map[string]string) error {
+			return g.editSecrets(cmd.Context(), f, func(k *kube.Client, s map[string]string) error {
+				// A plain variable of the same name would be two values for
+				// one name; the secret would win, silently.
+				env, err := k.ConfigMapData(cmd.Context(), app, functions.AppEnv)
+				if err != nil {
+					return err
+				}
+				if _, ok := env[name]; ok {
+					return fmt.Errorf("%s is a plain variable of %s's (mcloud env); mcloud env unset %s first", name, app, name)
+				}
 				s[name] = value
 				return nil
 			}, "Set "+name)
@@ -102,7 +127,7 @@ func secretsUnsetCmd(g *globals) *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name := args[0]
-			return g.editSecrets(cmd.Context(), f, func(s map[string]string) error {
+			return g.editSecrets(cmd.Context(), f, func(_ *kube.Client, s map[string]string) error {
 				if _, ok := s[name]; !ok {
 					return fmt.Errorf("no secret %s", name)
 				}
@@ -157,7 +182,7 @@ func secretsListCmd(g *globals) *cobra.Command {
 
 // editSecrets reads the app's secrets, changes them with edit, writes them
 // back, and restarts the functions (unless told not to).
-func (g *globals) editSecrets(ctx context.Context, f secretsFlags, edit func(map[string]string) error, done string) error {
+func (g *globals) editSecrets(ctx context.Context, f secretsFlags, edit func(*kube.Client, map[string]string) error, done string) error {
 	app, err := appName(nonEmpty(f.app))
 	if err != nil {
 		return err
@@ -177,15 +202,24 @@ func (g *globals) editSecrets(ctx context.Context, f secretsFlags, edit func(map
 	if err != nil {
 		return err
 	}
-	if err := edit(s); err != nil {
+	if err := edit(k, s); err != nil {
 		return err
 	}
 	if err := k.ApplySecret(ctx, app, functions.AppSecrets, s); err != nil {
 		return err
 	}
+	return g.restartAfterChange(ctx, k, app, f.noRestart, done, nil)
+}
+
+// restartAfterChange reports a change to the app's secrets or env, and
+// restarts its functions so they have it (unless noRestart).
+func (g *globals) restartAfterChange(ctx context.Context, k *kube.Client, app string, noRestart bool, done string, hints []string) error {
 	u := g.UI()
-	if f.noRestart {
+	if noRestart {
 		u.Success("%s", done)
+		for _, h := range hints {
+			u.Hint("%s", h)
+		}
 		u.Hint("Functions get it when they next start.")
 		return nil
 	}
@@ -193,10 +227,11 @@ func (g *globals) editSecrets(ctx context.Context, f secretsFlags, edit func(map
 	if err != nil {
 		return fmt.Errorf("%s, but restarting the functions failed (they get it when they next start): %w", strings.ToLower(done[:1])+done[1:], err)
 	}
-	if len(restarted) == 0 {
-		u.Success("%s", done)
-	} else {
-		u.Success("%s", done)
+	u.Success("%s", done)
+	for _, h := range hints {
+		u.Hint("%s", h)
+	}
+	if len(restarted) > 0 {
 		u.Hint("restarting %s", strings.Join(restarted, ", "))
 	}
 	return nil

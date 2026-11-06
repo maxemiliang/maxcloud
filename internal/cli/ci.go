@@ -79,7 +79,11 @@ func (g *globals) ciBuild(ctx context.Context, o ciOptions) error {
 		if err != nil {
 			return err
 		}
-		changed, err := functions.WriteDir(o.manifests, desc, functions.Options{Image: o.image, App: app})
+		env, err := manifestEnv(app)
+		if err != nil {
+			return err
+		}
+		changed, err := functions.WriteDir(o.manifests, desc, functions.Options{Image: o.image, App: app, Env: env})
 		if err != nil {
 			return err
 		}

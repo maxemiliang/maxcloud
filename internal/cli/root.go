@@ -13,7 +13,6 @@ import (
 
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
-	"sigs.k8s.io/yaml"
 
 	"github.com/maxemiliang/maxcloud/internal/github"
 	"github.com/maxemiliang/maxcloud/internal/kube"
@@ -34,6 +33,8 @@ type globals struct {
 	buildMode   string // mcloud deploy --build: auto, local, cluster
 	plain       bool   // --plain: no colors, spinners or prompts
 	ui          *ui.UI
+	// testKube, if set, is the cluster client (tests).
+	testKube *kube.Client
 
 	in     io.Reader
 	out    io.Writer
@@ -88,7 +89,7 @@ $GH_TOKEN (or $GITHUB_TOKEN), else the GitHub CLI's login.`,
 	f.StringVar(&g.kubeContext, "context", "", "kubeconfig context")
 	f.BoolVar(&g.plain, "plain", false, "plain output: no colors, spinners or interactive prompts (also $MCLOUD_PLAIN=1; always in CI, pipes, with NO_COLOR or TERM=dumb)")
 
-	root.AddCommand(initCmd(g), deployCmd(g), appsCmd(g), statusCmd(g), logsCmd(g), generateCmd(g), buildCmd(g), devCmd(g), queueCmd(g), secretsCmd(g), dbCmd(g), loginCmd(g), logoutCmd(g), credentialCmd(g), kubeconfigCmd(g), doctorCmd(g), runCmd(g), callCmd(g))
+	root.AddCommand(initCmd(g), deployCmd(g), appsCmd(g), statusCmd(g), logsCmd(g), generateCmd(g), buildCmd(g), devCmd(g), queueCmd(g), secretsCmd(g), envCmd(g), dbCmd(g), loginCmd(g), logoutCmd(g), credentialCmd(g), kubeconfigCmd(g), doctorCmd(g), runCmd(g), callCmd(g))
 	return root
 }
 
@@ -102,7 +103,12 @@ func version() string {
 	return "dev"
 }
 
-func (g *globals) kube() (*kube.Client, error) { return kube.New(g.kubeconfig, g.kubeContext) }
+func (g *globals) kube() (*kube.Client, error) {
+	if g.testKube != nil {
+		return g.testKube, nil
+	}
+	return kube.New(g.kubeconfig, g.kubeContext)
+}
 
 func (g *globals) github() (*github.Client, error) {
 	t, err := github.Token()
@@ -134,6 +140,9 @@ type project struct {
 	DB      *projectDB    `json:"db"`      // db: true, or db: {size: 2Gi, instances: 2}
 	// Custom hostnames: [{host: shop.example.com, service: web, proxied: true}]
 	Domains []registry.Domain `json:"domains"`
+	// Env: plain variables every function gets ({LOG_LEVEL: debug}), each
+	// value as written in the file. See parseProjectEnv.
+	Env map[string]string `json:"-"`
 
 	Dir string `json:"-"` // where the file is: the repo's root
 }
@@ -171,6 +180,9 @@ func (d *projectDB) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
+// errNoProject: no maxcloud.yaml here or in a parent.
+var errNoProject = errors.New("which app? Pass its name, or run this in a repo with a maxcloud.yaml")
+
 // loadProject finds maxcloud.yaml in the current directory or a parent.
 func loadProject() (*project, error) {
 	dir, err := os.Getwd()
@@ -181,19 +193,19 @@ func loadProject() (*project, error) {
 		file := filepath.Join(dir, ProjectFile)
 		data, err := os.ReadFile(file)
 		if err == nil {
-			var p project
-			if err := yaml.Unmarshal(data, &p); err != nil {
+			p, err := parseProject(data)
+			if err != nil {
 				return nil, fmt.Errorf("%s: %w", file, err)
 			}
 			if p.App == "" {
 				return nil, fmt.Errorf("%s has no app: field", file)
 			}
 			p.Dir = dir
-			return &p, nil
+			return p, nil
 		}
 		parent := filepath.Dir(dir)
 		if parent == dir {
-			return nil, errors.New("which app? Pass its name, or run this in a repo with a maxcloud.yaml")
+			return nil, errNoProject
 		}
 		dir = parent
 	}

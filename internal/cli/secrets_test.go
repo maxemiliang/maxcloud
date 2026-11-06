@@ -30,9 +30,9 @@ func TestSecretsSetRefusesWhileSOPSFileIsThere(t *testing.T) {
 	}
 }
 
-func TestReservedSecret(t *testing.T) {
+func TestReservedEnv(t *testing.T) {
 	for name, want := range map[string]bool{"DATABASE_URL": true, "AWS_REGION": true, "MAXCLOUD_APP": true, "STRIPE_KEY": false} {
-		if reservedSecret(name) != want {
+		if reservedEnv(name) != want {
 			t.Errorf("%s: %v", name, !want)
 		}
 	}

@@ -51,3 +51,31 @@ func TestAdoptSecret(t *testing.T) {
 		t.Error("adopted a Secret that isn't there")
 	}
 }
+
+func TestApplyConfigMapInPlace(t *testing.T) {
+	ctx := context.Background()
+	c := &Client{Core: fake.NewClientset()}
+	if got, err := c.ConfigMapData(ctx, "shop", "app-env"); err != nil || len(got) != 0 {
+		t.Fatalf("missing ConfigMap: %v, %v", got, err)
+	}
+	if err := c.ApplyConfigMap(ctx, "shop", "app-env", map[string]string{"A": "1", "B": "2"}); err != nil {
+		t.Fatal(err)
+	}
+	cm, _ := c.Core.CoreV1().ConfigMaps("shop").Get(ctx, "app-env", metav1.GetOptions{})
+	cm.UID = "kept"
+	c.Core.CoreV1().ConfigMaps("shop").Update(ctx, cm, metav1.UpdateOptions{})
+
+	if err := c.ApplyConfigMap(ctx, "shop", "app-env", map[string]string{"A": "3"}); err != nil {
+		t.Fatal(err)
+	}
+	cm, _ = c.Core.CoreV1().ConfigMaps("shop").Get(ctx, "app-env", metav1.GetOptions{})
+	if cm.UID != "kept" || len(cm.Data) != 1 || cm.Data["A"] != "3" {
+		t.Errorf("configmap: %+v", cm)
+	}
+	if cm.Labels["app.kubernetes.io/managed-by"] != "mcloud" {
+		t.Errorf("labels: %v", cm.Labels)
+	}
+	if got, _ := c.ConfigMapData(ctx, "shop", "app-env"); got["A"] != "3" {
+		t.Errorf("data: %v", got)
+	}
+}
