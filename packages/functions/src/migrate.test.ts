@@ -89,6 +89,24 @@ test("the shared apply cases", { skip }, async () => {
   }
 });
 
+// An app migrated into public keeps using public.maxcloud_migrations, even
+// when a schema earlier on its search_path (a "$user" schema) appears later.
+test("an existing table in public is kept", { skip }, async () => {
+  const db = await freshDatabase();
+  const client = new pg.Client({ connectionString: db.url });
+  await client.connect();
+  try {
+    await applyMigrations(client, loadMigrations(join(root, "v1")));
+    await client.query("CREATE SCHEMA shadow; SET search_path = shadow, public");
+    assert.deepEqual(await applyMigrations(client, loadMigrations(join(root, "v2"))), ["0003_more.sql"]);
+    const { rows } = await client.query("SELECT table_schema FROM information_schema.tables WHERE table_name = $1", [MIGRATIONS_TABLE]);
+    assert.deepEqual(rows.map((r) => r.table_schema), ["public"]);
+  } finally {
+    await client.end();
+    await db.drop();
+  }
+});
+
 test("concurrent runs apply each migration once", { skip }, async () => {
   const db = await freshDatabase();
   const files = loadMigrations(join(root, "v2"));

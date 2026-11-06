@@ -1,5 +1,5 @@
 // SQL migrations: the files in the app's migrations directory, applied
-// once each, in name order, and recorded in public.maxcloud_migrations.
+// once each, in name order, and recorded in maxcloud_migrations.
 //
 // mcloud db migrate and the Go SDK do the same (internal/migrate in the
 // maxcloud repo); all of them are tested against the repo's
@@ -12,8 +12,13 @@ import pg from "pg";
 
 /** Where an app keeps its migrations: next to package.json (and maxcloud.yaml). */
 export const MIGRATIONS_DIR = "migrations";
-/** The table that records the applied migrations. */
-export const MIGRATIONS_TABLE = "public.maxcloud_migrations";
+/**
+ * The table that records the applied migrations. Not schema-qualified: the
+ * one the connection's search_path finds (public.maxcloud_migrations on a
+ * default connection), and a new one goes in the connection's current
+ * schema, next to the app's tables (a testDatabase() schema's own).
+ */
+export const MIGRATIONS_TABLE = "maxcloud_migrations";
 /** The session advisory lock a run holds while it applies: the ASCII bytes of "maxcloud". */
 export const MIGRATIONS_LOCK_KEY = "7881713191291417956";
 
@@ -91,10 +96,14 @@ interface Applied {
   at: Date;
 }
 
+async function tableExists(client: pg.ClientBase): Promise<boolean> {
+  const { rows } = await client.query<{ exists: boolean }>("SELECT to_regclass($1) IS NOT NULL AS exists", [MIGRATIONS_TABLE]);
+  return rows[0]?.exists ?? false;
+}
+
 async function applied(client: pg.ClientBase): Promise<Map<string, Applied>> {
   const out = new Map<string, Applied>();
-  const { rows } = await client.query<{ exists: boolean }>("SELECT to_regclass($1) IS NOT NULL AS exists", [MIGRATIONS_TABLE]);
-  if (!rows[0]?.exists) return out;
+  if (!(await tableExists(client))) return out;
   const res = await client.query<{ name: string; checksum: string; applied_at: Date }>(`SELECT name, checksum, applied_at FROM ${MIGRATIONS_TABLE}`);
   for (const r of res.rows) out.set(r.name, { checksum: r.checksum, at: r.applied_at });
   return out;
@@ -160,7 +169,10 @@ export async function applyMigrations(client: pg.ClientBase, files: Migration[],
   }
   const names: string[] = [];
   try {
-    await client.query(CREATE_TABLE);
+    // Only when the search_path finds none: CREATE TABLE IF NOT EXISTS would
+    // make a second, empty one in an earlier schema (a "$user" schema made
+    // after the app first migrated into public).
+    if (!(await tableExists(client))) await client.query(CREATE_TABLE);
     // Another run may have applied some while this one waited.
     done = await applied(client);
     check(files, done);

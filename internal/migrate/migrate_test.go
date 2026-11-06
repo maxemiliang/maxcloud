@@ -236,3 +236,75 @@ func TestNothingPendingCreatesNothing(t *testing.T) {
 		t.Fatalf("table exists: %v, %v", exists, err)
 	}
 }
+
+// tableSchema is the schema that has a table named Table, or "".
+func tableSchema(t *testing.T, conn *pgx.Conn) string {
+	t.Helper()
+	var schemas []string
+	rows, err := conn.Query(context.Background(), "SELECT table_schema FROM information_schema.tables WHERE table_name = $1 ORDER BY 1", Table)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for rows.Next() {
+		var s string
+		rows.Scan(&s)
+		schemas = append(schemas, s)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	return strings.Join(schemas, ",")
+}
+
+// The table follows the connection's search_path, like the app's own
+// tables: a test schema without public on its path gets its own record.
+func TestTableFollowsTheSearchPath(t *testing.T) {
+	root, _ := testdata(t)
+	conn := testConn(t)
+	ctx := context.Background()
+	v1, err := Load(os.DirFS(root), "v1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, schema := range []string{"test_a", "test_b"} {
+		if _, err := conn.Exec(ctx, "CREATE SCHEMA "+schema+"; SET search_path = "+schema); err != nil {
+			t.Fatal(err)
+		}
+		names, err := Apply(ctx, conn, v1, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(names) != 2 {
+			t.Errorf("%s: applied %v, want both", schema, names)
+		}
+	}
+	if got := tableSchema(t, conn); got != "test_a,test_b" {
+		t.Errorf("tables in %q, want test_a,test_b", got)
+	}
+}
+
+// An app migrated into public keeps using public.maxcloud_migrations, even
+// when a schema earlier on its search_path (a "$user" schema) appears later.
+func TestExistingTableInPublicIsKept(t *testing.T) {
+	root, _ := testdata(t)
+	conn := testConn(t)
+	ctx := context.Background()
+	v1, _ := Load(os.DirFS(root), "v1")
+	v2, _ := Load(os.DirFS(root), "v2")
+	if _, err := Apply(ctx, conn, v1, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := conn.Exec(ctx, "CREATE SCHEMA shadow; SET search_path = shadow, public"); err != nil {
+		t.Fatal(err)
+	}
+	names, err := Apply(ctx, conn, v2, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(names, ",") != "0003_more.sql" {
+		t.Errorf("applied %v, want only 0003_more.sql", names)
+	}
+	if got := tableSchema(t, conn); got != "public" {
+		t.Errorf("tables in %q, want public", got)
+	}
+}
