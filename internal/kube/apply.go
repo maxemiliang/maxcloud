@@ -3,7 +3,9 @@ package kube
 import (
 	"context"
 	"fmt"
+	"time"
 
+	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -133,22 +135,108 @@ func (c *Client) SecretData(ctx context.Context, ns, name string) (map[string]st
 	return out, nil
 }
 
-// ApplySecret writes an Opaque Secret with exactly these values.
+// Marks on the app's secrets Secret: mcloud owns it (the maxcloud
+// controller backs up Secrets so marked), and Flux leaves it alone if it
+// once applied it from a secrets.sops.yaml that's gone from git since.
+var appSecretsLabels = map[string]string{"app.kubernetes.io/managed-by": FieldManager}
+var appSecretsAnnotations = map[string]string{"kustomize.toolkit.fluxcd.io/prune": "disabled"}
+
+// ApplySecret makes Secret name hold exactly data, marked as mcloud's.
+// It's updated in place, never deleted: a Secret that's briefly missing
+// would be put back from the controller's copy.
 func (c *Client) ApplySecret(ctx context.Context, ns, name string, data map[string]string) error {
-	obj := map[string]any{
-		"apiVersion": "v1",
-		"kind":       "Secret",
-		"metadata": map[string]any{
-			"name":   name,
-			"labels": map[string]any{"app.kubernetes.io/managed-by": "mcloud"},
-		},
-		"type":       "Opaque",
-		"stringData": data,
+	bytes := make(map[string][]byte, len(data))
+	for k, v := range data {
+		bytes[k] = []byte(v)
 	}
-	// Replace, not merge: an unset key must go.
-	err := c.Core.CoreV1().Secrets(ns).Delete(ctx, name, metav1.DeleteOptions{})
-	if err != nil && !apierrors.IsNotFound(err) {
+	secrets := c.Core.CoreV1().Secrets(ns)
+	s, err := secrets.Get(ctx, name, metav1.GetOptions{})
+	if apierrors.IsNotFound(err) {
+		s = &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{Name: name, Labels: appSecretsLabels, Annotations: appSecretsAnnotations},
+			Type:       corev1.SecretTypeOpaque,
+			Data:       bytes,
+		}
+		_, err = secrets.Create(ctx, s, metav1.CreateOptions{FieldManager: FieldManager})
 		return err
 	}
-	return c.Apply(ctx, ns, []map[string]any{obj})
+	if err != nil {
+		return err
+	}
+	markAppSecrets(s)
+	s.Data, s.StringData = bytes, nil
+	_, err = secrets.Update(ctx, s, metav1.UpdateOptions{FieldManager: FieldManager})
+	return err
+}
+
+// AdoptSecret marks an existing Secret (one Flux applied from
+// secrets.sops.yaml) as mcloud's. Returns false if there's none.
+func (c *Client) AdoptSecret(ctx context.Context, ns, name string) (bool, error) {
+	secrets := c.Core.CoreV1().Secrets(ns)
+	s, err := secrets.Get(ctx, name, metav1.GetOptions{})
+	if apierrors.IsNotFound(err) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	markAppSecrets(s)
+	_, err = secrets.Update(ctx, s, metav1.UpdateOptions{FieldManager: FieldManager})
+	return err == nil, err
+}
+
+func markAppSecrets(s *corev1.Secret) {
+	if s.Labels == nil {
+		s.Labels = map[string]string{}
+	}
+	if s.Annotations == nil {
+		s.Annotations = map[string]string{}
+	}
+	for k, v := range appSecretsLabels {
+		s.Labels[k] = v
+	}
+	for k, v := range appSecretsAnnotations {
+		s.Annotations[k] = v
+	}
+}
+
+// RestartedAtAnnotation on a function's pod template starts new pods (a
+// new revision, for a Knative service), which read the secrets again.
+const RestartedAtAnnotation = "maxcloud.gronblom.dev/restarted-at"
+
+// RestartFunctions rolls the app's HTTP and queue functions, so they pick
+// up changed secrets; scheduled ones read them on their next run anyway.
+// Returns what it restarted. It applies as its own field manager, so
+// neither Flux nor a direct deploy minds the annotation.
+func (c *Client) RestartFunctions(ctx context.Context, ns string) ([]string, error) {
+	now := time.Now().UTC().Format(time.RFC3339)
+	var done []string
+	for _, k := range []struct {
+		gvr        schema.GroupVersionResource
+		apiVersion string
+		kind       string
+	}{
+		{gvrKService, "serving.knative.dev/v1", "Service"},
+		{schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "deployments"}, "apps/v1", "Deployment"},
+	} {
+		items, err := c.list(ctx, k.gvr, ns, metav1.ListOptions{LabelSelector: "app.kubernetes.io/part-of=maxcloud-functions"})
+		if err != nil {
+			return done, err
+		}
+		for _, it := range items {
+			patch := &unstructured.Unstructured{Object: map[string]any{
+				"apiVersion": k.apiVersion,
+				"kind":       k.kind,
+				"metadata":   map[string]any{"name": it.GetName()},
+				"spec": map[string]any{"template": map[string]any{"metadata": map[string]any{
+					"annotations": map[string]any{RestartedAtAnnotation: now},
+				}}},
+			}}
+			if _, err := c.Dyn.Resource(k.gvr).Namespace(ns).Apply(ctx, it.GetName(), patch, metav1.ApplyOptions{FieldManager: FieldManager + "-restart", Force: true}); err != nil {
+				return done, fmt.Errorf("restarting %s: %w", it.GetName(), err)
+			}
+			done = append(done, it.GetName())
+		}
+	}
+	return done, nil
 }

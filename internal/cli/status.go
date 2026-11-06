@@ -32,19 +32,19 @@ func statusCmd(g *globals) *cobra.Command {
 			if st.Entry == nil && !st.Applied && st.Services == nil && st.Workloads == nil {
 				return fmt.Errorf("no app %s on the cluster; `mcloud apps list` shows the registered ones", name)
 			}
-			printStatus(g.out, st, g.registry)
+			printStatus(g.out, st)
 			return nil
 		},
 	}
 }
 
-func printStatus(w io.Writer, st *kube.Status, registryRepo string) {
+func printStatus(w io.Writer, st *kube.Status) {
 	tw := tabwriter.NewWriter(w, 0, 4, 2, ' ', 0)
 	defer tw.Flush()
 
 	fmt.Fprintf(tw, "App\t%s\n", st.Name)
 	if st.Entry != nil {
-		fmt.Fprintf(tw, "Source\t%s\n", source(st.Entry, registryRepo))
+		fmt.Fprintf(tw, "Source\t%s\n", source(st.Entry))
 	} else {
 		fmt.Fprintf(tw, "Source\tnot in the registry\n")
 	}

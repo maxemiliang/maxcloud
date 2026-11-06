@@ -30,8 +30,6 @@ const ProjectFile = "maxcloud.yaml"
 type globals struct {
 	kubeconfig  string
 	kubeContext string
-	registry    string // <owner>/<repo> of the homelab repo
-	branch      string
 
 	in     io.Reader
 	out    io.Writer
@@ -69,9 +67,6 @@ GitHub access uses $GH_TOKEN, else the GitHub CLI's login.`,
 	f := root.PersistentFlags()
 	f.StringVar(&g.kubeconfig, "kubeconfig", "", "kubeconfig file (default $MCLOUD_KUBECONFIG, else $KUBECONFIG)")
 	f.StringVar(&g.kubeContext, "context", "", "kubeconfig context")
-	f.StringVar(&g.registry, "registry", envOr("MCLOUD_REGISTRY", "maxemiliang/homelab"), "the homelab repo, for its SOPS recipients and registry entries kept in git ($MCLOUD_REGISTRY)")
-	f.StringVar(&g.branch, "registry-branch", "main", "branch of the registry repo")
-	_ = f.MarkHidden("registry-branch")
 
 	root.AddCommand(initCmd(g), deployCmd(g), appsCmd(g), statusCmd(g), logsCmd(g), generateCmd(g), queueCmd(g), secretsCmd(g), dbCmd(g), loginCmd(g), logoutCmd(g), credentialCmd(g), kubeconfigCmd(g), doctorCmd(g), runCmd(g), callCmd(g))
 	return root

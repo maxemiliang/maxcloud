@@ -1,13 +1,11 @@
 package cli
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -15,17 +13,15 @@ import (
 
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
-	"sigs.k8s.io/yaml"
 
 	"github.com/maxemiliang/maxcloud/internal/functions"
-	"github.com/maxemiliang/maxcloud/internal/github"
 	"github.com/maxemiliang/maxcloud/internal/kustomize"
+	"github.com/maxemiliang/maxcloud/internal/registry"
 )
 
-// secretsFile is where a GitOps app keeps its secrets: in its manifests
-// directory, SOPS-encrypted to the homelab's age key, which Flux decrypts
-// when it applies the app.
-const secretsFile = "secrets.sops.yaml"
+// legacySecretsFile is where GitOps apps kept their secrets before they
+// moved to the cluster: SOPS-encrypted in the manifests directory.
+const legacySecretsFile = "secrets.sops.yaml"
 
 var secretNameRe = regexp.MustCompile(`^[A-Z_][A-Z0-9_]*$`)
 
@@ -41,26 +37,31 @@ func secretsCmd(g *globals) *cobra.Command {
 		Use:   "secrets",
 		Short: "An app's secrets: environment variables for all its functions",
 		Long: `Secrets reach every function of the app as environment variables (the
-SDKs' secret("NAME") reads one). Run these in the app's repo.
+SDKs' secret("NAME") reads one). They live in the Secret ` + functions.AppSecrets + ` in the
+app's namespace, for GitOps and direct apps alike: nothing to commit, no
+keys to hold. The maxcloud controller keeps an encrypted copy and puts it
+back after a cluster rebuild.
 
-GitOps apps keep them in deploy/k8s/` + secretsFile + `, encrypted with SOPS to
-the homelab's age key (from the registry repo's .sops.yaml, or
-$MCLOUD_AGE_RECIPIENT); commit and push it, or mcloud deploy. Changing one
-needs the sops command, and your age key to decrypt the others.
+Setting or removing one restarts the app's HTTP and queue functions, so
+they have it right away (--no-restart: on their next start). Scheduled
+functions get it on their next run.
 
-Direct apps keep them in the Secret ` + functions.AppSecrets + ` on the cluster.
-
-New values reach functions as they start again (the next deploy, or a
-scale from zero).`,
+Run these in the app's repo, or name the app with --app.`,
 	}
-	c.AddCommand(secretsSetCmd(g), secretsUnsetCmd(g), secretsListCmd(g))
+	c.AddCommand(secretsSetCmd(g), secretsUnsetCmd(g), secretsListCmd(g), secretsMigrateCmd(g))
 	return c
 }
 
-type secretsFlags struct{ dir string }
+type secretsFlags struct {
+	app       string
+	noRestart bool
+}
 
-func (f *secretsFlags) bind(c *cobra.Command) {
-	c.Flags().StringVar(&f.dir, "dir", "deploy/k8s", "GitOps apps: the manifests directory, relative to the repo")
+func (f *secretsFlags) bind(c *cobra.Command, restart bool) {
+	c.Flags().StringVar(&f.app, "app", "", "the app (default: maxcloud.yaml's, or $MCLOUD_APP)")
+	if restart {
+		c.Flags().BoolVar(&f.noRestart, "no-restart", false, "don't restart the functions; they get the change when they next start")
+	}
 }
 
 func secretsSetCmd(g *globals) *cobra.Command {
@@ -86,10 +87,10 @@ func secretsSetCmd(g *globals) *cobra.Command {
 			return g.editSecrets(cmd.Context(), f, func(s map[string]string) error {
 				s[name] = value
 				return nil
-			}, "set "+name)
+			}, "Set "+name)
 		},
 	}
-	f.bind(c)
+	f.bind(c, true)
 	return c
 }
 
@@ -107,10 +108,10 @@ func secretsUnsetCmd(g *globals) *cobra.Command {
 				}
 				delete(s, name)
 				return nil
-			}, "removed "+name)
+			}, "Removed "+name)
 		},
 	}
-	f.bind(c)
+	f.bind(c, true)
 	return c
 }
 
@@ -120,35 +121,22 @@ func secretsListCmd(g *globals) *cobra.Command {
 		Use:   "list",
 		Short: "List the app's secrets (names only)",
 		Args:  cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			p, err := loadProject()
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			app, err := appName(nonEmpty(f.app))
 			if err != nil {
 				return err
 			}
-			var names []string
-			if p.Deploy == "direct" {
-				k, err := g.kube()
-				if err != nil {
-					return err
-				}
-				data, err := k.SecretData(cmd.Context(), p.App, functions.AppSecrets)
-				if err != nil {
-					return err
-				}
-				for n := range data {
-					names = append(names, n)
-				}
-			} else {
-				// SOPS leaves the keys readable; no key needed to list them.
-				raw, err := os.ReadFile(filepath.Join(p.Dir, f.dir, secretsFile))
-				if errors.Is(err, os.ErrNotExist) {
-					raw = nil
-				} else if err != nil {
-					return err
-				}
-				if names, err = sopsKeys(raw); err != nil {
-					return err
-				}
+			k, err := g.kube()
+			if err != nil {
+				return err
+			}
+			data, err := k.SecretData(cmd.Context(), app, functions.AppSecrets)
+			if err != nil {
+				return err
+			}
+			names := make([]string, 0, len(data))
+			for n := range data {
+				names = append(names, n)
 			}
 			sort.Strings(names)
 			if len(names) == 0 {
@@ -157,197 +145,124 @@ func secretsListCmd(g *globals) *cobra.Command {
 			for _, n := range names {
 				fmt.Fprintln(g.out, n)
 			}
+			if p, err := loadProject(); err == nil && p.App == app && legacySecretsPath(p) != "" {
+				fmt.Fprintf(g.errOut, "note: %s is still in git; mcloud secrets migrate moves the app off it\n", legacySecretsPath(p))
+			}
 			return nil
 		},
 	}
-	f.bind(c)
+	f.bind(c, false)
 	return c
 }
 
-// editSecrets reads the app's secrets, changes them with edit, and writes
-// them back where they live.
+// editSecrets reads the app's secrets, changes them with edit, writes them
+// back, and restarts the functions (unless told not to).
 func (g *globals) editSecrets(ctx context.Context, f secretsFlags, edit func(map[string]string) error, done string) error {
-	p, err := loadProject()
+	app, err := appName(nonEmpty(f.app))
 	if err != nil {
 		return err
 	}
-	if p.App == "" {
-		return errors.New("maxcloud.yaml has no app")
+	// A secrets.sops.yaml that Flux still applies would put its values back
+	// over these.
+	if p, err := loadProject(); err == nil && p.App == app {
+		if file := legacySecretsPath(p); file != "" {
+			return fmt.Errorf("%s still holds this app's secrets, and Flux would overwrite changes made here: run mcloud secrets migrate first", file)
+		}
 	}
-
-	if p.Deploy == "direct" {
-		k, err := g.kube()
-		if err != nil {
-			return err
-		}
-		s, err := k.SecretData(ctx, p.App, functions.AppSecrets)
-		if err != nil {
-			return err
-		}
-		if err := edit(s); err != nil {
-			return err
-		}
-		if err := k.ApplySecret(ctx, p.App, functions.AppSecrets, s); err != nil {
-			return err
-		}
-		fmt.Fprintf(g.out, "%s in Secret %s/%s. Functions get it when they next start.\n", done, p.App, functions.AppSecrets)
-		return nil
+	k, err := g.kube()
+	if err != nil {
+		return err
 	}
-
-	dir := filepath.Join(p.Dir, f.dir)
-	file := filepath.Join(dir, secretsFile)
-	s := map[string]string{}
-	if _, err := os.Stat(file); err == nil {
-		plain, err := runSops(ctx, nil, "decrypt", "--input-type", "yaml", "--output-type", "yaml", file)
-		if err != nil {
-			return fmt.Errorf("decrypt %s (needs your age key, as for any SOPS file): %w", file, err)
-		}
-		if s, err = secretStringData(plain); err != nil {
-			return fmt.Errorf("%s: %w", file, err)
-		}
+	s, err := k.SecretData(ctx, app, functions.AppSecrets)
+	if err != nil {
+		return err
 	}
 	if err := edit(s); err != nil {
 		return err
 	}
-	recipient, err := g.ageRecipient(ctx)
+	if err := k.ApplySecret(ctx, app, functions.AppSecrets, s); err != nil {
+		return err
+	}
+	if f.noRestart {
+		fmt.Fprintf(g.out, "%s. Functions get it when they next start.\n", done)
+		return nil
+	}
+	restarted, err := k.RestartFunctions(ctx, app)
 	if err != nil {
-		return err
+		return fmt.Errorf("%s, but restarting the functions failed (they get it when they next start): %w", strings.ToLower(done[:1])+done[1:], err)
 	}
-	enc, err := runSops(ctx, secretManifest(s), "encrypt",
-		"--age", recipient,
-		"--encrypted-regex", "^(data|stringData)$",
-		"--input-type", "yaml", "--output-type", "yaml",
-		"--filename-override", file)
-	if err != nil {
-		return err
+	if len(restarted) == 0 {
+		fmt.Fprintf(g.out, "%s.\n", done)
+	} else {
+		fmt.Fprintf(g.out, "%s; restarting %s.\n", done, strings.Join(restarted, ", "))
 	}
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return err
-	}
-	if err := os.WriteFile(file, enc, 0o644); err != nil {
-		return err
-	}
-	if err := addToKustomization(dir, secretsFile); err != nil {
-		return err
-	}
-	rel, _ := filepath.Rel(p.Dir, file)
-	fmt.Fprintf(g.out, "%s in %s (encrypted). Commit and push it, or mcloud deploy.\n", done, rel)
 	return nil
 }
 
-// ageRecipient is the homelab's age public key: $MCLOUD_AGE_RECIPIENT, or
-// the first age recipient in the registry repo's .sops.yaml.
-func (g *globals) ageRecipient(ctx context.Context) (string, error) {
-	if r := os.Getenv("MCLOUD_AGE_RECIPIENT"); r != "" {
-		return r, nil
+// legacySecretsPath is the app's secrets.sops.yaml if it still has one
+// (relative to the repo), else "".
+func legacySecretsPath(p *project) string {
+	dir := p.Path
+	if dir == "" {
+		dir = registry.DefaultPath
 	}
-	gh, err := g.github()
-	if err != nil {
-		return "", err
+	rel := filepath.Join(dir, legacySecretsFile)
+	if _, err := os.Stat(filepath.Join(p.Dir, rel)); err != nil {
+		return ""
 	}
-	data, err := gh.File(ctx, github.Repo(g.registry), g.branch, ".sops.yaml")
-	if err != nil {
-		return "", fmt.Errorf("the registry's .sops.yaml (for the age key to encrypt to; or set MCLOUD_AGE_RECIPIENT): %w", err)
-	}
-	r := ageRecipientRe.FindStringSubmatch(string(data))
-	if r == nil {
-		return "", fmt.Errorf("no age recipient in %s's .sops.yaml; set MCLOUD_AGE_RECIPIENT", g.registry)
-	}
-	return r[1], nil
+	return rel
 }
 
-var ageRecipientRe = regexp.MustCompile(`(?m)^\s*age:\s*['"]?(age1[0-9a-z]+)`)
-
-// secretManifest is the Secret holding the app's secrets, as YAML.
-func secretManifest(s map[string]string) []byte {
-	m := map[string]any{
-		"apiVersion": "v1",
-		"kind":       "Secret",
-		"metadata":   map[string]any{"name": functions.AppSecrets},
-		"type":       "Opaque",
-		"stringData": s,
+func secretsMigrateCmd(g *globals) *cobra.Command {
+	return &cobra.Command{
+		Use:   "migrate",
+		Short: "Move a GitOps app's secrets from secrets.sops.yaml in git to the cluster",
+		Long: `GitOps apps used to keep their secrets SOPS-encrypted in
+deploy/k8s/` + legacySecretsFile + `. This takes over the Secret Flux decrypted
+from it (so no key is needed), keeps Flux from deleting it, and removes the
+file from the repo: commit and push that.`,
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			p, err := loadProject()
+			if err != nil {
+				return err
+			}
+			rel := legacySecretsPath(p)
+			if rel == "" {
+				fmt.Fprintln(g.out, "Nothing to migrate: no "+legacySecretsFile+" here.")
+				return nil
+			}
+			k, err := g.kube()
+			if err != nil {
+				return err
+			}
+			ok, err := k.AdoptSecret(cmd.Context(), p.App, functions.AppSecrets)
+			if err != nil {
+				return err
+			}
+			if !ok {
+				return fmt.Errorf("the cluster has no Secret %s/%s to take over (has Flux applied %s yet? mcloud status %s)", p.App, functions.AppSecrets, rel, p.App)
+			}
+			dir := filepath.Dir(filepath.Join(p.Dir, rel))
+			kfile := filepath.Join(dir, "kustomization.yaml")
+			if ks, err := os.ReadFile(kfile); err == nil {
+				out, changed, err := kustomize.RemoveResource(string(ks), legacySecretsFile)
+				if err != nil {
+					return fmt.Errorf("%s: %w", kfile, err)
+				}
+				if changed {
+					if err := os.WriteFile(kfile, []byte(out), 0o644); err != nil {
+						return err
+					}
+				}
+			}
+			if err := os.Remove(filepath.Join(p.Dir, rel)); err != nil {
+				return err
+			}
+			fmt.Fprintf(g.out, "The cluster's Secret %s/%s is mcloud's now, and %s is gone.\nCommit and push:\n  git commit -am \"secrets: kept in the cluster\" && git push\n", p.App, functions.AppSecrets, rel)
+			return nil
+		},
 	}
-	out, _ := yaml.Marshal(m)
-	return out
-}
-
-// secretStringData reads a decrypted Secret's values.
-func secretStringData(plain []byte) (map[string]string, error) {
-	var sec struct {
-		StringData map[string]string `json:"stringData"`
-		Data       map[string][]byte `json:"data"`
-	}
-	if err := yaml.Unmarshal(plain, &sec); err != nil {
-		return nil, err
-	}
-	out := map[string]string{}
-	for k, v := range sec.Data {
-		out[k] = string(v)
-	}
-	for k, v := range sec.StringData {
-		out[k] = v
-	}
-	return out, nil
-}
-
-// sopsKeys lists the value names of an encrypted Secret (SOPS encrypts
-// values, not keys).
-func sopsKeys(raw []byte) ([]string, error) {
-	if len(raw) == 0 {
-		return nil, nil
-	}
-	var sec struct {
-		StringData map[string]any `json:"stringData"`
-		Data       map[string]any `json:"data"`
-	}
-	if err := yaml.Unmarshal(raw, &sec); err != nil {
-		return nil, err
-	}
-	var names []string
-	for k := range sec.StringData {
-		names = append(names, k)
-	}
-	for k := range sec.Data {
-		names = append(names, k)
-	}
-	return names, nil
-}
-
-func addToKustomization(dir, res string) error {
-	file := filepath.Join(dir, "kustomization.yaml")
-	k, err := os.ReadFile(file)
-	if errors.Is(err, os.ErrNotExist) {
-		return fmt.Errorf("no %s: is %s the app's manifests directory (--dir)?", file, dir)
-	}
-	if err != nil {
-		return err
-	}
-	ks := strings.Replace(string(k), "resources: []\n", "resources:\n", 1)
-	ks, changed, err := kustomize.AddResource(ks, res)
-	if err != nil {
-		return fmt.Errorf("%s: %w", file, err)
-	}
-	if !changed {
-		return nil
-	}
-	return os.WriteFile(file, []byte(ks), 0o644)
-}
-
-func runSops(ctx context.Context, stdin []byte, args ...string) ([]byte, error) {
-	if _, err := exec.LookPath("sops"); err != nil {
-		return nil, errors.New("needs the sops command (e.g. mise use -g sops)")
-	}
-	cmd := exec.CommandContext(ctx, "sops", args...)
-	if stdin != nil {
-		cmd.Stdin = bytes.NewReader(stdin)
-	}
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-	out, err := cmd.Output()
-	if err != nil {
-		return nil, fmt.Errorf("sops %s: %v: %s", args[0], err, strings.TrimSpace(stderr.String()))
-	}
-	return out, nil
 }
 
 // readSecretValue reads the value from stdin: a hidden prompt on a

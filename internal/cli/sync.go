@@ -81,7 +81,7 @@ func (g *globals) syncApp(ctx context.Context, k *kube.Client, p *project) (bool
 		if err := g.checkNamespace(ctx, e.Name); err != nil {
 			return false, err
 		}
-		fmt.Fprintf(g.out, "Registering %s (%s) ...\n", e.Name, source(&e, g.registry))
+		fmt.Fprintf(g.out, "Registering %s (%s) ...\n", e.Name, source(&e))
 		if err := k.PutRegistryEntry(ctx, &e); err != nil {
 			return false, err
 		}

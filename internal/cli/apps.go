@@ -51,14 +51,14 @@ func appsListCmd(g *globals) *cobra.Command {
 				if a.InGit {
 					where = "homelab git"
 				}
-				fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n", a.Name, source(a.Entry, g.registry), where, mark(a.Deploy.Status, a.Applied), shortRev(a.Revision), truncate(a.Deploy.Message, 60))
+				fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n", a.Name, source(a.Entry), where, mark(a.Deploy.Status, a.Applied), shortRev(a.Revision), truncate(a.Deploy.Message, 60))
 			}
 			return tw.Flush()
 		},
 	}
 }
 
-func source(e *registry.Entry, registryRepo string) string {
+func source(e *registry.Entry) string {
 	if e == nil {
 		return "?"
 	}
@@ -67,7 +67,7 @@ func source(e *registry.Entry, registryRepo string) string {
 	}
 	repo, p := e.Repo, e.Path
 	if repo == "" {
-		repo = registryRepo
+		repo = "the homelab repo"
 	}
 	if p == "" {
 		p = registry.DefaultPath

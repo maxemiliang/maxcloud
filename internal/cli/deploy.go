@@ -255,18 +255,18 @@ func (g *globals) followServices(ctx context.Context, k *kube.Client, name strin
 			if !s.Ready.Ready() {
 				pending = true
 				if s.Ready.Status == "False" {
-					printStatus(g.out, st, g.registry)
+					printStatus(g.out, st)
 					return fmt.Errorf("service %s isn't ready: %s%s", s.Name, s.Ready.Message, pullHint(st))
 				}
 			}
 		}
 		if !pending {
 			fmt.Fprintln(g.out)
-			printStatus(g.out, st, g.registry)
+			printStatus(g.out, st)
 			return nil
 		}
 		if err := sleep(ctx, 2*time.Second); err != nil {
-			printStatus(g.out, st, g.registry)
+			printStatus(g.out, st)
 			return errors.New("services not ready in time" + pullHint(st))
 		}
 	}

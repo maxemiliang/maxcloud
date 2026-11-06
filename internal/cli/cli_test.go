@@ -60,10 +60,10 @@ func TestShortRev(t *testing.T) {
 }
 
 func TestSource(t *testing.T) {
-	if got := source(&registry.Entry{Name: "d", Path: "apps/d"}, "o/homelab"); got != "o/homelab:apps/d" {
+	if got := source(&registry.Entry{Name: "d", Path: "apps/d"}); got != "the homelab repo:apps/d" {
 		t.Error(got)
 	}
-	if got := source(&registry.Entry{Name: "s", Repo: "o/s", Branch: "prod"}, "o/homelab"); got != "o/s@prod:deploy/k8s" {
+	if got := source(&registry.Entry{Name: "s", Repo: "o/s", Branch: "prod"}); got != "o/s@prod:deploy/k8s" {
 		t.Error(got)
 	}
 }
