@@ -50,6 +50,9 @@ func printStatus(w io.Writer, st *kube.Status, registryRepo string) {
 	}
 	if st.Source != nil && !st.Source.Ready() {
 		fmt.Fprintf(tw, "Fetch\t%s %s\n", mark(st.Source.Status, true), st.Source.Message)
+		if st.Source.NoRepoAccess() {
+			fmt.Fprintf(tw, "\tgive Flux's GitHub App access to the repo: %s\n", repoAccessURL(st))
+		}
 	}
 	if st.Entry != nil && st.Entry.Direct() {
 		fmt.Fprintf(tw, "Deploy\tdirect: applied by mcloud deploy, nothing from git\n")

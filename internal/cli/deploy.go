@@ -200,10 +200,21 @@ func (g *globals) followFlux(ctx context.Context, k *kube.Client, name, target s
 		fmt.Fprintf(g.errOut, "warning: can't ask Flux to fetch now (%v); it will within a minute\n", err)
 	}
 	last := ""
+	askedForAccess := false
 	for {
 		st, err := k.AppStatus(ctx, name)
 		if err != nil {
 			return err
+		}
+		// Flux can't read the repo: usually its GitHub App hasn't been given
+		// it yet. Open the page for that once and keep waiting; Flux tries
+		// again every minute.
+		if st.Source != nil && st.Source.NoRepoAccess() && !askedForAccess {
+			askedForAccess = true
+			u := repoAccessURL(st)
+			fmt.Fprintf(g.out, "  Flux can't read %s: %s\n", st.Entry.Repo, firstLine(st.Source.Message))
+			fmt.Fprintf(g.out, "  Give the homelab's Flux GitHub App access to it (Repository access, add %s):\n    %s\n  Waiting for Flux to fetch it ...\n", st.Entry.Repo, u)
+			openBrowser(u)
 		}
 		if !st.Applied {
 			return fmt.Errorf("%s has no Flux deploy on the cluster; register it with `mcloud apps create`", name)
@@ -220,6 +231,15 @@ func (g *globals) followFlux(ctx context.Context, k *kube.Client, name, target s
 			return fmt.Errorf("Flux hasn't applied %s yet: %s", target[:7], st.Deploy.Message)
 		}
 	}
+}
+
+// repoAccessURL is where Flux's GitHub App gets access to more repos: the
+// page the registry names, else the account's list of installed apps.
+func repoAccessURL(st *kube.Status) string {
+	if st.SourceAccessURL != "" {
+		return st.SourceAccessURL
+	}
+	return "https://github.com/settings/installations"
 }
 
 // followServices waits for every Knative service to have its newest revision

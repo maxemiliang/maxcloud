@@ -152,3 +152,20 @@ func TestPsqlError(t *testing.T) {
 		t.Errorf("psqlError = %q", got)
 	}
 }
+
+func TestNoRepoAccess(t *testing.T) {
+	for msg, want := range map[string]bool{
+		"failed to checkout and determine revision: unable to clone 'https://github.com/ann/shop.git': authentication required: Repository not found.": true,
+		"failed to get GitHub App installation token for owner ann":                                                                                    true,
+		"stored artifact for revision 'main@sha1:403abc404'":                                                                                           false,
+		"failed to checkout: unable to resolve reference 'main'":                                                                                       false,
+	} {
+		status := "False"
+		if strings.HasPrefix(msg, "stored") {
+			status = "True"
+		}
+		if got := (Condition{Status: status, Message: msg}).NoRepoAccess(); got != want {
+			t.Errorf("%q: NoRepoAccess = %v, want %v", msg, got, want)
+		}
+	}
+}

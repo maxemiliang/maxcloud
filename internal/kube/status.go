@@ -75,12 +75,15 @@ func (c *Client) app(ctx context.Context, provider *unstructured.Unstructured) (
 // Status is everything `mcloud status` shows for one app.
 type Status struct {
 	App
-	Source    *Condition // the GitRepository, for apps in their own repo
-	Services  []Service
-	Workloads []Workload
-	Databases []Database
-	Quota     []QuotaLine
-	Problems  []string // pods that aren't well, recent warnings
+	Source *Condition // the GitRepository, for apps in their own repo
+	// SourceAccessURL is where to give Flux's GitHub App access to the
+	// app's repo (the GitRepository's annotation SourceAccessAnnotation).
+	SourceAccessURL string
+	Services        []Service
+	Workloads       []Workload
+	Databases       []Database
+	Quota           []QuotaLine
+	Problems        []string // pods that aren't well, recent warnings
 }
 
 type Service struct {
@@ -130,6 +133,7 @@ func (c *Client) AppStatus(ctx context.Context, name string) (*Status, error) {
 		if g, err := c.get(ctx, gvrGitRepository, FluxNamespace, name); err == nil && g != nil {
 			cond := condition(g, "Ready")
 			st.Source = &cond
+			st.SourceAccessURL = g.GetAnnotations()[SourceAccessAnnotation]
 		}
 	}
 

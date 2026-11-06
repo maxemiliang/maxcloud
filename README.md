@@ -39,7 +39,9 @@ This repo holds:
    - it pins the image digest and commits.
 
    Flux then deploys that commit. `mcloud deploy` pushes and follows all
-   of it until the services are ready.
+   of it until the services are ready. If Flux can't read a new repo (the
+   homelab's Flux GitHub App doesn't have it yet), it says so and opens the
+   page where you add the repo to the app, then carries on once Flux can.
 
 Each kind of function becomes:
 

@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -99,6 +100,28 @@ type Condition struct {
 }
 
 func (c Condition) Ready() bool { return c.Status == "True" }
+
+// SourceAccessAnnotation on an app's GitRepository: the page where Flux's
+// GitHub App gets access to more repos (the homelab's app registry sets it).
+const SourceAccessAnnotation = "maxcloud.gronblom.dev/github-app-access"
+
+// NoRepoAccess: Flux's fetch failed because it may not read the repo (its
+// GitHub App isn't installed on it, or the repo doesn't exist).
+func (c Condition) NoRepoAccess() bool {
+	if c.Status != "False" {
+		return false
+	}
+	m := strings.ToLower(c.Message)
+	for _, s := range []string{
+		"repository not found", "authentication required", "authorization failed",
+		"could not read username", "installation", // the GitHub App's token
+	} {
+		if strings.Contains(m, s) {
+			return true
+		}
+	}
+	return false
+}
 
 func condition(o *unstructured.Unstructured, typ string) Condition {
 	conds, _, _ := unstructured.NestedSlice(o.Object, "status", "conditions")
