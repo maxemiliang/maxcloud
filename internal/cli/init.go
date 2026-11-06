@@ -127,6 +127,9 @@ app: %[1]s
 # A Postgres database (DATABASE_URL), backed up and restorable to a point in
 # time; queue functions need it:
 # db: true            # or {size: 2Gi, instances: 2}
+# The folder the app is built from and mcloud dev runs in, if it isn't this
+# one (e.g. the web app in worker/ of a repo whose root is a Go CLI):
+# source: worker
 `,
 	".github/workflows/deploy.yaml": `# Every push to main deploys this app to maxcloud (maxemiliang/maxcloud,
 # .github/workflows/run-deploy.yaml): builds the image, writes the

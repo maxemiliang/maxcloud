@@ -63,11 +63,15 @@ func (g *globals) clusterBuildPush(ctx context.Context, k *kube.Client, p *proje
 	if err != nil {
 		return "", nil, err
 	}
-	env, err := projectBuildEnv(filepath.Join(p.Dir, "project.toml"))
+	dir, err := p.sourceDir()
 	if err != nil {
 		return "", nil, err
 	}
-	src, err := sourceTar(p.Dir)
+	env, err := projectBuildEnv(filepath.Join(dir, "project.toml"))
+	if err != nil {
+		return "", nil, err
+	}
+	src, err := sourceTar(dir)
 	if err != nil {
 		return "", nil, err
 	}

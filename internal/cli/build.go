@@ -309,6 +309,7 @@ func cmdOutput(cmd *exec.Cmd) (string, error) {
 
 func buildCmd(g *globals) *cobra.Command {
 	var o ciOptions
+	var printContext bool
 	c := &cobra.Command{
 		Use:   "build",
 		Short: "Build the app's image and push it to the maxcloud registry",
@@ -317,6 +318,10 @@ buildpacks) and push it to the maxcloud registry,
 registry.gronblom.dev/<app>/<app>. mcloud is docker's credential helper
 for the registry while it builds, so there's no docker login.
 
+It builds the folder source: in maxcloud.yaml names (e.g. worker, when the
+repo's root is something else), else the folder maxcloud.yaml is in. The
+Dockerfile, if any, is looked for there.
+
 --ci is the deploy workflow (run-deploy.yaml): it pushes as the repo (GitHub
 Actions' OIDC token), writes the functions' manifests (--functions), pins
 the image by digest in the manifests and commits that. Outside CI it
@@ -324,6 +329,16 @@ pushes with an hour-long token of the app's push ServiceAccount and prints
 the image.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			if printContext {
+				// For the deploy workflow, which picks the builder (buildx or
+				// pack) by whether the build context has a Dockerfile.
+				dir, err := ciContext(o.context)
+				if err != nil {
+					return err
+				}
+				fmt.Fprintln(g.out, dir)
+				return nil
+			}
 			if o.ci {
 				return g.ciBuild(cmd.Context(), o)
 			}
@@ -345,10 +360,12 @@ the image.`,
 	}
 	f := c.Flags()
 	f.BoolVar(&o.ci, "ci", false, "the deploy workflow's build (GitHub Actions): build, push, generate, pin and commit")
-	f.StringVar(&o.context, "context", ".", "directory to build (--ci)")
+	f.StringVar(&o.context, "context", "", "directory to build (--ci; default: source: in maxcloud.yaml, else .)")
 	f.StringVar(&o.manifests, "manifests", "deploy/k8s", "the manifests directory Flux applies (--ci)")
 	f.StringVar(&o.image, "image", "app", "the image's name in the manifests, replaced by the built one (--ci)")
 	f.BoolVar(&o.functions, "functions", false, "a maxcloud functions app: write its functions' manifests (--ci)")
 	f.StringVar(&o.app, "app", "", "the app (default: maxcloud.yaml's)")
+	f.BoolVar(&printContext, "print-context", false, "print the directory --ci would build and exit")
+	_ = f.MarkHidden("print-context")
 	return c
 }

@@ -24,14 +24,21 @@ Queue functions need the app's database: db: true in maxcloud.yaml.
 
 The deploy workflow runs this on every push, from the image it built. Run it
 locally to see what a deploy would change: it asks the built app
-(npx maxcloud-functions --describe), so build the app first.`,
+(npx maxcloud-functions --describe, in source: from maxcloud.yaml), so
+build the app first.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			var data []byte
 			var err error
 			switch from {
 			case "":
-				data, err = describeLocal()
+				dir := "" // the current directory
+				if p, perr := loadProject(); perr == nil {
+					if dir, err = p.sourceDir(); err != nil {
+						return err
+					}
+				}
+				data, err = describeLocal(dir)
 			case "-":
 				data, err = io.ReadAll(g.in)
 			default:
@@ -77,9 +84,11 @@ locally to see what a deploy would change: it asks the built app
 	return c
 }
 
-// describeLocal asks the app in the current directory for its functions.
-func describeLocal() ([]byte, error) {
+// describeLocal asks the app in dir (source: in maxcloud.yaml) for its
+// functions.
+func describeLocal(dir string) ([]byte, error) {
 	cmd := exec.Command("npx", "--no-install", "maxcloud-functions", "--describe")
+	cmd.Dir = dir
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()
