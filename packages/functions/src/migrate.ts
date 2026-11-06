@@ -48,12 +48,6 @@ export interface MigrationEntry {
 const NAME = /^([0-9]+)_[A-Za-z0-9._-]+\.sql$/;
 
 /**
- * Reads the migrations in `dir`: its files ending in .sql, in name order.
- * Other files and subdirectories are left alone; a missing directory is no
- * migrations. Every .sql file's name must be a number, an underscore and a
- * description (0001_init.sql), the numbers all of one width.
- */
-/**
  * Whether dir is a drizzle-kit migrations folder: its files are named like
  * maxcloud's (0000_name.sql), but drizzle applies and records them itself.
  */
@@ -61,6 +55,17 @@ export function isDrizzleKitDir(dir: string): boolean {
   return existsSync(join(dir, "meta", "_journal.json"));
 }
 
+/** The names of the migrations migrate() would apply from dir: none for a drizzle-kit folder. */
+export function runtimeMigrations(dir: string): string[] {
+  return isDrizzleKitDir(dir) ? [] : loadMigrations(dir).map((m) => m.name);
+}
+
+/**
+ * Reads the migrations in `dir`: its files ending in .sql, in name order.
+ * Other files and subdirectories are left alone; a missing directory is no
+ * migrations. Every .sql file's name must be a number, an underscore and a
+ * description (0001_init.sql), the numbers all of one width.
+ */
 export function loadMigrations(dir: string): Migration[] {
   let entries;
   try {

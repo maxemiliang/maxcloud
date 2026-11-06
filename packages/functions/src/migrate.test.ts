@@ -10,7 +10,7 @@ import { join } from "node:path";
 import { randomBytes } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import pg from "pg";
-import { MIGRATIONS_LOCK_KEY, MIGRATIONS_TABLE, applyMigrations, loadMigrations, migrate, migrationStatus } from "./migrate.ts";
+import { MIGRATIONS_LOCK_KEY, MIGRATIONS_TABLE, applyMigrations, loadMigrations, migrate, migrationStatus, runtimeMigrations } from "./migrate.ts";
 
 const root = fileURLToPath(new URL("../../../testdata/migrate/", import.meta.url));
 const cases = JSON.parse(readFileSync(join(root, "cases.json"), "utf8")) as {
@@ -175,4 +175,6 @@ test("a drizzle-kit migrations folder is left to drizzle", async () => {
   // No DATABASE_URL needed: nothing is applied.
   assert.deepEqual(await migrate({ dir, url: "postgres://nowhere.invalid/x", log: (m) => logs.push(m) }), []);
   assert.match(logs.join("\n"), /drizzle-kit/);
+  // And describe doesn't list its files as ones the runtime applies.
+  assert.deepEqual(runtimeMigrations(dir), []);
 });
