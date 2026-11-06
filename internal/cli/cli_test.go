@@ -249,7 +249,51 @@ func TestSyncedFields(t *testing.T) {
 	if got := strings.Join(p.syncedFields(), ","); got != "domains" {
 		t.Errorf("got %s", got)
 	}
+	if got := strings.Join((&project{Deploy: "gitops"}).syncedFields(), ","); got != "deploy" {
+		t.Errorf("got %s", got)
+	}
 	if got := (&project{}).syncedFields(); len(got) != 0 {
 		t.Errorf("got %v", got)
+	}
+}
+
+// How a deploy deploys: maxcloud.yaml's deploy: when it has one, else the
+// entry's current mode; --direct switches only an app whose file is silent.
+func TestProjectTargetDeployMode(t *testing.T) {
+	direct := &registry.Entry{Name: "shop", Deploy: registry.DeployDirect}
+	gitops := &registry.Entry{Name: "shop", Repo: "o/shop"}
+	for _, c := range []struct {
+		name       string
+		file       string
+		base       *registry.Entry
+		flag       bool
+		wantDirect bool
+		wantErr    bool
+	}{
+		{"new app, no deploy:", "", nil, false, false, false},
+		{"switched to direct, no deploy:", "", direct, false, true, false},
+		{"gitops, no deploy:", "", gitops, false, false, false},
+		{"file says direct over a gitops entry", "direct", gitops, false, true, false},
+		{"file says gitops over a direct entry", "gitops", direct, false, false, false},
+		{"--direct, no deploy:", "", gitops, true, true, false},
+		{"--direct, file says direct", "direct", gitops, true, true, false},
+		{"--direct, file says gitops", "gitops", gitops, true, false, true},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			p := &project{App: "shop", Repo: "o/shop", Deploy: c.file}
+			e, err := p.target(c.base, c.flag)
+			if c.wantErr {
+				if err == nil {
+					t.Fatalf("no error, entry %+v", e)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if e.Direct() != c.wantDirect {
+				t.Errorf("direct = %v, want %v", e.Direct(), c.wantDirect)
+			}
+		})
 	}
 }

@@ -288,12 +288,13 @@ in the annotation `maxcloud.gronblom.dev/sync-error` and a Warning event.
 Entries in the homelab repo are left alone.
 
 `maxcloud.gronblom.dev/synced-fields` lists the entry's keys the file
-declares, sorted: from `cpu`, `memory`, `pods`, `buckets`, `db`, `dbSize`,
-`dbInstances` and `domains`. `quota: {cpu: 1}` declares `cpu`; `buckets: [...]`
-(an empty list too) declares `buckets`; `db` in any form (`true`, `false`
-or a map) declares all three database keys, since the file then owns the
-database setting. mcloud refuses to set these by hand: the next push would
-undo it. The annotation is set for each revision handled, and removed when
+declares, sorted: from `deploy`, `cpu`, `memory`, `pods`, `buckets`, `db`,
+`dbSize`, `dbInstances` and `domains`. `quota: {cpu: 1}` declares `cpu`;
+`buckets: [...]` (an empty list too) declares `buckets`; `db` in any form
+(`true`, `false` or a map) declares all three database keys, since the file
+then owns the database setting. `deploy:` is declared but not applied here:
+`mcloud deploy` switches the mode. mcloud refuses to set these by hand: the
+next push or deploy would undo it. The annotation is set for each revision handled, and removed when
 the revision has no `maxcloud.yaml`. A revision that fails to sync leaves
 it as it was.
 
@@ -478,6 +479,12 @@ or one before the oldest finished base backup is refused: the annotation
 is removed, the `Restore` condition (reason `Refused`) says why, and
 nothing is touched. A restore that goes ahead sets `Restore` to True
 (reason `Restored`) and `status.restoredTo`.
+
+If the `Cluster` is already gone when the annotation is set, the restore
+stops at that time too: the plan is written and the restore runs without
+the take-down. A time it can't reach is refused the same way (also when
+`recover-from` is set too, which wins), and the database then comes back
+as it would without it: its latest state.
 
 One gap: a time in the minute or two after an earlier restore, before the
 new generation's first base backup, can't be reached. The old

@@ -23,6 +23,9 @@ import (
 // runs once, a queue worker runs until SIGTERM. On SIGTERM it finishes what's
 // in flight and exits 0, so pods don't end in Error.
 //
+// Start calls os.Exit, so deferred calls in main don't run: register
+// cleanup with OnShutdown instead.
+//
 // Before it runs the function, it applies the app's pending SQL migrations
 // (see Migrations).
 //
@@ -99,9 +102,18 @@ func run(ctx context.Context, args []string, getenv func(string) string, stdout,
 		return 1
 	}
 
+	code := runFunction(ctx, f, *port, getenv, logger)
+	if !runShutdownHooks(ctx, logger) && code == 0 {
+		code = 1
+	}
+	return code
+}
+
+// runFunction runs f until it's done and returns the exit code.
+func runFunction(ctx context.Context, f *function, port string, getenv func(string) string, logger *log.Logger) int {
 	switch f.kind {
 	case kindHTTP:
-		if err := serveHTTP(ctx, f, ":"+*port, logger, nil); err != nil {
+		if err := serveHTTP(ctx, f, ":"+port, logger, nil); err != nil {
 			logger.Printf("%s: %v", f.name, err)
 			return 1
 		}
@@ -109,12 +121,7 @@ func run(ctx context.Context, args []string, getenv func(string) string, stdout,
 	case kindSchedule:
 		return runSchedule(ctx, f, logger)
 	default:
-		p, err := Pool(ctx)
-		if err != nil {
-			logger.Print(err)
-			return 1
-		}
-		if err := runWorker(ctx, f, workerConfig{pool: p, logf: logger.Printf}); err != nil {
+		if err := runWorker(ctx, f, workerConfig{url: getenv("DATABASE_URL"), logf: logger.Printf}); err != nil {
 			logger.Printf("%s: %v", f.name, err)
 			return 1
 		}

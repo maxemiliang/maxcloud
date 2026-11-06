@@ -63,10 +63,32 @@ func (p *project) entry(base *registry.Entry) registry.Entry {
 	return e
 }
 
+// target is the registry entry a deploy brings base to: p.entry, with
+// --direct (direct) switching an app whose maxcloud.yaml doesn't say how it
+// deploys. How the app deploys is maxcloud.yaml's deploy: when it has one,
+// else the entry's current mode (as mcloud apps set --deploy left it).
+func (p *project) target(base *registry.Entry, direct bool) (registry.Entry, error) {
+	q := *p
+	if direct {
+		if p.Deploy != "" && p.Deploy != registry.DeployDirect {
+			return registry.Entry{}, fmt.Errorf("--direct, but %s says deploy: %s: change it there", ProjectFile, p.Deploy)
+		}
+		q.Deploy = registry.DeployDirect
+	}
+	e := q.entry(base)
+	if err := e.Validate(); err != nil {
+		return registry.Entry{}, fmt.Errorf("%s: %w", ProjectFile, err)
+	}
+	return e, nil
+}
+
 // syncedFields are the registry keys maxcloud.yaml declares, which it owns
 // (the same rule as the controller's AppSync).
 func (p *project) syncedFields() []string {
 	var out []string
+	if p.Deploy != "" {
+		out = append(out, "deploy")
+	}
 	if q := p.Quota; q != nil {
 		if q.CPU != "" {
 			out = append(out, "cpu")
@@ -92,49 +114,50 @@ func (p *project) syncedFields() []string {
 }
 
 // syncApp registers the app from maxcloud.yaml, or brings its entry in line
-// with it. Returns whether the app was new. Switching between gitops and
-// direct asks first, unless yes.
-func (g *globals) syncApp(ctx context.Context, k *kube.Client, p *project, yes bool) (bool, error) {
+// with it (see target; direct is --direct). Returns the entry the app now
+// has, which says how it deploys, and whether the app was new. Switching
+// between gitops and direct asks first, unless yes.
+func (g *globals) syncApp(ctx context.Context, k *kube.Client, p *project, direct, yes bool) (*registry.Entry, bool, error) {
 	cur, err := k.GetRegistryEntry(ctx, p.App)
 	if err != nil {
-		return false, err
+		return nil, false, err
 	}
 	if cur != nil && cur.InGit {
-		g.UI().Note("%s is registered in the homelab repo; maxcloud.yaml's settings there win over this file", p.App)
-		return false, nil
+		g.UI().Note("%s is registered in the homelab repo; the settings there win over %s", p.App, ProjectFile)
+		return cur.Entry, false, nil
 	}
 	var base *registry.Entry
 	if cur != nil {
 		base = cur.Entry
 	}
-	e := p.entry(base)
-	if err := e.Validate(); err != nil {
-		return false, fmt.Errorf("%s: %w", ProjectFile, err)
+	e, err := p.target(base, direct)
+	if err != nil {
+		return nil, false, err
 	}
 	if cur == nil {
 		if err := g.checkNamespace(ctx, e.Name); err != nil {
-			return false, err
+			return nil, false, err
 		}
 		if err := k.PutRegistryEntry(ctx, &e); err != nil {
-			return false, err
+			return nil, false, err
 		}
 		g.UI().Success("Registered %s %s", g.UI().Bold(e.Name), g.UI().Dim("("+source(&e)+")"))
 		if err := k.SetSyncedFields(ctx, e.Name, p.syncedFields()); err != nil {
-			return false, err
+			return nil, false, err
 		}
 		if !e.Direct() {
 			g.UI().Hint("For Flux to read %s, the homelab's Flux GitHub App needs access to it (GitHub, Settings, Applications, the Flux app, Repository access).", e.Repo)
 		}
-		return true, nil
+		return &e, true, nil
 	}
 	if fields := p.syncedFields(); !slices.Equal(fields, cur.SyncedFields) {
 		if err := k.SetSyncedFields(ctx, e.Name, fields); err != nil {
-			return false, err
+			return nil, false, err
 		}
 	}
 	diff := diffEntries(base, &e)
 	if len(diff) == 0 {
-		return false, nil
+		return &e, false, nil
 	}
 	g.UI().Printf("%s Updating %s from %s", g.UI().Accent("↻"), g.UI().Bold(e.Name), ProjectFile)
 	for _, d := range diff {
@@ -145,9 +168,9 @@ func (g *globals) syncApp(ctx context.Context, k *kube.Client, p *project, yes b
 		if !yes {
 			ok, err := g.confirm("Switch it?")
 			if err != nil || !ok {
-				return false, orAborted(err)
+				return nil, false, orAborted(err)
 			}
 		}
 	}
-	return false, k.PutRegistryEntry(ctx, &e)
+	return &e, false, k.PutRegistryEntry(ctx, &e)
 }

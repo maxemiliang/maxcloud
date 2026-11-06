@@ -32,8 +32,9 @@ migrations/0002_add_orders.sql
 ```
 
 Each file is applied once, in name order, in its own transaction together
-with its row in the table `public.maxcloud_migrations` (name, SHA-256 checksum,
-time applied). A file that fails leaves nothing behind. Don't put `BEGIN`
+with its row in the table `maxcloud_migrations` (name, SHA-256 checksum,
+time applied): the one the connection's `search_path` finds, else a new
+one in its current schema, which is `public` on maxcloud. A file that fails leaves nothing behind. Don't put `BEGIN`
 or `COMMIT` in them, and statements that can't run in a transaction
 (`CREATE INDEX CONCURRENTLY`) can't be migrations. A file edited after it
 was applied stops every run until you put the change in a new file

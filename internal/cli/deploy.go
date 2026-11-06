@@ -33,7 +33,11 @@ The app's settings (quota, buckets, database, domains, deploy) come from
 maxcloud.yaml: the first deploy registers the app, later ones bring its
 registry entry in line. No commit to the homelab repo.
 
-A direct app (deploy: direct in maxcloud.yaml) is deployed without git:
+How the app deploys is maxcloud.yaml's deploy: (gitops or direct) when it
+has one. Without it, the app keeps the mode it has: gitops for a new app,
+or what --direct or mcloud apps set --deploy last switched it to.
+
+A direct app is deployed without git:
 mcloud builds the working tree, uncommitted changes included, pushes the
 image to the maxcloud registry (registry.gronblom.dev/<app>/<app>) with a
 short-lived token of the app's push ServiceAccount (nothing to log in to),
@@ -51,9 +55,6 @@ namespace, with the source streamed to it.`,
 				return err
 			}
 			name := p.App
-			if direct {
-				p.Deploy = "direct"
-			}
 			k, err := g.kube()
 			if err != nil {
 				return err
@@ -63,11 +64,13 @@ namespace, with the source streamed to it.`,
 			started := time.Now()
 			// The app's registry entry comes from maxcloud.yaml: registered on
 			// the first deploy, kept in line after that. No homelab commit.
-			created, err := g.syncApp(ctx, k, p, yes)
+			// How it deploys is the entry's: maxcloud.yaml's deploy: when it
+			// has one, else what the app was last switched to.
+			e, created, err := g.syncApp(ctx, k, p, direct, yes)
 			if err != nil {
 				return err
 			}
-			if p.Deploy == "direct" {
+			if e.Direct() {
 				if created {
 					if err := g.waitNamespace(ctx, name, 3*time.Minute); err != nil {
 						return err
@@ -133,7 +136,7 @@ namespace, with the source streamed to it.`,
 	f := c.Flags()
 	f.BoolVar(&rebuild, "rebuild", false, "run the deploy workflow again even with nothing new to push")
 	f.BoolVar(&noPush, "no-push", false, "don't push; follow the deploy of what's already pushed")
-	f.BoolVar(&direct, "direct", false, "build here and apply, without git, as deploy: direct in maxcloud.yaml does; switches a GitOps app to direct (asks first)")
+	f.BoolVar(&direct, "direct", false, "switch the app to direct (asks first) and deploy it: build here and apply, without git (refused if maxcloud.yaml says deploy: gitops)")
 	f.DurationVar(&timeout, "timeout", 15*time.Minute, "give up following after this long")
 	f.StringVar(&g.buildMode, "build", "auto", "direct apps: where to build: local (docker, pack), cluster (buildpacks in the app's namespace, no docker needed), or auto (local if docker is installed)")
 	f.BoolVarP(&yes, "yes", "y", false, "don't ask before switching between gitops and direct (deploy: in maxcloud.yaml)")

@@ -61,3 +61,12 @@ func TestKV(t *testing.T) {
 		t.Error("empty key accepted")
 	}
 }
+
+// Like the TS SDK's kv.list: 0 or less is the default 100; at most 1000.
+func TestKVListLimit(t *testing.T) {
+	for asked, want := range map[int]int{0: 100, -5: 100, 1: 1, 250: 250, 5000: 1000} {
+		if got := kvListLimit(asked); got != want {
+			t.Errorf("limit %d: %d, want %d", asked, got, want)
+		}
+	}
+}

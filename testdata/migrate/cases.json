@@ -1,6 +1,6 @@
 {
   "_": "Shared by every migration runner: mcloud and the Go SDK (internal/migrate), and the TypeScript SDK (packages/functions/src/migrate.ts). Each test loads the directories below and applies the steps in order to one empty database.",
-  "table": "public.maxcloud_migrations",
+  "table": "maxcloud_migrations",
   "lockKey": "7881713191291417956",
   "load": [
     {

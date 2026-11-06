@@ -76,13 +76,15 @@ var (
 	poolErr  error
 )
 
+var errNoDatabaseURL = errors.New("functions: DATABASE_URL isn't set: the app has no Postgres database (add db: true to its maxcloud.yaml), or this isn't running on maxcloud (mcloud dev sets it locally)")
+
 // Pool is the app's database: the connection pool on $DATABASE_URL, made on
 // first use and shared with Enqueue and the KV functions.
 func Pool(ctx context.Context) (*pgxpool.Pool, error) {
 	poolOnce.Do(func() {
 		url := os.Getenv("DATABASE_URL")
 		if url == "" {
-			poolErr = errors.New("functions: DATABASE_URL isn't set: the app has no Postgres database (add db: true to its maxcloud.yaml), or this isn't running on maxcloud (mcloud dev sets it locally)")
+			poolErr = errNoDatabaseURL
 			return
 		}
 		pool, poolErr = pgxpool.New(ctx, url)
@@ -213,13 +215,33 @@ func prune(ctx context.Context, db DB, days int) error {
 }
 
 type workerConfig struct {
+	// pool is for claiming and finishing jobs, and LISTEN. Without one,
+	// runWorker opens its own on url (see workerPool).
 	pool  *pgxpool.Pool
+	url   string
 	grace time.Duration // after stop, how long jobs in hand get to finish
 	poll  time.Duration
 	logf  func(format string, args ...any)
 }
 
 var errShutdown = errors.New("worker shutting down")
+
+// workerPool opens a queue worker's own pool, as the TS SDK does: a
+// connection per slot for claiming and finishing jobs, and one for LISTEN.
+// The handlers use the app's Pool, so a slot never waits for a connection
+// a handler holds, whatever the concurrency.
+func workerPool(ctx context.Context, url string, concurrency int) (*pgxpool.Pool, error) {
+	if url == "" {
+		return nil, errNoDatabaseURL
+	}
+	cfg, err := pgxpool.ParseConfig(url)
+	if err != nil {
+		return nil, err
+	}
+	cfg.MaxConns = int32(max(concurrency, 1) + 1)
+	cfg.MinConns = 0
+	return pgxpool.NewWithConfig(ctx, cfg)
+}
 
 // runWorker works on f's queue until stop is done, then lets the jobs in
 // hand finish (or puts them back after the grace period) and returns.
@@ -239,9 +261,17 @@ func runWorker(stop context.Context, f *function, cfg workerConfig) error {
 	if cfg.logf == nil {
 		cfg.logf = log.Printf
 	}
-	db := cfg.pool
 	// Database writes still have to happen while stopping.
 	bg := context.WithoutCancel(stop)
+	db := cfg.pool
+	if db == nil {
+		p, err := workerPool(bg, cfg.url, concurrency)
+		if err != nil {
+			return err
+		}
+		defer p.Close()
+		db = p
+	}
 
 	if err := ensureSchema(bg, db); err != nil {
 		return err

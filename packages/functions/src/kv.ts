@@ -27,10 +27,15 @@ export interface KVSetOptions {
   client?: Queryable;
 }
 
+/** list's page size: 0 or less (or none) is the default 100, as in the Go SDK; at most 1000. */
+export function listLimit(limit: number | undefined): number {
+  return !limit || limit <= 0 ? 100 : Math.min(Math.floor(limit), 1000) || 1;
+}
+
 export interface KVListOptions {
   /** Only keys starting with this. */
   prefix?: string;
-  /** At most this many keys (default 100, max 1000). */
+  /** At most this many keys (default 100, also for 0; max 1000). */
   limit?: number;
   /** Continue after a previous list's cursor. */
   cursor?: string;
@@ -126,7 +131,7 @@ export const kv = {
 
   /** Keys in order, optionally under a prefix, a page at a time. */
   async list(options: KVListOptions = {}): Promise<KVList> {
-    const limit = Math.min(Math.max(options.limit ?? 100, 1), 1000);
+    const limit = listLimit(options.limit);
     const db = await pool();
     const r = await db.query(
       `SELECT key FROM ${KV_TABLE}

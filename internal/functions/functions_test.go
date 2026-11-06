@@ -339,3 +339,15 @@ func TestContainerOptionsOnScheduleAndQueue(t *testing.T) {
 		t.Error("a volume on /tmp for a schedule: want an error")
 	}
 }
+
+// The TS SDK's backoffSeconds is any number, and the Go SDK's Backoff any
+// duration: a fractional one parses.
+func TestParseFractionalBackoff(t *testing.T) {
+	d, err := Parse([]byte(strings.Replace(desc, `"backoffSeconds":10`, `"backoffSeconds":1.5`, 1)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := d.Functions[2].BackoffSeconds; got != 1.5 {
+		t.Errorf("backoffSeconds = %v", got)
+	}
+}

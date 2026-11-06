@@ -5,6 +5,8 @@ import pg from "pg";
 import { db } from "../db.ts";
 import { kv } from "../kv.ts";
 import { enqueue, TABLE } from "../queue.ts";
+import { migrate } from "../migrate.ts";
+import { fileURLToPath } from "node:url";
 import { testDatabase, withSearchPath } from "./database.ts";
 
 const url = process.env.TEST_DATABASE_URL;
@@ -91,4 +93,18 @@ test("drop() puts back the pool db() had", { skip }, async () => {
   assert.equal(db(), outer.pool);
   assert.equal(process.env.DATABASE_URL, outer.url);
   await outer.drop();
+});
+
+test("migrate() applies the migrations in every test database, not just the first", { skip }, async () => {
+  const dir = fileURLToPath(new URL("../../../../testdata/migrate/v1/", import.meta.url));
+  for (let i = 0; i < 2; i++) {
+    const t = await testDatabase();
+    try {
+      assert.deepEqual(await migrate({ dir }), ["0001_init.sql", "0002_items.sql"], `test database ${i + 1}`);
+      const tables = await t.pool.query("SELECT table_name FROM information_schema.tables WHERE table_schema = $1 AND table_name = 'maxcloud_migrations'", [t.schema]);
+      assert.equal(tables.rowCount, 1, "the table that records them is in the schema");
+    } finally {
+      await t.drop();
+    }
+  }
 });

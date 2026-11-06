@@ -200,10 +200,11 @@ func appsSetCmd(g *globals) *cobra.Command {
 		Long: `Change fields of a registered app. Only the flags you pass change; pass an
 empty value (--cpu "") to go back to the default.
 
-An app's maxcloud.yaml owns what it declares (quota, buckets, db,
-domains): change those in the file. This refuses them, since the next push would undo them.
-Use it for what the file leaves out, for apps without one, and to switch
---deploy between gitops and direct.`,
+An app's maxcloud.yaml owns what it declares (deploy, quota, buckets, db,
+domains): change those in the file. This refuses them, since the next push
+or deploy would undo them. Use it for what the file leaves out, for apps
+without one, and to switch --deploy between gitops and direct when the file
+has no deploy:.`,
 		Example: `  mcloud apps set shop --cpu 500m --memory 2Gi
   mcloud apps set shop --buckets uploads,assets:public
   mcloud apps set shop --db --db-size 2Gi`,
@@ -218,7 +219,7 @@ Use it for what the file leaves out, for apps without one, and to switch
 				}
 			}
 			if len(changed) == 0 {
-				return errors.New("nothing to change: pass --cpu, --memory, --pods, --repo, --path, --branch, --deploy, --buckets, --db or --domains")
+				return errors.New("nothing to change: pass --cpu, --memory, --pods, --repo, --path, --branch, --deploy, --buckets, --db, --db-size, --db-instances or --domains")
 			}
 			apply := func(e *registry.Entry) {
 				fields := map[string]*string{"repo": &e.Repo, "path": &e.Path, "branch": &e.Branch, "cpu": &e.CPU, "memory": &e.Memory, "pods": &e.Pods, "deploy": &e.Deploy, "buckets": &e.Buckets, "db": &e.DB, "db-instances": &e.DBInstances, "db-size": &e.DBSize, "domains": &e.Domains}
@@ -343,7 +344,7 @@ func (g *globals) explainSwitch(e *registry.Entry) {
 
 // entryKeys maps mcloud apps set's flags to registry keys, for the fields
 // an app's maxcloud.yaml can own.
-var entryKeys = map[string]string{"cpu": "cpu", "memory": "memory", "pods": "pods", "buckets": "buckets", "db": "db", "db-size": "dbSize", "db-instances": "dbInstances", "domains": "domains"}
+var entryKeys = map[string]string{"deploy": "deploy", "cpu": "cpu", "memory": "memory", "pods": "pods", "buckets": "buckets", "db": "db", "db-size": "dbSize", "db-instances": "dbInstances", "domains": "domains"}
 
 func appsDeleteCmd(g *globals) *cobra.Command {
 	var cf confirmFlags

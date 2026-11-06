@@ -141,11 +141,12 @@ Put SQL migrations in `migrations/` at the app's root (next to
 `0001_init.sql`, `0002_add_orders.sql`. Before `maxcloud-functions` runs a
 function, it applies the ones the database hasn't had: each once, in name
 order, in its own transaction, recorded in the table
-`public.maxcloud_migrations`. Only one process applies them at a time; the
-others wait, so no function starts on an older schema than its code
-expects. A migration that fails, a file edited after it was applied, or
-migrations without a `DATABASE_URL` stop the process (exit 1). A
-migration the database has but the folder doesn't is left alone.
+`maxcloud_migrations` (the one the connection's `search_path` finds, else a
+new one in its current schema: `public` on maxcloud). Only one process
+applies them at a time; the others wait, so no function starts on an older
+schema than its code expects. A migration that fails, a file edited after it
+was applied, or migrations without a `DATABASE_URL` stop the process (exit
+1). A migration the database has but the folder doesn't is left alone.
 `MAXCLOUD_MIGRATE=0` in the environment turns it off.
 
 A `migrations/` folder made by drizzle-kit (it has `meta/_journal.json`)
@@ -239,7 +240,7 @@ const { keys, cursor } = await kv.list({ prefix: "session:", limit: 100 });
 ```
 
 `delete` resolves to whether the key was there. `list` gives keys in
-order, `limit` at a time (default 100, at most 1000), with a `cursor` to
+order, `limit` at a time (default 100, also for 0; at most 1000), with a `cursor` to
 pass back while there are more. `set` with `undefined` throws; use
 `delete`.
 
@@ -290,8 +291,8 @@ connecting to things.
 
 `onShutdown(fn)` runs `fn` after SIGTERM, once the requests or jobs in
 flight are done and before the process exits: close a pool, flush logs.
-Hooks run in order, for at most 10 seconds together; one that fails or
-runs over makes the process exit 1.
+Hooks run in order, for at most 10 seconds together; if one throws, or
+they're still running after 10 seconds, the process exits 1.
 
 A bundled server can be its own entrypoint instead of package.json's
 `main` (`@max-cloud/nuxt` builds Nuxt this way): `start(exports)` does what
@@ -369,7 +370,7 @@ before(async () => { if (!skip) t = await testDatabase(); });
 after(() => t?.drop());
 
 test("signup", { skip }, async () => {
-  await db().query("CREATE TABLE users (email text PRIMARY KEY)"); // or your migrations, below
+  await db().query("CREATE TABLE users (email text PRIMARY KEY)"); // or: await migrate()
   await kv.set("welcome", true);
   assert.equal(await kv.get("welcome"), true);
 });
@@ -385,15 +386,12 @@ set -x TEST_DATABASE_URL postgres://postgres:test@127.0.0.1:5433/postgres
 Only the schema is on the search path, not `public`: a table your test
 didn't create there doesn't exist, and an extension installed in `public`
 is only reachable as `public.<name>`. `t.url`, `t.pool` and `t.schema` are
-there for your own connections. `testDatabase({ use: false })` makes the
+there for your own connections. `migrate()` applies the app's migrations
+into the schema (it uses `DATABASE_URL`), and records them in the schema's
+own `maxcloud_migrations`, so every test database gets them all.
+`testDatabase({ use: false })` makes the
 schema without touching `db()` or `DATABASE_URL`. A schema left behind by a
 crashed run can be dropped by hand; they all start with `maxcloud_test_`.
-
-To set up a schema from `migrations/`, run the files yourself:
-`for (const m of loadMigrations("migrations")) await t.pool.query(m.sql)`.
-`migrate()` doesn't fit here: it records what it applied in
-`public.maxcloud_migrations`, outside the test schema, so the next run
-finds them applied and skips them.
 
 ### In-memory buckets
 

@@ -21,7 +21,11 @@ The app's settings (quota, buckets, database, domains, deploy) come from
 maxcloud.yaml: the first deploy registers the app, later ones bring its
 registry entry in line. No commit to the homelab repo.
 
-A direct app (deploy: direct in maxcloud.yaml) is deployed without git:
+How the app deploys is maxcloud.yaml's deploy: (gitops or direct) when it
+has one. Without it, the app keeps the mode it has: gitops for a new app,
+or what --direct or mcloud apps set --deploy last switched it to.
+
+A direct app is deployed without git:
 mcloud builds the working tree, uncommitted changes included, pushes the
 image to the maxcloud registry (registry.gronblom.dev/&lt;app&gt;/&lt;app&gt;) with a
 short-lived token of the app's push ServiceAccount (nothing to log in to),
@@ -41,7 +45,7 @@ Flags:
 | Flag | Default | |
 | --- | --- | --- |
 | `--build` string | `auto` | direct apps: where to build: local (docker, pack), cluster (buildpacks in the app's namespace, no docker needed), or auto (local if docker is installed) |
-| `--direct` |  | build here and apply, without git, as deploy: direct in maxcloud.yaml does; switches a GitOps app to direct (asks first) |
+| `--direct` |  | switch the app to direct (asks first) and deploy it: build here and apply, without git (refused if maxcloud.yaml says deploy: gitops) |
 | `--no-push` |  | don't push; follow the deploy of what's already pushed |
 | `--rebuild` |  | run the deploy workflow again even with nothing new to push |
 | `--timeout` duration | `15m0s` | give up following after this long |

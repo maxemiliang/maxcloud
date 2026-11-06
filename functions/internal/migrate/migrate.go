@@ -1,6 +1,6 @@
 // Package migrate applies an app's SQL migrations: the files in its
 // migrations directory, each once, in name order, recorded in the table
-// public.maxcloud_migrations.
+// maxcloud_migrations.
 //
 // This file is the same in mcloud (internal/migrate) and in the Go SDK
 // (functions/internal/migrate); a test in mcloud keeps the two identical.
@@ -28,8 +28,11 @@ import (
 const (
 	// Dir is where an app keeps its migrations, next to maxcloud.yaml.
 	Dir = "migrations"
-	// Table records the applied migrations.
-	Table = "public.maxcloud_migrations"
+	// Table records the applied migrations. It isn't schema-qualified: it
+	// is the one the connection's search_path finds (public.maxcloud_migrations
+	// on a default connection), and a new one goes in the connection's
+	// current schema, next to the app's own tables (a test schema's own).
+	Table = "maxcloud_migrations"
 	// LockKey is the session advisory lock a run holds while it applies
 	// migrations: the ASCII bytes of "maxcloud".
 	LockKey int64 = 0x6d6178636c6f7564
@@ -115,10 +118,17 @@ type record struct {
 	at       time.Time
 }
 
+// tableExists reports whether the search_path finds the table.
+func tableExists(ctx context.Context, conn *pgx.Conn) (bool, error) {
+	var exists bool
+	err := conn.QueryRow(ctx, `SELECT to_regclass($1) IS NOT NULL`, Table).Scan(&exists)
+	return exists, err
+}
+
 // applied reads the table; no table is nothing applied.
 func applied(ctx context.Context, conn *pgx.Conn) (map[string]record, error) {
-	var exists bool
-	if err := conn.QueryRow(ctx, `SELECT to_regclass($1) IS NOT NULL`, Table).Scan(&exists); err != nil {
+	exists, err := tableExists(ctx, conn)
+	if err != nil {
 		return nil, err
 	}
 	out := map[string]record{}
@@ -223,8 +233,15 @@ func Apply(ctx context.Context, conn *pgx.Conn, files []File, log func(string)) 
 	}
 	defer conn.Exec(context.WithoutCancel(ctx), `SELECT pg_advisory_unlock($1)`, LockKey)
 
-	if _, err := conn.Exec(ctx, createTable); err != nil {
-		return nil, fmt.Errorf("creating %s: %w", Table, err)
+	// Only when the search_path finds none: CREATE TABLE IF NOT EXISTS
+	// would make a second, empty one in an earlier schema (a "$user"
+	// schema made after the app first migrated into public).
+	if exists, err := tableExists(ctx, conn); err != nil {
+		return nil, err
+	} else if !exists {
+		if _, err := conn.Exec(ctx, createTable); err != nil {
+			return nil, fmt.Errorf("creating %s: %w", Table, err)
+		}
 	}
 	// Another run may have applied some while this one waited.
 	if done, err = applied(ctx, conn); err != nil {

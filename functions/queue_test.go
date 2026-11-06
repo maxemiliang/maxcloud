@@ -269,3 +269,74 @@ func TestWorkerTimeout(t *testing.T) {
 		t.Errorf("%+v", r)
 	}
 }
+
+// A worker's slots claim and finish jobs on a pool of their own (one
+// connection each, and one for LISTEN), not the app's: handlers holding
+// all of the app's connections don't stop the other slots from claiming.
+func TestWorkerHasItsOwnPool(t *testing.T) {
+	p := testPool(t)
+	cfg, err := pgxpool.ParseConfig(os.Getenv("TEST_DATABASE_URL"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.MaxConns = 4 // the app's pool on a pod with up to 4 CPUs
+	app, err := pgxpool.NewWithConfig(context.Background(), cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer app.Close()
+	q := queueName()
+	var wg sync.WaitGroup
+	wg.Add(4)
+	all := make(chan struct{})
+	go func() { wg.Wait(); close(all) }()
+	f := &function{name: "w", kind: kindQueue, queue: q, opts: options{concurrency: 4},
+		job: func(ctx context.Context, j *Job) error {
+			c, err := app.Acquire(ctx)
+			if err != nil {
+				return err
+			}
+			defer c.Release()
+			wg.Done()
+			select {
+			case <-all:
+			case <-ctx.Done():
+			}
+			return nil
+		}}
+	stop, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		done <- runWorker(stop, f, workerConfig{url: os.Getenv("TEST_DATABASE_URL"), poll: 50 * time.Millisecond, grace: 100 * time.Millisecond, logf: quiet})
+	}()
+	for i := range 4 {
+		if _, err := Enqueue(context.Background(), q, i, In(p)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	select {
+	case <-all:
+	case <-time.After(5 * time.Second):
+		t.Error("the 4 handlers were never in flight together")
+	}
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestWorkerPoolSize(t *testing.T) {
+	for _, c := range []struct{ concurrency, want int }{{0, 2}, {1, 2}, {10, 11}} {
+		p, err := workerPool(context.Background(), "postgres://u@127.0.0.1:1/db?pool_max_conns=3", c.concurrency)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := p.Config().MaxConns; int(got) != c.want {
+			t.Errorf("concurrency %d: %d connections, want %d", c.concurrency, got, c.want)
+		}
+		p.Close()
+	}
+	if _, err := workerPool(context.Background(), "", 1); err == nil {
+		t.Error("no error without DATABASE_URL")
+	}
+}

@@ -54,12 +54,12 @@ type describedSchedule struct {
 
 type describedQueue struct {
 	describedBase
-	Queue          string `json:"queue"`
-	Concurrency    int    `json:"concurrency"`
-	MaxInstances   int    `json:"maxInstances"`
-	MaxAttempts    int    `json:"maxAttempts"`
-	BackoffSeconds int    `json:"backoffSeconds"`
-	BacklogQuery   string `json:"backlogQuery"`
+	Queue          string  `json:"queue"`
+	Concurrency    int     `json:"concurrency"`
+	MaxInstances   int     `json:"maxInstances"`
+	MaxAttempts    int     `json:"maxAttempts"`
+	BackoffSeconds float64 `json:"backoffSeconds"`
+	BacklogQuery   string  `json:"backlogQuery"`
 }
 
 func strPtr(s string) *string {
@@ -123,7 +123,7 @@ func describe() description {
 			d.Functions = append(d.Functions, describedSchedule{base, f.schedule, or(o.timeZone, "UTC"), o.retries})
 		case kindQueue:
 			base.TimeoutSeconds = f.jobTimeout()
-			d.Functions = append(d.Functions, describedQueue{base, f.queue, or(o.concurrency, 1), or(o.maxInstances, 3), or(o.maxAttempts, 5), int(or(o.backoff, defaultBackoff).Seconds()), BacklogQuery(f.queue)})
+			d.Functions = append(d.Functions, describedQueue{base, f.queue, or(o.concurrency, 1), or(o.maxInstances, 3), or(o.maxAttempts, 5), or(o.backoff, defaultBackoff).Seconds(), BacklogQuery(f.queue)})
 		}
 	}
 	return d

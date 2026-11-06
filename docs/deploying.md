@@ -61,8 +61,9 @@ the database never is.
 
 What you give up: nothing is in git, so a cluster rebuild doesn't bring a
 direct app back (run `mcloud deploy` again), and there's no history to
-revert to. Use GitOps for anything that matters: remove `deploy: direct`
-from `maxcloud.yaml` and `mcloud deploy`, which asks before it switches.
+revert to. Use GitOps for anything that matters: change `maxcloud.yaml` to
+`deploy: gitops` and `mcloud deploy`, which asks before it switches.
+(Removing the line keeps the app direct.)
 
 `image:` in `maxcloud.yaml` pushes a local build somewhere else instead
 (log in to it yourself); the cluster then needs to be able to pull from

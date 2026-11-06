@@ -586,6 +586,53 @@ func TestRestoreToRefused(t *testing.T) {
 	}
 }
 
+// restore-to set while the Cluster is already gone: the restore stops at
+// that time, not at the latest state.
+func TestRestoreToWithTheClusterGone(t *testing.T) {
+	e := readyDB(t)
+	e.deleteCluster()
+	e.annotate(v1.RestoreToAnnotation, "2026-11-05T10:30:00Z")
+	e.reconcileDB()
+	c := e.cluster()
+	if method, from := bootstrapOf(c); method != "recovery" || from != "db-1" {
+		t.Errorf("bootstrap = %s from %q", method, from)
+	}
+	if got := targetOf(c); got != "2026-11-05T10:30:00Z" {
+		t.Errorf("targetTime = %q, want the annotation's", got)
+	}
+	if got := clusterServerName(c); got != "db-2" {
+		t.Errorf("serverName = %q", got)
+	}
+	db := e.db()
+	if _, ok := db.Annotations[v1.RestoreToAnnotation]; ok {
+		t.Error("annotation not removed")
+	}
+	if db.Status.RestoredTo == nil || !db.Status.RestoredTo.Time.Equal(time.Date(2026, 11, 5, 10, 30, 0, 0, time.UTC)) {
+		t.Errorf("restoredTo = %v", db.Status.RestoredTo)
+	}
+}
+
+// A restore-to it can't do, with the Cluster gone: refused visibly, and the
+// database comes back as it would without it (the latest state).
+func TestRestoreToRefusedWithTheClusterGone(t *testing.T) {
+	e := readyDB(t)
+	e.deleteCluster()
+	e.annotate(v1.RestoreToAnnotation, "2026-11-05T06:00:00Z") // before the first backup
+	e.reconcileDB()
+	db := e.db()
+	if c := condition(db, "Restore"); c == nil || c.Status != metav1.ConditionFalse || c.Reason != "Refused" {
+		t.Fatalf("Restore = %+v", c)
+	}
+	if _, ok := db.Annotations[v1.RestoreToAnnotation]; ok {
+		t.Error("annotation left behind")
+	}
+	e.reconcileDB()
+	c := e.cluster()
+	if _, from := bootstrapOf(c); from != "db-1" || targetOf(c) != "" {
+		t.Errorf("bootstrap from %q to %q, want the latest of db-1", from, targetOf(c))
+	}
+}
+
 func TestParseBackupInfo(t *testing.T) {
 	info := parseBackupInfo([]byte("backup_label=None\nstatus=DONE\nend_time=2026-11-05 07:44:41.123456+00:00\n"))
 	if info["status"] != "DONE" {

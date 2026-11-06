@@ -24,16 +24,19 @@ server (VS Code's YAML extension, for one) completes and checks the file.
 `mcloud deploy` applies the whole file to the app's registry entry. What
 it leaves out stays as it is.
 
-`quota`, `buckets`, `db` and `domains` are the file's: once it declares
-one, `mcloud apps set` refuses to change it, since the next push would undo
-it. For a GitOps app a push applies them too, without mcloud: the
-controller reads `maxcloud.yaml` at the repo's root from Flux's copy of the
-repo.
+`deploy`, `quota`, `buckets`, `db` and `domains` are the file's: once it
+declares one, `mcloud apps set` refuses to change it, since the next push
+or deploy would undo it. For a GitOps app a push applies `quota`,
+`buckets`, `db` and `domains` too, without mcloud: the controller reads
+`maxcloud.yaml` at the repo's root from Flux's copy of the repo.
 
-`deploy`, `repo`, `path` and `branch` take effect on the next
-`mcloud deploy` only, and `mcloud apps set` can still change them.
-Changing `deploy:` switches the app between GitOps and direct, which
-`mcloud deploy` asks about first. `source` and `image` are only read by
+`deploy` takes effect on the next `mcloud deploy` only. Changing it
+switches the app between GitOps and direct, which `mcloud deploy` asks
+about first. Without `deploy:`, the app keeps the mode it has: GitOps for
+a new app, or what `mcloud deploy --direct` or `mcloud apps set --deploy`
+last switched it to. `repo`, `path` and `branch` also take effect on the
+next `mcloud deploy` only, and `mcloud apps set` can still change them.
+`source` and `image` are only read by
 mcloud when it builds. The deploy workflow `mcloud init` writes runs on
 pushes to `main`: with another `branch:`, change its trigger too.
 

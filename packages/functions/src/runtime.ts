@@ -6,7 +6,7 @@ import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { isFunction, type MaxcloudFunction, type ScheduleFunction } from "./define.ts";
 import { serveHttp } from "./http.ts";
-import { MIGRATIONS_DIR, loadMigrations } from "./migrate.ts";
+import { MIGRATIONS_DIR, runtimeMigrations } from "./migrate.ts";
 import { backlogQuery, runWorker } from "./queue.ts";
 
 /** A Kubernetes-safe name for an export: resizeImage -> resize-image. */
@@ -48,10 +48,10 @@ export const DESCRIBE_TAG = "maxcloud:describe:";
 
 /**
  * What `--describe` prints, with every default filled in. `migrations`
- * (default: the ones in ./migrations) are the files the runtime applies
+ * (default: the ones in ./migrations, none for a drizzle-kit folder) are the files the runtime applies
  * when it starts, so mcloud can tell when the image doesn't have them.
  */
-export function describe(found: Found[], migrations: string[] = loadMigrations(resolve(MIGRATIONS_DIR)).map((m) => m.name)) {
+export function describe(found: Found[], migrations: string[] = runtimeMigrations(resolve(MIGRATIONS_DIR))) {
   return {
     sdk: "@max-cloud/functions",
     version: packageVersion(),

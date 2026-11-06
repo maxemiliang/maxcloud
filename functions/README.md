@@ -66,7 +66,7 @@ answers 500.
 | `TimeZone(tz)` | schedule | UTC |
 | `Retries(n)` | schedule | 0 |
 | `MaxAttempts(n)` | queue | 5 |
-| `Backoff(d)` | queue: first retry's delay, doubled each time | 10s |
+| `Backoff(d)` | queue: first retry's delay, doubled each time (fractions of a second too) | 10s |
 | `Proxied()` | HTTP: the public hostname behind Cloudflare (WAF, caching, Access); needs `Public()` | off |
 | `HealthPath(p)` | HTTP: a path that answers 2xx when an instance can take requests (readiness, and a liveness probe that restarts a stuck one) | none |
 | `MemoryLimit(q)` | all: memory above `Memory` (the request), for spikes | `Memory` |
@@ -102,6 +102,10 @@ SDK creates (`maxcloud_jobs`).
 - **Delay a job** with `functions.Delay(d)`.
 - **Cleanup:** a worker deletes jobs that finished more than 7 days ago
   when it starts. Failed jobs stay, with the error in `last_error`.
+- **Connections:** a worker claims and finishes jobs on a pool of its own,
+  `Concurrency(n)` + 1 connections (one is its `LISTEN`). Handlers use
+  `functions.Pool`, which pgx sizes to max(4, CPUs): with a high
+  concurrency, handlers wait for each other there, not for the worker.
 
 ## Database
 
@@ -136,8 +140,9 @@ func main() {
 
 Before `Start` runs a function, it applies the ones the database hasn't
 had: each once, in name order, in its own transaction, recorded in the
-table `public.maxcloud_migrations`. Only one process applies them at a
-time; the others wait, so no function starts on an older schema than its
+table `maxcloud_migrations` (the one the connection's `search_path` finds,
+else a new one in its current schema: `public` on maxcloud). Only one
+process applies them at a time; the others wait, so no function starts on an older schema than its
 code expects. A migration that fails, a file edited after it was applied,
 or migrations without a `$DATABASE_URL` stop the process (exit 1). A
 migration the database has but the binary doesn't is left alone.
@@ -226,7 +231,22 @@ reads it, with an error that says how to set it when it's missing.
 First it applies the app's pending migrations (see Migrations). On SIGTERM
 an HTTP server or worker finishes what's in flight (up to 25 seconds) and
 exits 0; a scheduled run's `ctx` is cancelled. `Start` doesn't return: it
-exits the process, so deferred calls in `main` don't run.
+exits the process, so deferred calls in `main` don't run. Put cleanup in
+`functions.OnShutdown` instead: it runs after the function stops (after
+SIGTERM, once what was in flight is done; after a schedule's run) and
+before the process exits.
+
+```go
+functions.OnShutdown(func(ctx context.Context) error {
+	return tracer.Shutdown(ctx) // close a pool, flush logs
+})
+```
+
+Hooks run in the order they were registered, for at most 10 seconds
+together (`ctx` ends then). One that fails (an error or a panic) is logged
+and the rest still run. If one failed, or they're still running after 10
+seconds, the process exits 1. The TypeScript SDK's `onShutdown` works the
+same way.
 
 With `--describe` it prints the registered functions, their settings and
 the embedded migrations as JSON instead. With `MAXCLOUD_DESCRIBE=1` in the
