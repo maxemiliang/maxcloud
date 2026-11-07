@@ -23,11 +23,26 @@ test("requests and responses go through intact", async (t) => {
   assert.deepEqual(res.headers.getSetCookie(), ["a=1", "b=2"]);
 });
 
-test("the URL uses the forwarded scheme and host", async (t) => {
+test("the URL is the Host header with the forwarded scheme", async (t) => {
   const s = await serveHttp(onRequest((req) => new Response(req.url)), 0, quiet);
   t.after(() => s.close(0));
-  const res = await fetch(`http://127.0.0.1:${s.port}/x`, { headers: { "x-forwarded-proto": "https", "x-forwarded-host": "web-shop.gronblom.dev" } });
-  assert.equal(await res.text(), "https://web-shop.gronblom.dev/x");
+  const get = (headers: Record<string, string>) =>
+    new Promise<string>((resolve, reject) => {
+      request({ host: "127.0.0.1", port: s.port, path: "/x?y=1", headers }, (res) => {
+        let body = "";
+        res.on("data", (c) => (body += c)).on("end", () => resolve(body));
+      }).on("error", reject).end();
+    });
+  assert.equal(await get({ host: "web--shop.gronblom.dev", "x-forwarded-proto": "https" }), "https://web--shop.gronblom.dev/x?y=1");
+  // A client's X-Forwarded-Host reaches the app through Cloudflare and
+  // Traefik: it mustn't decide the URL.
+  assert.equal(
+    await get({ host: "web--shop.gronblom.dev", "x-forwarded-proto": "https", "x-forwarded-host": "evil.example" }),
+    "https://web--shop.gronblom.dev/x?y=1",
+  );
+  assert.equal(await get({ host: "paja.lankkupelit.fi", "x-forwarded-proto": "https,http" }), "https://paja.lankkupelit.fi/x?y=1");
+  assert.equal(await get({ host: "localhost:8080" }), "http://localhost:8080/x?y=1");
+  assert.equal(await get({ host: "web--shop.gronblom.dev", "x-forwarded-proto": "javascript" }), "http://web--shop.gronblom.dev/x?y=1");
 });
 
 test("a throwing handler gets a 500", async (t) => {

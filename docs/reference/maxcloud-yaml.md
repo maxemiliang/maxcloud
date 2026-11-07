@@ -14,7 +14,7 @@ For completion and checking in an editor with the YAML language server, start th
 
 | Field | Type | Default | |
 | --- | --- | --- | --- |
-| `app` | string, required |  | The app's name: its namespace, and part of its hostnames (&lt;service&gt;-&lt;app&gt;.gronblom.dev) and bucket names (mc-&lt;app&gt;--&lt;bucket&gt;). Lowercase letters, digits and single dashes, starting with a letter, at most 30 characters. Platform namespaces (flux-system, traefik, kube-\*, ...) are reserved. |
+| `app` | string, required |  | The app's name: its namespace, and part of its hostnames (&lt;service&gt;--&lt;app&gt;.gronblom.dev) and bucket names (mc-&lt;app&gt;--&lt;bucket&gt;). Lowercase letters, digits and single dashes, starting with a letter, at most 30 characters. Platform namespaces (flux-system, traefik, kube-\*, ...) are reserved. |
 | `deploy` | string: gitops, direct | `gitops` | gitops: a push to the repo deploys, through Flux. direct: mcloud deploy builds here and applies the manifests itself, nothing from git. Changing it switches the app on the next mcloud deploy, which asks first. Left out, the app keeps its current mode (gitops for a new app), and mcloud apps set --deploy can change it; set, apps set refuses to. |
 | `source` | string | `.` | The folder the app is built from and mcloud dev runs in, relative to maxcloud.yaml. A Dockerfile, project.toml and migrations/ are looked for there. A directory inside the repo, without '..'. The manifests stay at the root (path). |
 | `image` | string | `registry.gronblom.dev/<app>/<app>` | Where mcloud build and local direct builds push the image, instead of the maxcloud registry; log in to it yourself. The cluster has to be able to pull from it. --build cluster refuses it and the GitOps deploy workflow ignores it: those push to the maxcloud registry. |
@@ -29,7 +29,7 @@ For completion and checking in an editor with the YAML language server, start th
 | `db` | boolean or object |  | A Postgres database (CloudNativePG), backed up continuously to the bucket mc-&lt;app&gt;--db; every function gets DATABASE\_URL. true, or its settings. false removes the database and keeps its backups. |
 | `db.size` | string | `1Gi` | Disk per instance, a Kubernetes quantity. Can grow, never shrink. |
 | `db.instances` | integer or string: 1, 2 | `1` | 1, or 2 for a replica on the other node. |
-| `domains` | list of objects |  | Hostnames of the app's own for its Knative services, besides &lt;service&gt;-&lt;app&gt;.gronblom.dev. Only the hostnames an admin allowed the app (the homelab repo's infrastructure/configs/run/domains.yaml), in zones the cluster has certificates for. Removing one removes its route and DNS record. |
+| `domains` | list of objects |  | Hostnames of the app's own for its Knative services, besides &lt;service&gt;--&lt;app&gt;.gronblom.dev. Only the hostnames an admin allowed the app (the homelab repo's infrastructure/configs/run/domains.yaml), in zones the cluster has certificates for. Removing one removes its route and DNS record. |
 | `domains[].host` | string, required |  | The hostname: lowercase, no wildcards. E.g. `shop.gronblom.dev` |
 | `domains[].service` | string, required |  | The Knative service it routes to: an HTTP function's name. It can stay private. |
 | `domains[].proxied` | boolean | `false` | Behind Cloudflare's proxy (WAF, caching, Access). Not for \*.lab.gronblom.dev. |

@@ -83,12 +83,16 @@ HTTPRoute mc-<app>--<bucket>: host <bucket>--<app>.<domain>, GET/HEAD
 Making the bucket private again, or deleting it, removes the three.
 
 Traefik needs `providers.kubernetesCRD.allowExternalNameServices: true`,
-`providers.kubernetesCRD.safeNaming: false` (the route names the
-TraefikService by Traefik's legacy, normalized name) and the controller's
-namespace in `providers.kubernetesGateway.crossProviderNamespaces`. Apps can make
+`providers.kubernetesCRD.safeNaming` the same as
+`MAXCLOUD_TRAEFIK_SAFE_NAMING` (the route names the TraefikService the way
+Traefik does: legacy `maxcloud-system-mc-shop-uploads`, normalized and
+collision-prone, or safe `maxcloud-system_mc-shop--uploads`) and the
+controller's namespace in `providers.kubernetesGateway.crossProviderNamespaces`. Apps can make
 neither kind of object, nor routes in that namespace. `--` can't occur in
-app or bucket names, so the hostname can't collide with a Knative
-service's `<svc>-<app>`. The bucket is still public on the S3 endpoint too.
+app or bucket names, so the hostname can't collide with another app's
+bucket or Knative service (`<service>--<app>`). Within one app, a public
+bucket and a public service of the same name would both want
+`<name>--<app>`: name them apart. The bucket is still public on the S3 endpoint too.
 
 ### Custom domains
 
@@ -183,7 +187,9 @@ leader), creates any entry that has a copy but isn't in the cluster. The
 registry then recreates the app, and its database restores itself from
 its backups. A finalizer on each entry deletes the copy first
 when the app is deleted on purpose, so a deleted app doesn't come back.
-Entries that live in the homelab repo aren't copied: git has them.
+Entries that live in the homelab repo aren't copied: git has them. They
+get the finalizer too, for the app's secrets' and variables' copies
+(below).
 
 ### App secrets
 
@@ -205,8 +211,9 @@ rebuild the secrets come back with the app, and deleting `app-secrets` by
 hand brings it straight back from the copy: to remove secrets, unset them
 with mcloud.
 
-Deleting the app deletes the copy, with the registry entry's copy (the same
-finalizer), so an app made later under the same name starts without
+Deleting the app's registry entry deletes the copy, with the entry's own
+copy (the same finalizer), whether mcloud made the entry or it's in the
+homelab repo, so an app made later under the same name starts without
 secrets. A Secret whose app has no registry entry isn't copied.
 
 The controller caches only Secrets labelled
@@ -289,7 +296,12 @@ the artifact from Flux's
 source-controller, checks its digest, and writes the file's quota, buckets,
 database and domains into the app's entry. The rest of the entry (repo, path,
 deploy mode) stays what mcloud registered. A file whose `app` names a
-different app is refused.
+different app is refused, and so is one with values the registry can't
+render (one ResourceSet renders every app, so a bad entry would stop them
+all): a bucket name `naming.Bucket` refuses, `db` or a duplicate in
+`buckets`, an option other than `:public`, a quota or database size that
+isn't a quantity above 0, `pods` below 1 or `db.instances` outside 1-2.
+The entry then keeps its values.
 
 It writes as the user `maxcloud:app-sync` (impersonated), not as itself,
 so the cluster's limits on what a developer may ask for apply: a
@@ -370,6 +382,7 @@ one part:
 | --- | --- | --- |
 | `MAXCLOUD_PUBLIC_DOMAIN` | unset: off | [public buckets' hostnames](#public-buckets-on-their-own-hostname) |
 | `MAXCLOUD_PUBLIC_GATEWAY` | `traefik/public/https-public` | their Gateway listener, `namespace/gateway/listener` |
+| `MAXCLOUD_TRAEFIK_SAFE_NAMING` | `false` | `true` when Traefik runs with `providers.kubernetesCRD.safeNaming: true`: how their routes name the TraefikService |
 | `MAXCLOUD_DOMAINS_GATEWAY` | `traefik/public` | the Gateway for [custom domains](#custom-domains), `namespace/gateway` |
 | `MAXCLOUD_DOMAINS_ALLOWLIST` | `maxcloud-domains` | the allowlist ConfigMap; without it no Domain is routed |
 | `MAXCLOUD_REGISTRY_BUCKET` | `maxcloud-registry` | the bucket for the [registry's copy](#the-app-registrys-copy) and the secrets' copies |

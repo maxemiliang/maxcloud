@@ -33,14 +33,17 @@ const (
 	RegistryNamespace = "flux-system"
 	appLabel          = "run.gronblom.dev/app"
 	mcloudManaged     = "mcloud"
-	// RegistryFinalizer keeps an entry until its copy is deleted too, so a
-	// deliberately removed app isn't put back after a restart.
+	// RegistryFinalizer, on every app's entry, keeps it until the app's
+	// copies are deleted too, so a deliberately removed app isn't put back
+	// after a restart, and an app made later under the same name doesn't
+	// get its secrets.
 	RegistryFinalizer = "maxcloud.gronblom.dev/registry-backup"
 	registryPrefix    = "apps/"
 )
 
 // RegistryBackup copies mcloud-made registry entries to a bucket and
-// restores missing ones.
+// restores missing ones. When any app's entry is deleted, it deletes the
+// app's copies (entry, secrets, variables) first.
 type RegistryBackup struct {
 	client.Client
 	Storage objectstorage.Storage
@@ -55,9 +58,13 @@ type RegistryBackup struct {
 // +kubebuilder:rbac:groups=fluxcd.controlplane.io,resources=resourcesetinputproviders,verbs=get;list;watch;create;update;patch
 // +kubebuilder:rbac:groups=fluxcd.controlplane.io,resources=resourcesetinputproviders/finalizers,verbs=update
 
+// isAppEntry: any app's registry entry, mcloud's or from the homelab repo.
+func isAppEntry(o client.Object) bool {
+	return o.GetNamespace() == RegistryNamespace && o.GetLabels()[appLabel] == "true"
+}
+
 func isMcloudEntry(o client.Object) bool {
-	l := o.GetLabels()
-	return o.GetNamespace() == RegistryNamespace && l[appLabel] == "true" && l[ManagedByLabel] == mcloudManaged
+	return isAppEntry(o) && o.GetLabels()[ManagedByLabel] == mcloudManaged
 }
 
 func backupKey(name string) string { return registryPrefix + name + ".yaml" }
@@ -68,7 +75,7 @@ func (r *RegistryBackup) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 	if err := r.Get(ctx, req.NamespacedName, u); err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
-	if !isMcloudEntry(u) {
+	if !isAppEntry(u) {
 		return ctrl.Result{}, nil
 	}
 	if !u.GetDeletionTimestamp().IsZero() {
@@ -77,7 +84,8 @@ func (r *RegistryBackup) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 		}
 		// The app's secrets' and variables' copies go too (whether or not
 		// those backups are on), so an app made later under the same name
-		// doesn't get them.
+		// doesn't get them. Every app has those, wherever its entry lives;
+		// only mcloud's entries have a copy of the entry itself.
 		for _, k := range []string{secretsKey(u.GetName()), envKey(u.GetName()), backupKey(u.GetName())} {
 			if err := r.Objects.DeleteObject(ctx, r.Bucket, k); err != nil {
 				return ctrl.Result{}, err
@@ -91,6 +99,9 @@ func (r *RegistryBackup) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 		if err := r.Update(ctx, u); err != nil {
 			return ctrl.Result{}, err
 		}
+	}
+	if !isMcloudEntry(u) {
+		return ctrl.Result{}, nil // git keeps this one
 	}
 	data, err := backupOf(u)
 	if err != nil {
@@ -194,7 +205,7 @@ func (r *RegistryBackup) SetupWithManager(mgr ctrl.Manager) error {
 	u := &unstructured.Unstructured{}
 	u.SetGroupVersionKind(providerGVK)
 	err := ctrl.NewControllerManagedBy(mgr).
-		For(u, builder.WithPredicates(predicate.NewPredicateFuncs(isMcloudEntry))).
+		For(u, builder.WithPredicates(predicate.NewPredicateFuncs(isAppEntry))).
 		Named("registry").
 		Complete(r)
 	if err != nil {

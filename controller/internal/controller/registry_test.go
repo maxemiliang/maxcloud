@@ -118,18 +118,52 @@ func TestRegistryCopyDeleteAndRestore(t *testing.T) {
 	}
 }
 
-func TestRegistryIgnoresEntriesInGit(t *testing.T) {
+// An entry in git isn't copied (git keeps it), but its app's secrets' and
+// variables' copies still go when it's deleted: an app made later under the
+// same name, mcloud's or git's, mustn't get them.
+func TestRegistryEntryInGit(t *testing.T) {
 	inGit := entry("run-demo", map[string]string{appLabel: "true", "kustomize.toolkit.fluxcd.io/name": "apps"})
-	e := newDBEnv(t, inGit)
+	e := newDBEnv(t, inGit, entry("other", mcloudLabels))
 	r := e.registry()
 	_ = r.Restore(context.Background())
 	e.reconcileEntry(r, "run-demo")
-	if len(e.objects.objects[registryBucket]) != 0 {
+	if _, ok := e.objects.objects[registryBucket]["apps/run-demo.yaml"]; ok {
 		t.Error("copied an entry that lives in git")
 	}
 	u, _ := e.getEntry("run-demo")
-	if len(u.GetFinalizers()) != 0 {
-		t.Error("finalizer on an entry that lives in git")
+	if len(u.GetFinalizers()) != 1 || u.GetFinalizers()[0] != RegistryFinalizer {
+		t.Errorf("finalizers = %v", u.GetFinalizers())
+	}
+
+	e.objects.put(registryBucket, secretsKey("run-demo"), "age...")
+	e.objects.put(registryBucket, envKey("run-demo"), "{}")
+	e.objects.put(registryBucket, secretsKey("other"), "age...")
+	if err := e.client.Delete(context.Background(), u); err != nil {
+		t.Fatal(err)
+	}
+	e.reconcileEntry(r, "run-demo")
+	for _, k := range []string{secretsKey("run-demo"), envKey("run-demo")} {
+		if _, ok := e.objects.objects[registryBucket][k]; ok {
+			t.Errorf("%s kept after the app was removed from git", k)
+		}
+	}
+	if _, ok := e.objects.objects[registryBucket][secretsKey("other")]; !ok {
+		t.Error("deleted another app's secrets' copy")
+	}
+	if _, ok := e.getEntry("run-demo"); ok {
+		t.Error("entry still there (finalizer not removed?)")
+	}
+}
+
+// Not an app's entry at all: left alone.
+func TestRegistryIgnoresOtherProviders(t *testing.T) {
+	e := newDBEnv(t, entry("something", map[string]string{"kustomize.toolkit.fluxcd.io/name": "apps"}))
+	r := e.registry()
+	_ = r.Restore(context.Background())
+	e.reconcileEntry(r, "something")
+	u, _ := e.getEntry("something")
+	if len(u.GetFinalizers()) != 0 || len(e.objects.objects[registryBucket]) != 0 {
+		t.Errorf("finalizers = %v, objects = %v", u.GetFinalizers(), e.objects.objects[registryBucket])
 	}
 	var _ client.Object = u
 }

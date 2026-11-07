@@ -125,7 +125,7 @@ database, and starts deploying the app's manifests from its repo.
 In an app's repo, mcloud deploy does this by itself from maxcloud.yaml.
 
 The name becomes the namespace, and public services get
-https://<service>-<name>.gronblom.dev.`,
+https://<service>--<name>.gronblom.dev.`,
 		Example: `  mcloud apps create shop --repo maxemiliang/shop
   mcloud apps create shop --repo maxemiliang/shop --cpu 500m --memory 2Gi --db`,
 		Args: cobra.ExactArgs(1),

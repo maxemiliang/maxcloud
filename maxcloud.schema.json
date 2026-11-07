@@ -8,7 +8,7 @@
   "additionalProperties": false,
   "properties": {
     "app": {
-      "description": "The app's name: its namespace, and part of its hostnames (<service>-<app>.gronblom.dev) and bucket names (mc-<app>--<bucket>). Lowercase letters, digits and single dashes, starting with a letter, at most 30 characters. Platform namespaces (flux-system, traefik, kube-*, ...) are reserved.",
+      "description": "The app's name: its namespace, and part of its hostnames (<service>--<app>.gronblom.dev) and bucket names (mc-<app>--<bucket>). Lowercase letters, digits and single dashes, starting with a letter, at most 30 characters. Platform namespaces (flux-system, traefik, kube-*, ...) are reserved.",
       "type": "string",
       "pattern": "^[a-z]([a-z0-9]|-[a-z0-9])*$",
       "maxLength": 30
@@ -102,7 +102,7 @@
       ]
     },
     "domains": {
-      "description": "Hostnames of the app's own for its Knative services, besides <service>-<app>.gronblom.dev. Only the hostnames an admin allowed the app (the homelab repo's infrastructure/configs/run/domains.yaml), in zones the cluster has certificates for. Removing one removes its route and DNS record.",
+      "description": "Hostnames of the app's own for its Knative services, besides <service>--<app>.gronblom.dev. Only the hostnames an admin allowed the app (the homelab repo's infrastructure/configs/run/domains.yaml), in zones the cluster has certificates for. Removing one removes its route and DNS record.",
       "type": "array",
       "items": {
         "type": "object",
