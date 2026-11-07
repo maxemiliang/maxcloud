@@ -54,7 +54,8 @@ type BucketPolicies interface {
 // Objects is the part of the S3 API the Database controller uses: the
 // restore marker, and looking at what backups a bucket holds.
 type Objects interface {
-	// GetObject returns the object, or found false if there's none.
+	// GetObject returns the object, or found false if there's none. An
+	// object bigger than MaxObjectBytes is an error (ErrTooLarge).
 	GetObject(ctx context.Context, bucket, key string) (data []byte, found bool, err error)
 	PutObject(ctx context.Context, bucket, key string, data []byte) error
 	// DeleteObject succeeds if the object is already gone.

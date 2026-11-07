@@ -39,6 +39,9 @@ func (f *fakeObjects) GetObject(_ context.Context, bucket, key string) ([]byte, 
 		return nil, false, objectstorage.ErrNoSuchBucket
 	}
 	d, ok := f.objects[bucket][key]
+	if len(d) > objectstorage.MaxObjectBytes {
+		return nil, false, objectstorage.ErrTooLarge
+	}
 	return d, ok, nil
 }
 
@@ -352,6 +355,23 @@ func TestDatabaseBlocksOnUnknownBackups(t *testing.T) {
 	}
 	if c := condition(db, "Blocked"); c == nil || c.Status != metav1.ConditionTrue || !strings.Contains(c.Message, v1.RecoverFromAnnotation) {
 		t.Errorf("Blocked = %+v", c)
+	}
+}
+
+// A backup.info too big to read (the app's own S3 key can write there)
+// isn't a backup, and doesn't stop the controller seeing the real ones.
+func TestDatabaseIgnoresOversizedBackupInfo(t *testing.T) {
+	e := newDBEnv(t, tenantNS("shop"), database("shop"))
+	e.backUp(1)
+	huge := "status=DONE\n" + strings.Repeat("x", objectstorage.MaxObjectBytes)
+	e.objects.put(dbBucket, serverName(1)+"/base/zzz/backup.info", huge)
+	ends, err := e.dr.baseBackups(context.Background(), dbBucket, 1)
+	if err != nil || len(ends) != 1 {
+		t.Errorf("baseBackups = %v, %v; want the one real backup", ends, err)
+	}
+	e.objects.put(dbBucket, serverName(2)+"/base/zzz/backup.info", huge)
+	if base, err := e.dr.hasBase(context.Background(), dbBucket, 2); err != nil || base {
+		t.Errorf("hasBase(2) = %v, %v; want false: its only backup.info is unreadable", base, err)
 	}
 }
 
