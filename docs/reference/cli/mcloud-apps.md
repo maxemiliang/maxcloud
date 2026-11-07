@@ -27,7 +27,7 @@ database, and starts deploying the app's manifests from its repo.
 In an app's repo, mcloud deploy does this by itself from maxcloud.yaml.
 
 The name becomes the namespace, and public services get
-https://&lt;service&gt;-&lt;name&gt;.gronblom.dev.
+https://&lt;service&gt;--&lt;name&gt;.gronblom.dev.
 
 ```
 mcloud apps create NAME [flags]

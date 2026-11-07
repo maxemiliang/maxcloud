@@ -43,7 +43,7 @@ own, and it reaches the app.
 
 | Option | Default | |
 | --- | --- | --- |
-| `public` | `false` | Reachable from the internet at `https://<name>-<app>.gronblom.dev`. Otherwise cluster-local. |
+| `public` | `false` | Reachable from the internet at `https://<name>--<app>.gronblom.dev`. Otherwise cluster-local. |
 | `minInstances` | `0` | Instances kept running when idle. |
 | `maxInstances` | `3` | |
 | `concurrency` | `0` | Requests one instance handles before another starts (0: no limit). |

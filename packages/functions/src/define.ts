@@ -31,7 +31,7 @@ export interface CommonOptions {
 }
 
 export interface HttpOptions extends CommonOptions {
-  /** Reachable from the internet at https://<name>-<app>.gronblom.dev. Default false: cluster-local only. */
+  /** Reachable from the internet at https://<name>--<app>.gronblom.dev. Default false: cluster-local only. */
   public?: boolean;
   /** Instances kept running when idle. Default 0 (scale to zero). */
   minInstances?: number;

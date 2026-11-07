@@ -89,8 +89,10 @@ Traefik does: legacy `maxcloud-system-mc-shop-uploads`, normalized and
 collision-prone, or safe `maxcloud-system_mc-shop--uploads`) and the
 controller's namespace in `providers.kubernetesGateway.crossProviderNamespaces`. Apps can make
 neither kind of object, nor routes in that namespace. `--` can't occur in
-app or bucket names, so the hostname can't collide with a Knative
-service's `<svc>-<app>`. The bucket is still public on the S3 endpoint too.
+app or bucket names, so the hostname can't collide with another app's
+bucket or Knative service (`<service>--<app>`). Within one app, a public
+bucket and a public service of the same name would both want
+`<name>--<app>`: name them apart. The bucket is still public on the S3 endpoint too.
 
 ### Custom domains
 

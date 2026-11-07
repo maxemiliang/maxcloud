@@ -66,7 +66,9 @@ const BucketLabel = "maxcloud.gronblom.dev/bucket"
 func (p *PublicRoutes) Enabled() bool { return p != nil && p.Domain != "" }
 
 // Hostname of an app's public bucket. "--" can't occur in app or bucket
-// names, so this can't collide with a Knative service's <svc>-<app>.
+// names, so this can't collide with another app's bucket or Knative service
+// (<service>--<app>). Within one app, a public service named like the
+// bucket would want the same hostname.
 func (p *PublicRoutes) Hostname(app, bucket string) string {
 	return bucket + "--" + app + "." + p.Domain
 }

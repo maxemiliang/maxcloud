@@ -35,3 +35,5 @@ https://assets--shop.gronblom.dev/logo.png      # object logo.png in mc-shop--as
 - `kubectl get maxcloud -n shop` shows each bucket's URL.
 - Removing `:public` makes the bucket private again: its hostname and the
   public read go, its objects stay.
+- Public functions are at `<function>--<app>.gronblom.dev` too: don't give
+  a public bucket the name of a public function of the same app.
