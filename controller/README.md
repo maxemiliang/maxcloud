@@ -185,7 +185,9 @@ leader), creates any entry that has a copy but isn't in the cluster. The
 registry then recreates the app, and its database restores itself from
 its backups. A finalizer on each entry deletes the copy first
 when the app is deleted on purpose, so a deleted app doesn't come back.
-Entries that live in the homelab repo aren't copied: git has them.
+Entries that live in the homelab repo aren't copied: git has them. They
+get the finalizer too, for the app's secrets' and variables' copies
+(below).
 
 ### App secrets
 
@@ -207,8 +209,9 @@ rebuild the secrets come back with the app, and deleting `app-secrets` by
 hand brings it straight back from the copy: to remove secrets, unset them
 with mcloud.
 
-Deleting the app deletes the copy, with the registry entry's copy (the same
-finalizer), so an app made later under the same name starts without
+Deleting the app's registry entry deletes the copy, with the entry's own
+copy (the same finalizer), whether mcloud made the entry or it's in the
+homelab repo, so an app made later under the same name starts without
 secrets. A Secret whose app has no registry entry isn't copied.
 
 The controller caches only Secrets labelled
