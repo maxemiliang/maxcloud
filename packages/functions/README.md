@@ -36,7 +36,10 @@ export.
 standard `Request` and returns a `Response`, so fetch-style frameworks work
 as they are: `onRequest(app.fetch)` with Hono, for example. Its second
 argument is `{ signal }`, aborted when the client goes away or the server
-shuts down. A handler that throws answers 500.
+shuts down. A handler that throws answers 500. `req.url` is absolute: the
+host is the request's `Host` header and the scheme `X-Forwarded-Proto`
+(`http` or `https`). `X-Forwarded-Host` isn't used: a client can send its
+own, and it reaches the app.
 
 | Option | Default | |
 | --- | --- | --- |
