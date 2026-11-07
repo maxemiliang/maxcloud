@@ -83,9 +83,11 @@ HTTPRoute mc-<app>--<bucket>: host <bucket>--<app>.<domain>, GET/HEAD
 Making the bucket private again, or deleting it, removes the three.
 
 Traefik needs `providers.kubernetesCRD.allowExternalNameServices: true`,
-`providers.kubernetesCRD.safeNaming: false` (the route names the
-TraefikService by Traefik's legacy, normalized name) and the controller's
-namespace in `providers.kubernetesGateway.crossProviderNamespaces`. Apps can make
+`providers.kubernetesCRD.safeNaming` the same as
+`MAXCLOUD_TRAEFIK_SAFE_NAMING` (the route names the TraefikService the way
+Traefik does: legacy `maxcloud-system-mc-shop-uploads`, normalized and
+collision-prone, or safe `maxcloud-system_mc-shop--uploads`) and the
+controller's namespace in `providers.kubernetesGateway.crossProviderNamespaces`. Apps can make
 neither kind of object, nor routes in that namespace. `--` can't occur in
 app or bucket names, so the hostname can't collide with a Knative
 service's `<svc>-<app>`. The bucket is still public on the S3 endpoint too.
@@ -375,6 +377,7 @@ one part:
 | --- | --- | --- |
 | `MAXCLOUD_PUBLIC_DOMAIN` | unset: off | [public buckets' hostnames](#public-buckets-on-their-own-hostname) |
 | `MAXCLOUD_PUBLIC_GATEWAY` | `traefik/public/https-public` | their Gateway listener, `namespace/gateway/listener` |
+| `MAXCLOUD_TRAEFIK_SAFE_NAMING` | `false` | `true` when Traefik runs with `providers.kubernetesCRD.safeNaming: true`: how their routes name the TraefikService |
 | `MAXCLOUD_DOMAINS_GATEWAY` | `traefik/public` | the Gateway for [custom domains](#custom-domains), `namespace/gateway` |
 | `MAXCLOUD_DOMAINS_ALLOWLIST` | `maxcloud-domains` | the allowlist ConfigMap; without it no Domain is routed |
 | `MAXCLOUD_REGISTRY_BUCKET` | `maxcloud-registry` | the bucket for the [registry's copy](#the-app-registrys-copy) and the secrets' copies |

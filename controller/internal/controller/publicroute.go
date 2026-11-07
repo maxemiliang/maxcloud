@@ -29,8 +29,9 @@ import (
 //
 // Traefik needs kubernetesCRD.allowExternalNameServices, this namespace in
 // kubernetesGateway.crossProviderNamespaces (so its HTTPRoutes may name a
-// TraefikService), and kubernetesCRD.safeNaming off (see traefikServiceRef).
-// Apps can make neither object, and can't put routes in this namespace.
+// TraefikService), and kubernetesCRD.safeNaming the same as SafeNaming here
+// (see traefikServiceRef). Apps can make neither object, and can't put
+// routes in this namespace.
 type PublicRoutes struct {
 	Client client.Client
 	// Reader reads straight from the API server: no cache of every
@@ -45,6 +46,9 @@ type PublicRoutes struct {
 	GatewayNamespace, Gateway, Listener string
 	// S3Host is the Object Storage endpoint's host (tl8dc.upcloudobjects.com).
 	S3Host string
+	// SafeNaming: Traefik runs with providers.kubernetesCRD.safeNaming on,
+	// which changes the name an HTTPRoute must use for a TraefikService.
+	SafeNaming bool
 }
 
 var (
@@ -122,7 +126,7 @@ func (p *PublicRoutes) Ensure(ctx context.Context, bucket, hostname string) erro
 			"backendRefs": []any{map[string]any{
 				"group": "traefik.io",
 				"kind":  "TraefikService",
-				"name":  traefikServiceRef(p.Namespace, bucket),
+				"name":  traefikServiceRef(p.Namespace, bucket, p.SafeNaming),
 			}},
 		}},
 	}
@@ -181,11 +185,20 @@ func (p *PublicRoutes) applyUnstructured(ctx context.Context, want *unstructured
 }
 
 // traefikServiceRef is the name Traefik gives a TraefikService, as a
-// Gateway API backendRef must spell it: its CRD provider's legacy naming
-// (safeNaming off) joins namespace and name with "-" and normalizes the
-// result, every run of other characters becoming one "-". So
-// maxcloud-system/mc-shop--assets is maxcloud-system-mc-shop-assets.
-func traefikServiceRef(namespace, name string) string {
+// Gateway API backendRef must spell it. Which name depends on its CRD
+// provider's safeNaming (Traefik's pkg/provider/kubernetes/crd,
+// name_builder.go, makeID):
+//
+//   - off (legacy, Traefik's default): namespace and name joined with "-"
+//     and normalized, every run of other characters becoming one "-". So
+//     maxcloud-system/mc-shop--assets is maxcloud-system-mc-shop-assets.
+//     Two objects can end up with one name (mc-shop--x-y and mc-shop-x--y).
+//   - on: namespace and name joined with "_", which can't occur in either,
+//     and not normalized: maxcloud-system_mc-shop--assets.
+func traefikServiceRef(namespace, name string, safe bool) string {
+	if safe {
+		return namespace + "_" + name + "@kubernetescrd"
+	}
 	parts := strings.FieldsFunc(namespace+"-"+name, func(r rune) bool {
 		return !unicode.IsLetter(r) && !unicode.IsNumber(r)
 	})

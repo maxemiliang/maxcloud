@@ -34,6 +34,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -63,6 +64,7 @@ type config struct {
 	token, serviceUUID, endpoint, region, accessKeyID, secretAccessKey string
 	postgresImage, dbStorageClass                                      string
 	publicDomain, publicGateway, namespace                             string
+	traefikSafeNaming                                                  bool
 	domainsGateway, domainsAllowlist                                   string
 	registryBucket                                                     string
 	secretsKey                                                         *age.X25519Identity
@@ -116,6 +118,13 @@ func configFromEnv() (config, error) {
 	c.publicDomain = os.Getenv("MAXCLOUD_PUBLIC_DOMAIN")
 	if c.publicGateway = os.Getenv("MAXCLOUD_PUBLIC_GATEWAY"); c.publicGateway == "" {
 		c.publicGateway = "traefik/public/https-public"
+	}
+	if s := os.Getenv("MAXCLOUD_TRAEFIK_SAFE_NAMING"); s != "" {
+		v, err := strconv.ParseBool(s)
+		if err != nil {
+			return c, fmt.Errorf("MAXCLOUD_TRAEFIK_SAFE_NAMING %q: true or false", s)
+		}
+		c.traefikSafeNaming = v
 	}
 	if c.namespace = os.Getenv("POD_NAMESPACE"); c.namespace == "" {
 		c.namespace = "maxcloud-system"
@@ -230,7 +239,7 @@ func run(metricsAddr, probeAddr string, leaderElect bool) error {
 		routes = &controller.PublicRoutes{
 			Client: mgr.GetClient(), Reader: mgr.GetAPIReader(), Namespace: cfg.namespace,
 			Domain: cfg.publicDomain, GatewayNamespace: gw[0], Gateway: gw[1], Listener: gw[2],
-			S3Host: u.Hostname(),
+			S3Host: u.Hostname(), SafeNaming: cfg.traefikSafeNaming,
 		}
 	}
 	if err := (&controller.BucketReconciler{
