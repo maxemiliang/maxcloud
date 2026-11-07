@@ -54,6 +54,9 @@ type DatabaseReconciler struct {
 	// StorageClass of new Clusters' disks, "" for the cluster's default.
 	// Existing Clusters keep theirs.
 	StorageClass string
+	// Registrations: only the registration the app's data belongs to gets
+	// its backups (nil: no check).
+	Registrations *Registrations
 	// Now is time.Now, replaceable in tests.
 	Now func() time.Time
 }
@@ -95,6 +98,20 @@ func (r *DatabaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		return ctrl.Result{}, r.setStatus(ctx, &db, "", metav1.ConditionFalse, ReasonBadName, err.Error())
 	}
 	db.Status.Bucket = bucket
+
+	// Before anything reads the backups or gets credentials for them. A
+	// running Cluster is left alone either way.
+	v, err := r.Registrations.Check(ctx, app)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+	if v.Wait {
+		return ctrl.Result{RequeueAfter: registrationWait}, nil
+	}
+	if !v.Allowed {
+		log.FromContext(ctx).Info("not this registration's data", "reason", v.Reason)
+		return ctrl.Result{RequeueAfter: resync}, r.setStatus(ctx, &db, v1.PhaseBlocked, metav1.ConditionFalse, ReasonRegistration, v.Reason)
+	}
 
 	if controllerutil.AddFinalizer(&db, DatabaseFinalizer) {
 		if err := r.Update(ctx, &db); err != nil {

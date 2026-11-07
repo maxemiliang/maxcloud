@@ -191,6 +191,47 @@ Entries that live in the homelab repo aren't copied: git has them. They
 get the finalizer too, for the app's secrets' and variables' copies
 (below).
 
+### Registrations: who gets an app's data
+
+An app's buckets and database backups stay in Object Storage when its
+entry is deleted (Retain), so that deleting an app doesn't delete its data
+by accident. Without more, whoever registered the same name next would get
+them: the app's S3 user covers every `mc-<name>--*` bucket, and the
+database restores itself from `mc-<name>--db`. So:
+
+- Every entry has a registration ID, the annotation
+  `maxcloud.gronblom.dev/registration`. The controller gives an entry
+  mcloud made a random one the first time it sees it, and the entry's copy
+  keeps it, so an entry restored after a rebuild is the same registration.
+  An entry from the homelab repo declares its own in git (any random value,
+  kept for good): the controller doesn't give those one, since Flux would
+  race it, and a rebuild recreates them from git without a copy. Admission
+  lets only the controller and Flux set or change it.
+- The controller keeps a record per app name in the registry's bucket,
+  `registrations/<name>.json`: which registration the name's data belongs
+  to. Deleting the entry leaves it there.
+- Before a Bucket, Database or DatabaseBranch makes or hands out anything
+  (the app's credentials included), the controller checks that the app's
+  entry is that registration. If the record names another one and any
+  bucket `mc-<name>--*` still exists, it stops with `Ready` False, reason
+  `RegistrationMismatch`, and a message with both IDs and the fix. A
+  running Cluster is left as it is. If no bucket is left, or nobody has
+  a record yet and no bucket exists, the entry takes the name and the
+  record moves to it.
+- An admin gives a new entry the old data with the annotation
+  `maxcloud.gronblom.dev/adopt-registration=<the old ID>` on it (admission
+  lets only admins set it). The record then moves to the new entry, with
+  the old ID in its `previous`.
+- When this first ran, nothing had a record. The controller wrote
+  `registrations/_since.json` (when records began) when it first started;
+  an entry made before then keeps the data under its name without a
+  record (so fn-demo, paja and the rest carried on, database included),
+  and one made after doesn't: leftovers of an app deleted before records
+  began need `adopt-registration=unrecorded` from an admin.
+
+A record the controller can't read stops every check for that app (an
+error, retried), rather than being overwritten.
+
 ### App secrets
 
 mcloud keeps an app's secrets in the Secret `app-secrets` in its namespace,
@@ -302,6 +343,10 @@ all): a bucket name `naming.Bucket` refuses, `db` or a duplicate in
 `buckets`, an option other than `:public`, a quota or database size that
 isn't a quantity above 0, `pods` below 1 or `db.instances` outside 1-2.
 The entry then keeps its values.
+
+It never touches the entry's `owners` (who may run the app is the
+registry's, not the repo's: a push mustn't grant it) or its registration
+ID, and admission refuses `maxcloud:app-sync` changing either.
 
 It writes as the user `maxcloud:app-sync` (impersonated), not as itself,
 so the cluster's limits on what a developer may ask for apply: a

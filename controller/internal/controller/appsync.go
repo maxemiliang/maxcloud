@@ -237,7 +237,9 @@ func projectFileFrom(tgz []byte) ([]byte, bool, error) {
 }
 
 // project is the part of maxcloud.yaml the sync takes (mcloud's
-// internal/cli/root.go has the whole file).
+// internal/cli/root.go has the whole file). Never owners: who may run an
+// app is the registry's, so a push can't grant it (admission refuses
+// maxcloud:app-sync changing owners as well).
 type project struct {
 	App string `json:"app"`
 	// Deploy isn't applied (mcloud deploy switches it), but declaring it

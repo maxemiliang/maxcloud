@@ -91,11 +91,26 @@ func (r *RegistryBackup) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 				return ctrl.Result{}, err
 			}
 		}
+		// The registration record (Registrations) stays while the app's
+		// buckets do, so the next entry with this name doesn't get them.
 		log.FromContext(ctx).Info("app removed from the registry; its copies too", "app", u.GetName())
 		controllerutil.RemoveFinalizer(u, RegistryFinalizer)
 		return ctrl.Result{}, r.Update(ctx, u)
 	}
-	if controllerutil.AddFinalizer(u, RegistryFinalizer) {
+	// The finalizer, and for an entry mcloud made, its registration ID
+	// (Registrations): one from git declares its own there.
+	changed := controllerutil.AddFinalizer(u, RegistryFinalizer)
+	if isMcloudEntry(u) && u.GetAnnotations()[RegistrationAnnotation] == "" {
+		annotations := u.GetAnnotations()
+		if annotations == nil {
+			annotations = map[string]string{}
+		}
+		annotations[RegistrationAnnotation] = NewRegistrationID()
+		u.SetAnnotations(annotations)
+		changed = true
+		log.FromContext(ctx).Info("registry entry given its registration ID", "app", u.GetName(), "registration", annotations[RegistrationAnnotation])
+	}
+	if changed {
 		if err := r.Update(ctx, u); err != nil {
 			return ctrl.Result{}, err
 		}
@@ -119,13 +134,18 @@ func (r *RegistryBackup) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 	return ctrl.Result{}, nil
 }
 
-// backupOf is what's kept of an entry: enough to create it again.
+// backupOf is what's kept of an entry: enough to create it again, as the
+// same registration (its ID), so a rebuilt cluster's app gets its data
+// back. The owners are in the spec.
 func backupOf(u *unstructured.Unstructured) ([]byte, error) {
 	keep := &unstructured.Unstructured{}
 	keep.SetGroupVersionKind(providerGVK)
 	keep.SetNamespace(u.GetNamespace())
 	keep.SetName(u.GetName())
 	keep.SetLabels(u.GetLabels())
+	if id := u.GetAnnotations()[RegistrationAnnotation]; id != "" {
+		keep.SetAnnotations(map[string]string{RegistrationAnnotation: id})
+	}
 	keep.Object["spec"] = u.Object["spec"]
 	return yaml.Marshal(keep.Object)
 }

@@ -338,3 +338,35 @@ func TestAppSyncAcceptsValidValues(t *testing.T) {
 		}
 	}
 }
+
+// Owning an app is the registry's (mcloud apps owners, admission), never
+// the app repo's: a push mustn't grant it, nor change the registration.
+func TestAppSyncNeverTouchesOwnersOrRegistration(t *testing.T) {
+	e := newSyncEnv(t, mcloudLabels, map[string]string{
+		"maxcloud.yaml": "app: shop\nowners: [mallory]\nquota: {cpu: 300m}\n",
+	})
+	u := e.entry()
+	u.SetAnnotations(map[string]string{RegistrationAnnotation: "aaa"})
+	v := values(u)
+	v["owners"] = "alice"
+	unstructured.SetNestedMap(u.Object, v, "spec", "defaultValues")
+	if err := e.c.Update(context.Background(), u); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.reconcile(); err != nil {
+		t.Fatal(err)
+	}
+	got := e.entry()
+	if values(got)["cpu"] != "300m" {
+		t.Fatalf("not synced: %v", values(got))
+	}
+	if values(got)["owners"] != "alice" {
+		t.Errorf("owners = %v", values(got)["owners"])
+	}
+	if got.GetAnnotations()[RegistrationAnnotation] != "aaa" {
+		t.Errorf("registration = %v", got.GetAnnotations())
+	}
+	if f := got.GetAnnotations()[SyncedFieldsAnnotation]; strings.Contains(f, "owners") {
+		t.Errorf("synced fields = %s", f)
+	}
+}

@@ -242,6 +242,14 @@ func run(metricsAddr, probeAddr string, leaderElect bool) error {
 			S3Host: u.Hostname(), SafeNaming: cfg.traefikSafeNaming,
 		}
 	}
+	// Which registration of an app name its buckets and backups belong
+	// to: a new entry under an old name doesn't get the old app's data.
+	registrations := &controller.Registrations{
+		Client: mgr.GetClient(), Storage: storage, Objects: s3c, Bucket: cfg.registryBucket,
+	}
+	if err := mgr.Add(registrations); err != nil {
+		return fmt.Errorf("registrations: %w", err)
+	}
 	if err := (&controller.BucketReconciler{
 		Client:   mgr.GetClient(),
 		Identity: identity,
@@ -250,6 +258,8 @@ func run(metricsAddr, probeAddr string, leaderElect bool) error {
 		Metrics:  &controller.MetricsCache{Storage: storage, MaxAge: 2 * time.Minute},
 		Routes:   routes,
 		Endpoint: cfg.endpoint,
+
+		Registrations: registrations,
 	}).SetupWithManager(mgr); err != nil {
 		return fmt.Errorf("bucket controller: %w", err)
 	}
@@ -261,6 +271,8 @@ func run(metricsAddr, probeAddr string, leaderElect bool) error {
 		Endpoint:     cfg.endpoint,
 		Image:        cfg.postgresImage,
 		StorageClass: cfg.dbStorageClass,
+
+		Registrations: registrations,
 	}
 	if err := databases.SetupWithManager(mgr); err != nil {
 		return fmt.Errorf("database controller: %w", err)
