@@ -274,3 +274,67 @@ func TestAppSyncRecordsSyncedFields(t *testing.T) {
 		}
 	})
 }
+
+// A maxcloud.yaml with values the registry can't render (which would stop
+// the ResourceSet that renders every app) leaves the entry as it was, and
+// says why.
+func TestAppSyncRefusesInvalidValues(t *testing.T) {
+	for _, tc := range []struct{ file, why string }{
+		{"buckets: [Bad_Name]\n", "buckets"},
+		{"buckets: [uploads, a--b]\n", "buckets"},
+		{"buckets: [db]\n", "reserved"},
+		{"buckets: [x-s3alias]\n", "reserved"},
+		{"buckets: [':public']\n", "buckets"},
+		{"buckets: [uploads:private]\n", ":public"},
+		{"buckets: [uploads, 'uploads:public']\n", "twice"},
+		{"buckets: [" + strings.Repeat("a", 55) + "]\n", "S3 allows 63"},
+		{"quota: {pods: -5}\n", "quota.pods"},
+		{"quota: {pods: 0}\n", "quota.pods"},
+		{"quota: {pods: 2.5}\n", "quota.pods"},
+		{"quota: {pods: lots}\n", "quota.pods"},
+		{"quota: {cpu: '-1'}\n", "quota.cpu"},
+		{"quota: {cpu: '0'}\n", "quota.cpu"},
+		{"quota: {memory: lots}\n", "quota.memory"},
+		{"db: {size: -1Gi}\n", "db.size"},
+		{"db: {instances: 0}\n", "db.instances"},
+		{"db: {instances: 3}\n", "db.instances"},
+		{"db: {instances: '1\\n  evil: true'}\n", "db.instances"},
+	} {
+		e := newSyncEnv(t, mcloudLabels, map[string]string{"maxcloud.yaml": "app: shop\nquota: {memory: 2Gi}\n" + tc.file})
+		// The same key twice in YAML is an error of its own; keep one quota.
+		if strings.HasPrefix(tc.file, "quota:") {
+			e = newSyncEnv(t, mcloudLabels, map[string]string{"maxcloud.yaml": "app: shop\n" + tc.file})
+		}
+		if err := e.reconcile(); err != nil {
+			t.Fatalf("%q: a refusal is reported, not retried: %v", tc.file, err)
+		}
+		ent := e.entry()
+		if v := values(ent); len(v) != 3 || v["cpu"] != "200m" {
+			t.Errorf("%q: values = %v, want them unchanged", tc.file, v)
+		}
+		a := ent.GetAnnotations()
+		if !strings.Contains(a[SyncErrorAnnotation], tc.why) || a[SyncedRevisionAnnotation] != "main@sha1:abc" {
+			t.Errorf("%q: annotations = %v, want a sync error about %s", tc.file, a, tc.why)
+		}
+	}
+}
+
+func TestAppSyncAcceptsValidValues(t *testing.T) {
+	e := newSyncEnv(t, mcloudLabels, map[string]string{"maxcloud.yaml": "app: shop\n" +
+		"quota: {cpu: '1', memory: 512Mi, pods: '5'}\n" +
+		"buckets: [' uploads ', assets:public, " + strings.Repeat("a", 54) + "]\n" +
+		"db: {size: 1Gi, instances: 2}\n"})
+	if err := e.reconcile(); err != nil {
+		t.Fatal(err)
+	}
+	if a := e.entry().GetAnnotations(); a[SyncErrorAnnotation] != "" {
+		t.Fatalf("sync error: %s", a[SyncErrorAnnotation])
+	}
+	v := values(e.entry())
+	for k, want := range map[string]string{"cpu": "1", "memory": "512Mi", "pods": "5", "dbInstances": "2",
+		"buckets": "uploads,assets:public," + strings.Repeat("a", 54)} {
+		if v[k] != want {
+			t.Errorf("%s = %v, want %s", k, v[k], want)
+		}
+	}
+}

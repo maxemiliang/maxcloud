@@ -289,7 +289,12 @@ the artifact from Flux's
 source-controller, checks its digest, and writes the file's quota, buckets,
 database and domains into the app's entry. The rest of the entry (repo, path,
 deploy mode) stays what mcloud registered. A file whose `app` names a
-different app is refused.
+different app is refused, and so is one with values the registry can't
+render (one ResourceSet renders every app, so a bad entry would stop them
+all): a bucket name `naming.Bucket` refuses, `db` or a duplicate in
+`buckets`, an option other than `:public`, a quota or database size that
+isn't a quantity above 0, `pods` below 1 or `db.instances` outside 1-2.
+The entry then keeps its values.
 
 It writes as the user `maxcloud:app-sync` (impersonated), not as itself,
 so the cluster's limits on what a developer may ask for apply: a

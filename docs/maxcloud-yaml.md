@@ -44,6 +44,11 @@ manifests), and `mcloud env set` refuses the names it declares
 read by mcloud when it builds. The deploy workflow `mcloud init` writes runs on
 pushes to `main`: with another `branch:`, change its trigger too.
 
+A pushed `maxcloud.yaml` with values that can't work is refused too, and
+the app keeps what it had: a bucket name that isn't lowercase letters,
+digits and single hyphens (or is `db`, or is listed twice), a quota or
+size that isn't above 0, `pods` below 1, `db.instances` other than 1 or 2.
+
 A `maxcloud.yaml` asking for more than a developer may have is refused.
 `mcloud deploy` says why; for a push, the reason is only on the entry in
 `flux-system` (the annotation `maxcloud.gronblom.dev/sync-error`, and a
