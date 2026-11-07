@@ -54,7 +54,7 @@ func (c *Client) app(ctx context.Context, provider *unstructured.Unstructured) (
 			return ""
 		}
 		a.Entry = &registry.Entry{Name: s("name"), Repo: s("repo"), Path: s("path"), Branch: s("branch"), CPU: s("cpu"), Memory: s("memory"), Pods: s("pods"), Deploy: s("deploy"),
-			Buckets: s("buckets"), DB: s("db"), DBInstances: s("dbInstances"), DBSize: s("dbSize"), Domains: s("domains")}
+			Buckets: s("buckets"), DB: s("db"), DBInstances: s("dbInstances"), DBSize: s("dbSize"), Domains: s("domains"), Owners: s("owners")}
 		a.InGit = provider.GetLabels()[registry.FluxOwnerLabel] != ""
 		if a.Entry.Name != "" {
 			a.Name = a.Entry.Name

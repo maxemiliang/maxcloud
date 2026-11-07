@@ -174,3 +174,32 @@ func TestDomains(t *testing.T) {
 		}
 	}
 }
+
+func TestOwners(t *testing.T) {
+	e := &Entry{Name: "shop", Repo: "a/shop", Owners: " alice, bob,alice,, maxemiliang "}
+	if err := e.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	if e.Owners != "alice,bob,maxemiliang" {
+		t.Errorf("owners = %q", e.Owners)
+	}
+	if !e.HasOwner("bob") || e.HasOwner("carol") {
+		t.Errorf("HasOwner: %v", e.OwnerList())
+	}
+	back, err := FromObject(e.Object())
+	if err != nil || back.Owners != e.Owners {
+		t.Errorf("object round trip: %+v, %v", back, err)
+	}
+	for _, bad := range []string{"al ice", "-alice", "alice-", "a\nb", "authelia:alice", strings.Repeat("a", 65)} {
+		e := &Entry{Name: "shop", Repo: "a/shop", Owners: bad}
+		if err := e.Validate(); err == nil {
+			t.Errorf("owners %q passed", bad)
+		}
+	}
+	for _, good := range []string{"a", "alice.smith", "a_b", "alice@example.com", "Alice"} {
+		e := &Entry{Name: "shop", Repo: "a/shop", Owners: good}
+		if err := e.Validate(); err != nil {
+			t.Errorf("owners %q: %v", good, err)
+		}
+	}
+}

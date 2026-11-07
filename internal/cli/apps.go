@@ -23,7 +23,7 @@ func appsCmd(g *globals) *cobra.Command {
 		Use:   "apps",
 		Short: "Register, change and remove apps",
 	}
-	c.AddCommand(appsListCmd(g), appsCreateCmd(g), appsSetCmd(g), appsDeleteCmd(g))
+	c.AddCommand(appsListCmd(g), appsCreateCmd(g), appsSetCmd(g), appsOwnersCmd(g), appsDeleteCmd(g))
 	return c
 }
 
@@ -52,12 +52,23 @@ func appsListCmd(g *globals) *cobra.Command {
 				if a.InGit {
 					where = "homelab git"
 				}
-				rows = append(rows, []string{u.Accent(a.Name), source(a.Entry), u.Dim(where), u.Mark(a.Deploy.Status, a.Applied), u.Dim(shortRev(a.Revision)), truncate(a.Deploy.Message, 60)})
+				rows = append(rows, []string{u.Accent(a.Name), source(a.Entry), u.Dim(where), owners(a.Entry), u.Mark(a.Deploy.Status, a.Applied), u.Dim(shortRev(a.Revision)), truncate(a.Deploy.Message, 60)})
 			}
-			u.Table([]string{"Name", "Source", "Registered", "Deployed", "Revision", "Message"}, rows)
+			u.Table([]string{"Name", "Source", "Registered", "Owners", "Deployed", "Revision", "Message"}, rows)
 			return nil
 		},
 	}
+}
+
+// owners is how apps list and status show an app's owners.
+func owners(e *registry.Entry) string {
+	if e == nil {
+		return "?"
+	}
+	if o := e.OwnerList(); len(o) > 0 {
+		return strings.Join(o, ", ")
+	}
+	return "admins"
 }
 
 func source(e *registry.Entry) string {
@@ -124,10 +135,15 @@ database, and starts deploying the app's manifests from its repo.
 
 In an app's repo, mcloud deploy does this by itself from maxcloud.yaml.
 
+You own the app you register (--owners adds the people you run it with):
+owners are admin in its namespace, and only they and admins may change or
+remove it. Change them later with mcloud apps owners.
+
 The name becomes the namespace, and public services get
 https://<service>--<name>.gronblom.dev.`,
 		Example: `  mcloud apps create shop --repo maxemiliang/shop
-  mcloud apps create shop --repo maxemiliang/shop --cpu 500m --memory 2Gi --db`,
+  mcloud apps create shop --repo maxemiliang/shop --cpu 500m --memory 2Gi --db
+  mcloud apps create shop --repo maxemiliang/shop --owners alice,bob`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			e.Name = args[0]
@@ -135,6 +151,7 @@ https://<service>--<name>.gronblom.dev.`,
 		},
 	}
 	entryFlags(c.Flags(), &e)
+	c.Flags().StringVar(&e.Owners, "owners", "", "co-owners besides you, comma-separated Authelia usernames")
 	cf.bind(c.Flags(), true)
 	return c
 }
@@ -155,6 +172,9 @@ func (g *globals) createApp(ctx context.Context, e registry.Entry, cf confirmFla
 		return fmt.Errorf("%s is already registered; change it with `mcloud apps set`", e.Name)
 	}
 	if err := g.checkNamespace(ctx, e.Name); err != nil {
+		return err
+	}
+	if err := g.addOwner(ctx, k, &e); err != nil {
 		return err
 	}
 	if e.Repo != "" && !e.Direct() {
@@ -288,6 +308,7 @@ func diffEntries(a, b *registry.Entry) []string {
 		{"db-instances", a.DBInstances, b.DBInstances, "1"},
 		{"db-size", a.DBSize, b.DBSize, "1Gi"},
 		{"domains", a.Domains, b.Domains, "none"},
+		{"owners", a.Owners, b.Owners, "none, admins only"},
 	} {
 		if f.a != f.b {
 			out = append(out, fmt.Sprintf("%s %s -> %s", f.name, show(f.a, f.def), show(f.b, f.def)))
@@ -353,8 +374,11 @@ func appsDeleteCmd(g *globals) *cobra.Command {
 		Short: "Remove an app, its namespace and all its data",
 		Long: `Remove an app from the registry. Flux then deletes everything the
 registry made for it, including its namespace, and with it every database and
-volume in it. There is no undo; restore a database from its backup if it had
-one.`,
+volume in it. There is no undo. Only the app's owners (and admins) may.
+
+Its buckets and database backups stay in Object Storage, but belong to this
+registration: registering the name again starts without them, unless an
+admin gives the new entry the old data.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name := args[0]
@@ -382,7 +406,7 @@ one.`,
 				msg += fmt.Sprintf(", including the database(s) %s", strings.Join(dbs, ", "))
 			}
 			g.UI().Printf("%s.", g.UI().Red(msg))
-			g.UI().Hint("Buckets and database backups in Object Storage are kept (still billed).")
+			g.UI().Hint("Buckets and database backups in Object Storage are kept (still billed); registering %s again doesn't get them back without an admin.", name)
 			g.UI().Println()
 			if cf.dryRun {
 				return nil

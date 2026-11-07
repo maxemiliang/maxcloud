@@ -44,11 +44,25 @@ A command that acts on an app takes its name as the first argument, else
 `$MCLOUD_APP`, else the `app:` of the `maxcloud.yaml` in this folder or a
 parent. So inside an app's repo, `mcloud status` is enough.
 
-`apps create`, `set` and `delete` change the registry
+`apps create`, `set`, `owners` and `delete` change the registry
 in the cluster (no commit anywhere), and show the change and ask first.
 Pass `--dry-run` to only see it, or `--yes` to skip the question. `delete`
 asks you to type the app's name. Apps registered in the homelab repo itself
 (the platform's own, like run-demo) change there instead.
+
+## Owners
+
+Whoever registers an app (`mcloud apps create`, or the first `mcloud
+deploy`) owns it. An app's owners are admin in its namespace (its pods,
+Secrets and database), and only they and admins may change or remove it;
+other developers see that it exists, not its data. `mcloud apps owners
+<app> --add <user>` and `--remove <user>` change them (Authelia usernames;
+an app keeps at least one). Owners never come from `maxcloud.yaml`. An app
+without owners is an admin's.
+
+A deleted app's buckets and database backups stay in Object Storage, but
+they belong to that registration: registering the name again starts
+without them, unless an admin hands them over.
 
 ## Output
 

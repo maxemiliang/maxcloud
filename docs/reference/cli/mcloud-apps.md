@@ -13,6 +13,7 @@ Register, change and remove apps.
 | [`mcloud apps create`](#mcloud-apps-create) | Register an app: its namespace, quota and deploys from its repo |
 | [`mcloud apps delete`](#mcloud-apps-delete) | Remove an app, its namespace and all its data |
 | [`mcloud apps list`](#mcloud-apps-list) | List registered apps and whether their last deploy applied |
+| [`mcloud apps owners`](#mcloud-apps-owners) | Show an app's owners, or add and remove co-owners |
 | [`mcloud apps set`](#mcloud-apps-set) | Change a registered app by hand (apps with a maxcloud.yaml: edit that) |
 
 ## mcloud apps create
@@ -26,6 +27,10 @@ database, and starts deploying the app's manifests from its repo.
 
 In an app's repo, mcloud deploy does this by itself from maxcloud.yaml.
 
+You own the app you register (--owners adds the people you run it with):
+owners are admin in its namespace, and only they and admins may change or
+remove it. Change them later with mcloud apps owners.
+
 The name becomes the namespace, and public services get
 https://&lt;service&gt;--&lt;name&gt;.gronblom.dev.
 
@@ -38,6 +43,7 @@ Examples:
 ```fish
 mcloud apps create shop --repo maxemiliang/shop
 mcloud apps create shop --repo maxemiliang/shop --cpu 500m --memory 2Gi --db
+mcloud apps create shop --repo maxemiliang/shop --owners alice,bob
 ```
 
 Flags:
@@ -54,6 +60,7 @@ Flags:
 | `--domains` string |  | custom hostnames, comma-separated &lt;host&gt;:&lt;service&gt;\[:proxied\] (paja.lankkupelit.fi:web:proxied); only those an admin allowed the app |
 | `--dry-run` |  | show the change, make none |
 | `--memory` string |  | quota: memory the app's pods may request in total (default 1Gi) |
+| `--owners` string |  | co-owners besides you, comma-separated Authelia usernames |
 | `--path` string |  | directory of the app's manifests in that repo (default deploy/k8s) |
 | `--pods` string |  | quota: number of pods (default 20) |
 | `--repo` string |  | the app's GitHub repo, &lt;owner&gt;/&lt;repo&gt;; leave out for an app kept in the registry repo |
@@ -67,8 +74,11 @@ Remove an app, its namespace and all its data.
 
 Remove an app from the registry. Flux then deletes everything the
 registry made for it, including its namespace, and with it every database and
-volume in it. There is no undo; restore a database from its backup if it had
-one.
+volume in it. There is no undo. Only the app's owners (and admins) may.
+
+Its buckets and database backups stay in Object Storage, but belong to this
+registration: registering the name again starts without them, unless an
+admin gives the new entry the old data.
 
 ```
 mcloud apps delete NAME [flags]
@@ -88,6 +98,40 @@ List registered apps and whether their last deploy applied.
 ```
 mcloud apps list
 ```
+
+## mcloud apps owners
+
+Show an app's owners, or add and remove co-owners.
+
+Show who owns an app, or change it. An app's owners are Authelia users:
+each is admin in the app's namespace (its pods, Secrets, database), and only
+they (and admins) may change or remove the app. Whoever registers an app
+owns it; owners add the people they run it with.
+
+Other developers see that the app exists, not its data. An app keeps at
+least one owner: to hand one over, add the new owner, then remove yourself.
+Owners never come from maxcloud.yaml.
+
+```
+mcloud apps owners NAME [flags]
+```
+
+Examples:
+
+```fish
+mcloud apps owners shop
+mcloud apps owners shop --add alice
+mcloud apps owners shop --add alice --remove bob
+```
+
+Flags:
+
+| Flag | Default | |
+| --- | --- | --- |
+| `--add` stringArray |  | an Authelia username to make an owner (repeatable) |
+| `--dry-run` |  | show the change, make none |
+| `--remove` stringArray |  | an owner to remove (repeatable) |
+| `-y`, `--yes` |  | don't ask before changing the registry |
 
 ## mcloud apps set
 
