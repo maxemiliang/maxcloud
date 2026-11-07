@@ -508,6 +508,12 @@ func (r *DatabaseReconciler) baseBackups(ctx context.Context, bucket string, gen
 			continue
 		}
 		data, found, err := r.Objects.GetObject(ctx, bucket, k)
+		if errors.Is(err, objectstorage.ErrTooLarge) {
+			// barman's are a few hundred bytes; the app's own S3 key can
+			// write here. Not a backup to count on.
+			log.FromContext(ctx).Info("ignoring an oversized backup.info", "bucket", bucket, "key", k)
+			continue
+		}
 		if err != nil {
 			return nil, err
 		}

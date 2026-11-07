@@ -1,7 +1,7 @@
 # Custom domains
 
 A function (or any Knative service of the app) can have hostnames besides
-`<service>-<app>.gronblom.dev`, from `domains:` in `maxcloud.yaml`:
+`<service>--<app>.gronblom.dev`, from `domains:` in `maxcloud.yaml`:
 
 ```yaml
 domains:

@@ -36,11 +36,14 @@ export.
 standard `Request` and returns a `Response`, so fetch-style frameworks work
 as they are: `onRequest(app.fetch)` with Hono, for example. Its second
 argument is `{ signal }`, aborted when the client goes away or the server
-shuts down. A handler that throws answers 500.
+shuts down. A handler that throws answers 500. `req.url` is absolute: the
+host is the request's `Host` header and the scheme `X-Forwarded-Proto`
+(`http` or `https`). `X-Forwarded-Host` isn't used: a client can send its
+own, and it reaches the app.
 
 | Option | Default | |
 | --- | --- | --- |
-| `public` | `false` | Reachable from the internet at `https://<name>-<app>.gronblom.dev`. Otherwise cluster-local. |
+| `public` | `false` | Reachable from the internet at `https://<name>--<app>.gronblom.dev`. Otherwise cluster-local. |
 | `minInstances` | `0` | Instances kept running when idle. |
 | `maxInstances` | `3` | |
 | `concurrency` | `0` | Requests one instance handles before another starts (0: no limit). |

@@ -6,11 +6,26 @@ import { Readable } from "node:stream";
 import { finished, pipeline } from "node:stream/promises";
 import type { HttpHandler, NodeListener } from "./define.ts";
 
+// requestURL is the request's absolute URL. The host is the Host header,
+// as the Go SDK's r.Host: Knative leaves it as the client sent it, custom
+// domains included. Not X-Forwarded-Host, which a client can send and which
+// reaches the app (Cloudflare and Traefik pass it on), so an app building
+// links from req.url could be pointed at someone else's host. The scheme is
+// X-Forwarded-Proto (set by Traefik for the original request), and only
+// http or https.
+function requestURL(req: Pick<IncomingMessage, "headers" | "url">): URL {
+  const forwarded = String(req.headers["x-forwarded-proto"] ?? "").split(",")[0]!.trim().toLowerCase();
+  const proto = forwarded === "https" ? "https" : "http";
+  const path = req.url ?? "/";
+  try {
+    return new URL(path, `${proto}://${req.headers.host || "localhost"}`);
+  } catch {
+    return new URL(path, `${proto}://localhost`);
+  }
+}
+
 function toRequest(req: IncomingMessage, signal: AbortSignal): Request {
-  // Traefik and Knative's queue-proxy set these for the original request.
-  const proto = String(req.headers["x-forwarded-proto"] ?? "http").split(",")[0]!.trim();
-  const host = req.headers["x-forwarded-host"] ?? req.headers.host ?? "localhost";
-  const url = new URL(req.url ?? "/", `${proto}://${host}`);
+  const url = requestURL(req);
   const headers = new Headers();
   for (let i = 0; i < req.rawHeaders.length; i += 2) {
     headers.append(req.rawHeaders[i]!, req.rawHeaders[i + 1]!);

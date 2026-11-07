@@ -5,7 +5,7 @@ import (
 )
 
 // DomainSpec puts one of the app's Knative services on a hostname of its
-// own (the Domain's name), next to the <service>-<app> one Knative gives
+// own (the Domain's name), next to the <service>--<app> one Knative gives
 // it. The service can be private: the hostname reaches its revisions
 // directly, with the request's Host header as the client sent it.
 type DomainSpec struct {

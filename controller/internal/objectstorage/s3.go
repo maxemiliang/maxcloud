@@ -68,12 +68,30 @@ func (s *S3) GetObject(ctx context.Context, bucket, key string) ([]byte, bool, e
 		return nil, false, fmt.Errorf("get s3://%s/%s: %w", bucket, key, err)
 	}
 	defer out.Body.Close()
-	data, err := io.ReadAll(out.Body)
+	if out.ContentLength != nil && *out.ContentLength > MaxObjectBytes {
+		return nil, false, fmt.Errorf("get s3://%s/%s: %d bytes: %w", bucket, key, *out.ContentLength, ErrTooLarge)
+	}
+	// Read one byte past the limit to tell "exactly the limit" from "more".
+	data, err := io.ReadAll(io.LimitReader(out.Body, MaxObjectBytes+1))
 	if err != nil {
 		return nil, false, fmt.Errorf("read s3://%s/%s: %w", bucket, key, err)
 	}
+	if len(data) > MaxObjectBytes {
+		return nil, false, fmt.Errorf("get s3://%s/%s: %w", bucket, key, ErrTooLarge)
+	}
 	return data, true, nil
 }
+
+// MaxObjectBytes is the most GetObject reads of one object. Everything the
+// controller reads is small (markers, registry entries, encrypted secrets
+// and variables, barman's backup.info), but some of it sits where an app's
+// own S3 key can write: an unbounded read of a huge object would take the
+// controller past its memory limit on every start.
+const MaxObjectBytes = 8 << 20
+
+// ErrTooLarge: the object is bigger than MaxObjectBytes. GetObject returns
+// it rather than a truncated object.
+var ErrTooLarge = fmt.Errorf("object larger than %d bytes", MaxObjectBytes)
 
 func (s *S3) PutObject(ctx context.Context, bucket, key string, data []byte) error {
 	_, err := s.client.PutObject(ctx, &s3.PutObjectInput{

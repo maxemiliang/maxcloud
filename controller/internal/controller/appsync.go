@@ -10,13 +10,16 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
@@ -28,6 +31,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/yaml"
+
+	"github.com/maxemiliang/maxcloud/controller/internal/naming"
 )
 
 // AppSync keeps a GitOps app's registry entry in line with the maxcloud.yaml
@@ -105,6 +110,11 @@ func (r *AppSync) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result,
 		}
 		if p.App != "" && p.App != entry.GetName() {
 			return ctrl.Result{}, r.fail(ctx, entry, revision, fmt.Sprintf("%s is for app %q, not %q", projectFile, p.App, entry.GetName()))
+		}
+		// Values the registry can't render would stop the one ResourceSet
+		// that renders every app: keep the entry as it was instead.
+		if err := p.validate(entry.GetName()); err != nil {
+			return ctrl.Result{}, r.fail(ctx, entry, revision, fmt.Sprintf("%s: %v", projectFile, err))
 		}
 		values, _, _ := unstructured.NestedMap(entry.Object, "spec", "defaultValues")
 		if values == nil {
@@ -283,6 +293,84 @@ func parseProject(data []byte) (*project, error) {
 		return nil, err
 	}
 	return &p, nil
+}
+
+// validate checks what apply would write: each value must render into
+// objects the API server accepts (the registry renders every app in one
+// ResourceSet, so one bad entry stops them all). How much an app may ask
+// for is the admission ceiling's call, not this.
+func (p *project) validate(app string) error {
+	if q := p.Quota; q != nil {
+		for _, f := range []struct{ name, v string }{{"quota.cpu", q.CPU}, {"quota.memory", q.Memory}} {
+			if f.v == "" {
+				continue
+			}
+			if err := positiveQuantity(f.v); err != nil {
+				return fmt.Errorf("%s: %w", f.name, err)
+			}
+		}
+		if q.Pods != nil {
+			if _, err := intInRange(q.Pods, 1, math.MaxInt32); err != nil {
+				return fmt.Errorf("quota.pods: %w", err)
+			}
+		}
+	}
+	seen := map[string]bool{}
+	for _, b := range p.Buckets {
+		if strings.TrimSpace(b) == "" {
+			continue // skipped, as mcloud and the registry's template do
+		}
+		name, opts, _ := strings.Cut(strings.TrimSpace(b), ":")
+		if _, err := naming.Bucket(app, name); err != nil {
+			return fmt.Errorf("buckets: %w", err)
+		}
+		if name == naming.DatabaseBucket {
+			return fmt.Errorf("buckets: %q is reserved for the database's backups", name)
+		}
+		if opts != "" && opts != "public" {
+			return fmt.Errorf("buckets: %q: the only option is :public", b)
+		}
+		if seen[name] {
+			return fmt.Errorf("buckets: %q is listed twice", name)
+		}
+		seen[name] = true
+	}
+	if d := p.DB; d != nil && d.Enabled {
+		if d.Size != "" {
+			if err := positiveQuantity(d.Size); err != nil {
+				return fmt.Errorf("db.size: %w", err)
+			}
+		}
+		if d.Instances != "" {
+			if _, err := intInRange(d.Instances, 1, 2); err != nil {
+				return fmt.Errorf("db.instances: %w", err)
+			}
+		}
+	}
+	return nil
+}
+
+func positiveQuantity(s string) error {
+	q, err := resource.ParseQuantity(s)
+	if err != nil {
+		return fmt.Errorf("%q isn't a quantity", s)
+	}
+	if q.Sign() <= 0 {
+		return fmt.Errorf("%q: must be more than 0", s)
+	}
+	return nil
+}
+
+// intInRange reads a whole number, from YAML (a float64) or a string.
+func intInRange(v any, lo, hi int) (int, error) {
+	n, err := strconv.Atoi(fmt.Sprint(v))
+	if err != nil {
+		return 0, fmt.Errorf("%v isn't a whole number", v)
+	}
+	if n < lo || n > hi {
+		return 0, fmt.Errorf("%d: must be from %d to %d", n, lo, hi)
+	}
+	return n, nil
 }
 
 // apply writes what the file says into an entry's values (what it leaves

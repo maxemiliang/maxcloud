@@ -78,7 +78,7 @@ those always push to the maxcloud registry.
 | `onSchedule` | a CronJob |
 | `onQueue` | a Deployment that KEDA scales from 0 on the queue's backlog |
 
-A public HTTP function is at `https://<function>-<app>.gronblom.dev/`;
+A public HTTP function is at `https://<function>--<app>.gronblom.dev/`;
 [custom domains](domains.md) add hostnames of your own. Queues keep their
 jobs in the app's Postgres database: `db: true` in `maxcloud.yaml` (mcloud
 says so when an app with a queue has none).

@@ -112,6 +112,31 @@ func TestPublicRouteGoesWithTheBucket(t *testing.T) {
 	}
 }
 
+// Flipping SafeNaming (with Traefik's) rewrites the existing routes'
+// backendRefs on their next reconcile.
+func TestPublicRouteFollowsSafeNaming(t *testing.T) {
+	e := newEnv(t, tenantNS("shop"), bucket("shop", "assets", func(b *v1.Bucket) { b.Spec.Public = true }))
+	withRoutes(e)
+	backendRef := func() any {
+		t.Helper()
+		_, _, route := e.routeObjects("mc-shop--assets")
+		if route == nil {
+			t.Fatal("no HTTPRoute")
+		}
+		rules, _, _ := unstructured.NestedSlice(route.Object, "spec", "rules")
+		return rules[0].(map[string]any)["backendRefs"].([]any)[0].(map[string]any)["name"]
+	}
+	e.mustReconcile("shop", "assets")
+	if got := backendRef(); got != "maxcloud-system-mc-shop-assets@kubernetescrd" {
+		t.Errorf("legacy backendRef = %v", got)
+	}
+	e.r.Routes.SafeNaming = true
+	e.mustReconcile("shop", "assets")
+	if got := backendRef(); got != "maxcloud-system_mc-shop--assets@kubernetescrd" {
+		t.Errorf("safe backendRef = %v", got)
+	}
+}
+
 func TestNoHostnamesWhenOff(t *testing.T) {
 	e := newEnv(t, tenantNS("shop"), bucket("shop", "assets", func(b *v1.Bucket) { b.Spec.Public = true }))
 	e.mustReconcile("shop", "assets") // Routes nil
@@ -124,12 +149,26 @@ func TestNoHostnamesWhenOff(t *testing.T) {
 }
 
 func TestTraefikServiceRef(t *testing.T) {
-	for in, want := range map[[2]string]string{
-		{"maxcloud-system", "mc-run-demo--cdn"}: "maxcloud-system-mc-run-demo-cdn@kubernetescrd",
-		{"ns", "a.b_c"}:                         "ns-a-b-c@kubernetescrd",
+	for _, tc := range []struct {
+		ns, name string
+		safe     bool
+		want     string
+	}{
+		{"maxcloud-system", "mc-run-demo--cdn", false, "maxcloud-system-mc-run-demo-cdn@kubernetescrd"},
+		{"ns", "a.b_c", false, "ns-a-b-c@kubernetescrd"},
+		{"maxcloud-system", "mc-run-demo--cdn", true, "maxcloud-system_mc-run-demo--cdn@kubernetescrd"},
+		{"ns", "a.b", true, "ns_a.b@kubernetescrd"},
 	} {
-		if got := traefikServiceRef(in[0], in[1]); got != want {
-			t.Errorf("traefikServiceRef(%q, %q) = %q, want %q", in[0], in[1], got, want)
+		if got := traefikServiceRef(tc.ns, tc.name, tc.safe); got != tc.want {
+			t.Errorf("traefikServiceRef(%q, %q, safe %v) = %q, want %q", tc.ns, tc.name, tc.safe, got, tc.want)
 		}
+	}
+	// What safe naming is for: legacy names collide, safe ones don't.
+	a, b := "mc-shop--x-y", "mc-shop-x--y"
+	if traefikServiceRef("maxcloud-system", a, false) != traefikServiceRef("maxcloud-system", b, false) {
+		t.Error("expected the legacy names of " + a + " and " + b + " to collide")
+	}
+	if traefikServiceRef("maxcloud-system", a, true) == traefikServiceRef("maxcloud-system", b, true) {
+		t.Error("safe names of " + a + " and " + b + " collide")
 	}
 }
