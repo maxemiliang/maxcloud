@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.14.0](https://github.com/maxemiliang/maxcloud/compare/v0.13.0...v0.14.0) (2026-11-08)
+
+
+### Features
+
+* app owners and registration IDs (audit M10) ([d286278](https://github.com/maxemiliang/maxcloud/commit/d28627845818d17184ded8fcc0d3d556d8985c44))
+* **mcloud:** app owners ([33e3439](https://github.com/maxemiliang/maxcloud/commit/33e34392fe4c227ce200d8d2ecd58414b0c445cc))
+
 ## [0.13.0](https://github.com/maxemiliang/maxcloud/compare/v0.12.0...v0.13.0) (2026-11-07)
 
 
