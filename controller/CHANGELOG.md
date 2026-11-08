@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.13.0](https://github.com/maxemiliang/maxcloud/compare/controller/v0.12.0...controller/v0.13.0) (2026-11-08)
+
+
+### Features
+
+* app owners and registration IDs (audit M10) ([d286278](https://github.com/maxemiliang/maxcloud/commit/d28627845818d17184ded8fcc0d3d556d8985c44))
+* **controller:** registration IDs, so a re-registered name doesn't get the old app's data ([23894cc](https://github.com/maxemiliang/maxcloud/commit/23894cc41b14d641134392c4ef2dd68f0823cf68))
+
 ## [0.12.0](https://github.com/maxemiliang/maxcloud/compare/controller/v0.11.0...controller/v0.12.0) (2026-11-07)
 
 
