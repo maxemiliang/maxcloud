@@ -49,7 +49,7 @@ Guides:
 - [Environment variables](docs/environment.md): `env:` and `mcloud env`
 - [Secrets and key-value storage](docs/secrets.md)
 - [mcloud](docs/mcloud.md): installing, logging in, which app a command
-  acts on
+  acts on, an app's owners
 
 Reference, generated from the code:
 

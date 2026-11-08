@@ -15,7 +15,8 @@ An app deploys one of two ways:
    a `wrangler.toml`.
 2. **Register the app.** The first `mcloud deploy` does it, from
    `maxcloud.yaml`. It adds the app's entry to the registry in the cluster,
-   with your login: no commit to the homelab repo. From that entry the
+   with your login: no commit to the homelab repo, and you
+   [own](mcloud.md#owners) the app. From that entry the
    platform creates the app's namespace with its quota and guardrails, its
    buckets and database, and a reconciler for the app's `deploy/k8s`. After
    that, a pushed change to `maxcloud.yaml` reaches the entry by itself (the
@@ -53,7 +54,7 @@ cluster instead (`--build cluster`, chosen by itself; with pack but no
 docker, pass it yourself): a buildpacks pod in the app's namespace, with
 the source streamed to it. The image goes to the maxcloud
 registry with a token of the app's push ServiceAccount that lasts an hour
-(whoever may manage the app's namespace may push its images); mcloud is
+(the app's owners and admins may get one); mcloud is
 docker's credential helper while it builds, so there's no docker login and
 nothing is written to `~/.docker`. Then it asks the image for its
 functions and applies their manifests. Functions you removed are deleted;
