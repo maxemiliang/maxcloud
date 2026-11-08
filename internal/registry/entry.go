@@ -252,8 +252,9 @@ var reserved = map[string]bool{
 	"knative-serving": true, "knative-operator": true, "keda": true,
 	"monitoring": true, "cnpg-system": true, "cert-manager": true,
 	"external-dns": true, "authelia": true, "kured": true,
-	// Their <name>.lab.gronblom.dev is Authelia's and Grafana's (an app may
-	// route its own <name>.lab.gronblom.dev).
+	// Their <name>.lab.gronblom.dev is Authelia's and Grafana's. (An app
+	// gets <name>.lab.gronblom.dev only if an admin allows it in the
+	// homelab's domains.yaml.)
 	"auth": true, "grafana": true,
 }
 
