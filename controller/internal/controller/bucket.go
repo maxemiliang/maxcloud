@@ -39,6 +39,10 @@ const (
 	// How often a ready Bucket is looked at again: its metrics, and
 	// anything deleted by hand (the credentials Secret).
 	resync = 5 * time.Minute
+
+	// How soon to look again when the app's entry is about to get its
+	// registration ID.
+	registrationWait = 5 * time.Second
 )
 
 // Condition reasons.
@@ -64,6 +68,9 @@ type BucketReconciler struct {
 	Routes *PublicRoutes
 	// Endpoint of the Object Storage instance, shown in the status.
 	Endpoint string
+	// Registrations: only the registration the app's data belongs to gets
+	// its buckets (nil: no check).
+	Registrations *Registrations
 }
 
 // +kubebuilder:rbac:groups=maxcloud.gronblom.dev,resources=buckets,verbs=get;list;watch;update;patch
@@ -94,6 +101,19 @@ func (r *BucketReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	bucket, err := naming.Bucket(app, b.Name)
 	if err != nil {
 		return ctrl.Result{}, r.setReady(ctx, &b, metav1.ConditionFalse, ReasonBadName, err.Error())
+	}
+
+	// Before anything is made or handed out: the app's credentials reach
+	// every bucket mc-<app>--*, not only this one.
+	v, err := r.Registrations.Check(ctx, app)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+	if v.Wait {
+		return ctrl.Result{RequeueAfter: registrationWait}, nil
+	}
+	if !v.Allowed {
+		return ctrl.Result{RequeueAfter: resync}, r.setReady(ctx, &b, metav1.ConditionFalse, ReasonRegistration, v.Reason)
 	}
 
 	if controllerutil.AddFinalizer(&b, BucketFinalizer) {

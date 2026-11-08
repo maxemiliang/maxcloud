@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"path"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -46,7 +47,52 @@ type Entry struct {
 	// "paja.lankkupelit.fi:web:proxied". Admission only lets an app have
 	// the hostnames an admin allowed it (the ConfigMap maxcloud-domains).
 	Domains string `json:"domains,omitempty"`
+	// Owners are the Authelia usernames that run the app, comma-separated:
+	// admin in its namespace, and the only developers who may change or
+	// remove its entry (admission). mcloud adds whoever registers the app.
+	// Never taken from maxcloud.yaml: a push mustn't grant it. An entry
+	// without owners (one from git) is an admin's.
+	Owners string `json:"owners,omitempty"`
 }
+
+// ownerRe: an Authelia username as the API server sees it after
+// "authelia:" (infrastructure/configs/run/registry-admission.yaml in the
+// homelab repo checks the same).
+var ownerRe = regexp.MustCompile(`^[A-Za-z0-9]([A-Za-z0-9._@-]*[A-Za-z0-9])?$`)
+
+// maxOwnerLength is admission's limit on one username.
+const maxOwnerLength = 64
+
+// ParseOwners reads an Entry.Owners value: usernames, each once.
+func ParseOwners(s string) ([]string, error) {
+	var out []string
+	for _, o := range strings.Split(s, ",") {
+		o = strings.TrimSpace(o)
+		if o == "" {
+			continue
+		}
+		if !ownerRe.MatchString(o) || len(o) > maxOwnerLength {
+			return nil, fmt.Errorf("owner %q: not an Authelia username (letters, digits, and . _ @ - inside)", o)
+		}
+		if slices.Contains(out, o) {
+			continue
+		}
+		out = append(out, o)
+	}
+	return out, nil
+}
+
+// FormatOwners is the canonical Entry.Owners value.
+func FormatOwners(owners []string) string { return strings.Join(owners, ",") }
+
+// OwnerList is e's owners; an unreadable value counts as none.
+func (e *Entry) OwnerList() []string {
+	o, _ := ParseOwners(e.Owners)
+	return o
+}
+
+// HasOwner reports whether user is one of e's owners.
+func (e *Entry) HasOwner(user string) bool { return slices.Contains(e.OwnerList(), user) }
 
 // Domain is one entry of Entry.Domains.
 type Domain struct {
@@ -266,6 +312,13 @@ func (e *Entry) Validate() error {
 		}
 		e.Domains = FormatDomains(ds)
 	}
+	if e.Owners != "" {
+		owners, err := ParseOwners(e.Owners)
+		if err != nil {
+			return err
+		}
+		e.Owners = FormatOwners(owners)
+	}
 	if e.Repo != "" && !repoRe.MatchString(e.Repo) {
 		return fmt.Errorf("repo %q: expected <owner>/<repo>", e.Repo)
 	}
@@ -343,6 +396,7 @@ func (e *Entry) fields() []field {
 		{"buckets", e.Buckets},
 		{"db", e.DB}, {"dbInstances", e.DBInstances}, {"dbSize", e.DBSize},
 		{"domains", e.Domains},
+		{"owners", e.Owners},
 	} {
 		if f.value != "" {
 			fs = append(fs, f)
@@ -378,6 +432,7 @@ func Parse(data []byte) (*Entry, error) {
 		Buckets: s("buckets"),
 		DB:      s("db"), DBInstances: s("dbInstances"), DBSize: s("dbSize"),
 		Domains: s("domains"),
+		Owners:  s("owners"),
 	}
 	if e.Name == "" {
 		return nil, fmt.Errorf("entry has no name")

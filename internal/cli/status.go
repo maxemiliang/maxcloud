@@ -41,6 +41,7 @@ func printStatus(u *ui.UI, st *kube.Status) {
 	kv := [][2]string{{"App", u.Bold(st.Name)}}
 	if st.Entry != nil {
 		kv = append(kv, [2]string{"Source", source(st.Entry)})
+		kv = append(kv, [2]string{"Owners", owners(st.Entry)})
 	} else {
 		kv = append(kv, [2]string{"Source", u.Amber("not in the registry")})
 	}

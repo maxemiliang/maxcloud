@@ -55,6 +55,19 @@ func (r *BranchReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	}
 	b.Status.Cluster = branchClusterName(&b)
 
+	// A branch is restored from the database's backups: only for the
+	// registration they belong to.
+	v, err := r.DB.Registrations.Check(ctx, b.Namespace)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+	if v.Wait {
+		return ctrl.Result{RequeueAfter: registrationWait}, nil
+	}
+	if !v.Allowed {
+		return ctrl.Result{RequeueAfter: resync}, r.setStatus(ctx, &b, v1.BranchFailed, metav1.ConditionFalse, ReasonRegistration, v.Reason)
+	}
+
 	c := &unstructured.Unstructured{}
 	c.SetGroupVersionKind(clusterGVK)
 	err = r.Get(ctx, types.NamespacedName{Namespace: b.Namespace, Name: b.Status.Cluster}, c)

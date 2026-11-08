@@ -138,6 +138,9 @@ func (g *globals) syncApp(ctx context.Context, k *kube.Client, p *project, direc
 		if err := g.checkNamespace(ctx, e.Name); err != nil {
 			return nil, false, err
 		}
+		if err := g.addOwner(ctx, k, &e); err != nil {
+			return nil, false, err
+		}
 		if err := k.PutRegistryEntry(ctx, &e); err != nil {
 			return nil, false, err
 		}

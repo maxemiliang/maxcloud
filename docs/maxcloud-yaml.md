@@ -24,7 +24,8 @@ server (VS Code's YAML extension, for one) completes and checks the file.
 ## What it owns
 
 `mcloud deploy` applies the whole file to the app's registry entry. What
-it leaves out stays as it is.
+it leaves out stays as it is. Who owns the app isn't in it: a push can't
+grant anyone access ([owners](mcloud.md#owners)).
 
 `deploy`, `quota`, `buckets`, `db` and `domains` are the file's: once it
 declares one, `mcloud apps set` refuses to change it, since the next push

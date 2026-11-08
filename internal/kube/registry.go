@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	authv1 "k8s.io/api/authentication/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -25,6 +26,29 @@ type RegistryEntry struct {
 	// SyncedFields are the registry keys (cpu, memory, pods, buckets, db,
 	// dbSize, dbInstances) the app's maxcloud.yaml declares, which it owns.
 	SyncedFields []string
+	// Registration is the entry's registration ID, which the maxcloud
+	// controller gives it: the app's buckets and database backups belong
+	// to one registration, and a new entry under an old name doesn't get
+	// them without an admin.
+	Registration string
+}
+
+// RegistrationAnnotation holds an entry's registration ID (the maxcloud
+// controller's; only it and Flux may set it).
+const RegistrationAnnotation = "maxcloud.gronblom.dev/registration"
+
+// AutheliaPrefix is how the API server names Authelia's users and groups
+// (homelab infra/cluster-auth).
+const AutheliaPrefix = "authelia:"
+
+// Whoami returns the user the cluster sees this client as (what kubectl
+// auth whoami shows), such as authelia:alice.
+func (c *Client) Whoami(ctx context.Context) (string, error) {
+	r, err := c.Core.AuthenticationV1().SelfSubjectReviews().Create(ctx, &authv1.SelfSubjectReview{}, metav1.CreateOptions{})
+	if err != nil {
+		return "", err
+	}
+	return r.Status.UserInfo.Username, nil
 }
 
 // SyncedFieldsAnnotation on a registry entry lists the keys the app's
@@ -48,15 +72,16 @@ func (c *Client) GetRegistryEntry(ctx context.Context, name string) (*RegistryEn
 	if err != nil {
 		return nil, fmt.Errorf("registry entry %s: %w", name, err)
 	}
-	r := &RegistryEntry{Entry: e, InGit: o.GetLabels()[registry.FluxOwnerLabel] != ""}
+	r := &RegistryEntry{Entry: e, InGit: o.GetLabels()[registry.FluxOwnerLabel] != "", Registration: o.GetAnnotations()[RegistrationAnnotation]}
 	if v := o.GetAnnotations()[SyncedFieldsAnnotation]; v != "" {
 		r.SyncedFields = strings.Split(v, ",")
 	}
 	return r, nil
 }
 
-// PutRegistryEntry creates the app's entry, or replaces its values. An entry
-// that lives in git is refused: Flux would put it back.
+// PutRegistryEntry creates the app's entry, or replaces its values (owners
+// included: e must carry them). An entry that lives in git is refused: Flux
+// would put it back.
 func (c *Client) PutRegistryEntry(ctx context.Context, e *registry.Entry) error {
 	want := &unstructured.Unstructured{Object: e.Object()}
 	res := c.Dyn.Resource(gvrProvider).Namespace(FluxNamespace)
