@@ -469,6 +469,13 @@ discovery document.
 The controller isn't on the data path: if it's down, buckets and
 credentials keep working; only changes wait.
 
+It reads at most 8 MiB of any object in Object Storage (markers, the
+registry's and secrets' copies, registration records, barman's
+`backup.info`). All of these are small, but some sit where an app's own
+S3 key can write, and a huge one would take the controller past its
+memory limit (256Mi) on every start. A bigger object is an error, not
+read in part.
+
 ## Development
 
 ```fish
@@ -514,8 +521,9 @@ whole namespace, or whole Kubernetes cluster is gone comes back by itself:
 | the bucket has objects but no marker; or a new database's generation has WAL but no base backup; or neither a restore's generation nor its source has a base backup; or the marker says ready but there's no base backup; or the marker is unreadable | **Blocked**: never `initdb` over data it can't account for |
 
 A generation counts as restorable once barman's `backup.info` in
-`db-N/base/` says `status=DONE`; the controller takes that first base
-backup itself as soon as the new `Cluster` is ready.
+`db-N/base/` says `status=DONE` (one over 8 MiB is ignored); the
+controller takes that first base backup itself as soon as the new
+`Cluster` is ready.
 
 **When it's Blocked**, its `Blocked` condition says why. Look at the
 bucket's generations, then pick one:
