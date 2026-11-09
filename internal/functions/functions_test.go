@@ -297,6 +297,9 @@ func TestHTTPOptions(t *testing.T) {
 	if _, ok := get(c, "readinessProbe", "httpGet").(map[string]any)["port"]; ok {
 		t.Error("probe port: Knative probes the container port itself")
 	}
+	if _, ok := get(c, "readinessProbe").(map[string]any)["periodSeconds"]; ok {
+		t.Error("readinessProbe periodSeconds: Knative then probes once per period instead of until ready")
+	}
 	if get(spec, "volumes", 1, "emptyDir", "medium") != "Memory" || get(spec, "volumes", 0, "emptyDir", "sizeLimit") != "1Gi" {
 		t.Errorf("volumes = %v", get(spec, "volumes"))
 	}
