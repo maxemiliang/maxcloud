@@ -117,7 +117,7 @@ func hello(w http.ResponseWriter, r *http.Request) {
 var appFiles = map[string]string{
 	"maxcloud.yaml": `# This repo's app on maxcloud: the whole app's definition. mcloud deploy
 # registers the app from it the first time and keeps it in line after that
-# (no commit to the homelab repo); mcloud status, logs and the rest use it too.
+# (no commit to the platform's git); mcloud status, logs and the rest use it too.
 app: %[1]s
 # What the app may reserve (defaults: 200m CPU, 1Gi memory, 20 pods):
 # quota: {cpu: 500m, memory: 2Gi}
@@ -130,8 +130,8 @@ app: %[1]s
 # before it runs the app, and mcloud db migrate by hand:
 # db: true            # or {size: 2Gi, instances: 2}
 # Hostnames of your own for a function or Knative service (it can stay
-# private). Only ones an admin allowed this app (homelab
-# infrastructure/configs/run/domains.yaml); proxied: behind Cloudflare.
+# private). Only ones an admin allowed this app (maxcloud's
+# platform/infrastructure/configs/run/domains.yaml); proxied: behind Cloudflare.
 # domains:
 #   - {host: shop.gronblom.dev, service: web, proxied: true}
 # The folder the app is built from and mcloud dev runs in, if it isn't this

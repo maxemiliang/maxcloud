@@ -22,7 +22,7 @@ type App struct {
 	Deploy   Condition       // the app's Flux Kustomization
 	Revision string          // last revision Flux applied
 	Applied  bool            // the Kustomization exists
-	InGit    bool            // registered in the homelab repo, not with mcloud
+	InGit    bool            // registered in git (platform/), not with mcloud
 }
 
 // Apps lists the registered apps.

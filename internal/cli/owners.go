@@ -118,7 +118,7 @@ Owners never come from maxcloud.yaml.`,
 				return nil
 			}
 			if cur.InGit {
-				return fmt.Errorf("%s is registered in the homelab repo: its owners change in apps/maxcloud/apps/%s.yaml there", name, name)
+				return fmt.Errorf("%s is registered in git: its owners change in platform/apps/maxcloud/apps/%s.yaml in the maxcloud repo", name, name)
 			}
 			for _, o := range append(slices.Clone(add), remove...) {
 				if _, err := registry.ParseOwners(o); err != nil || strings.Contains(o, ",") {

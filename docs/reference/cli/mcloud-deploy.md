@@ -19,7 +19,7 @@ change in the homelab platform).
 
 The app's settings (quota, buckets, database, domains, deploy) come from
 maxcloud.yaml: the first deploy registers the app, later ones bring its
-registry entry in line. No commit to the homelab repo.
+registry entry in line. No commit to the platform's git.
 
 How the app deploys is maxcloud.yaml's deploy: (gitops or direct) when it
 has one. Without it, the app keeps the mode it has: gitops for a new app,

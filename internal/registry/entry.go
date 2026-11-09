@@ -1,5 +1,5 @@
 // Package registry reads and writes entries in the maxcloud app registry: one
-// ResourceSetInputProvider per app in the homelab repo's apps/maxcloud/apps/,
+// ResourceSetInputProvider per app in platform/apps/maxcloud/apps/,
 // which the Flux Operator turns into the app's namespace, guardrails and
 // reconciler (see apps/maxcloud/resourceset.yaml there).
 package registry
@@ -56,8 +56,8 @@ type Entry struct {
 }
 
 // ownerRe: an Authelia username as the API server sees it after
-// "authelia:" (infrastructure/configs/run/registry-admission.yaml in the
-// homelab repo checks the same).
+// "authelia:" (platform/infrastructure/configs/run/registry-admission.yaml
+// checks the same).
 var ownerRe = regexp.MustCompile(`^[A-Za-z0-9]([A-Za-z0-9._@-]*[A-Za-z0-9])?$`)
 
 // maxOwnerLength is admission's limit on one username.
@@ -226,7 +226,7 @@ const DeployDirect = "direct"
 func (e *Entry) Direct() bool { return e.Deploy == DeployDirect }
 
 // Defaults the ResourceSet applies to empty fields (keep in sync with
-// resourceset.yaml in the homelab repo).
+// platform/apps/maxcloud/resourceset.yaml).
 const (
 	DefaultPath   = "deploy/k8s"
 	DefaultBranch = "main"
@@ -339,7 +339,7 @@ func (e *Entry) Validate() error {
 		return fmt.Errorf("deploy %q: gitops (the default) or direct", e.Deploy)
 	}
 	if e.Repo == "" && e.Path == "" && !e.Direct() {
-		return fmt.Errorf("an app kept in the homelab repo needs --path (e.g. apps/%s)", e.Name)
+		return fmt.Errorf("an app kept in the maxcloud repo needs --path (e.g. platform/apps/%s)", e.Name)
 	}
 	if e.Branch != "" && (!branchRe.MatchString(e.Branch) || strings.Contains(e.Branch, "..")) {
 		return fmt.Errorf("branch %q: not a valid branch name", e.Branch)
@@ -441,12 +441,12 @@ func Parse(data []byte) (*Entry, error) {
 	return e, nil
 }
 
-// Labels on an entry made in the cluster by mcloud (not from homelab git).
+// Labels on an entry made in the cluster by mcloud (not from git, platform/).
 const (
 	ManagedByLabel = "app.kubernetes.io/managed-by"
 	ManagedBy      = "mcloud"
 	// FluxOwnerLabel is on objects Flux applied from git: entries that
-	// still live in the homelab repo.
+	// still live in git (platform/).
 	FluxOwnerLabel = "kustomize.toolkit.fluxcd.io/name"
 	// Namespace of the registry's entries.
 	Namespace = "flux-system"

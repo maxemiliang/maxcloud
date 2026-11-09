@@ -123,7 +123,7 @@ func (g *globals) syncApp(ctx context.Context, k *kube.Client, p *project, direc
 		return nil, false, err
 	}
 	if cur != nil && cur.InGit {
-		g.UI().Note("%s is registered in the homelab repo; the settings there win over %s", p.App, ProjectFile)
+		g.UI().Note("%s is registered in git (the maxcloud repo's platform/); the settings there win over %s", p.App, ProjectFile)
 		return cur.Entry, false, nil
 	}
 	var base *registry.Entry
