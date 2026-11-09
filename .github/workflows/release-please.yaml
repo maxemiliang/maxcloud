@@ -19,6 +19,14 @@
 # Needs: Settings, Actions, General, "Allow GitHub Actions to create and
 # approve pull requests". The release PR is made with GITHUB_TOKEN, so CI
 # doesn't run on it by itself.
+#
+# mcloud (the root package, ".") has no `component` in
+# release-please-config.json on purpose. Its tags have none (v0.14.1), and
+# release-please checks a release PR with a single release (mcloud alone)
+# against the configured component, which the PR's branch never has: with
+# "component": "mcloud" it merged v0.14.1's PR without releasing it ("PR
+# component: undefined does not match configured component: mcloud",
+# release-please 17.6.0, BaseStrategy.buildRelease).
 name: release-please
 
 on:
