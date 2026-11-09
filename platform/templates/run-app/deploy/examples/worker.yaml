@@ -1,0 +1,31 @@
+# A background worker: always running, no HTTP, so a plain Deployment rather
+# than a Knative service. Same image as the web service, different command.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: worker
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: worker
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: worker
+    spec:
+      priorityClassName: tenant
+      # The restricted Pod Security level: what Knative sets for its
+      # services automatically has to be spelled out here.
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: worker
+          image: app
+          command: ["./worker"]
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]

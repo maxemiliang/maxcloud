@@ -1,0 +1,91 @@
+# Authelia's group maxcloud-developers: may run apps on maxcloud (mcloud),
+# not the cluster. They get:
+#   - reading what mcloud shows across the cluster (this ClusterRole): that
+#     apps exist and how they're doing, not their Secrets;
+#   - registering apps: the registry's entries in flux-system (the Role
+#     below), within the ceiling in
+#     infrastructure/configs/run/registry-admission.yaml. RBAC lets the
+#     group update and delete any entry; admission narrows that to the
+#     entry's owners (maxcloud-registry-owners), and makes whoever
+#     registers an app one of them;
+#   - for the apps they own only: admin in the app's namespace, and
+#     restoring its database (maxcloud-app-developer), bound per app to
+#     the entry's owners as Users authelia:<name> by the registry
+#     (apps/maxcloud/resourceset.yaml). Not to the group: owning one app
+#     mustn't mean reading every app's database credentials.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: maxcloud-developer-read
+rules:
+  - apiGroups: [""]
+    resources: [namespaces, events]
+    verbs: [get, list, watch]
+  - apiGroups: [events.k8s.io]
+    resources: [events]
+    verbs: [get, list, watch]
+  - apiGroups: [maxcloud.gronblom.dev]
+    resources: [buckets, databases, databasebranches]
+    verbs: [get, list, watch]
+  - apiGroups: [serving.knative.dev]
+    resources: [services, revisions, routes, configurations]
+    verbs: [get, list, watch]
+  - apiGroups: [postgresql.cnpg.io]
+    resources: [clusters]
+    verbs: [get, list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: maxcloud-developers-read
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: maxcloud-developer-read
+subjects:
+  - apiGroup: rbac.authorization.k8s.io
+    kind: Group
+    name: authelia:maxcloud-developers
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: maxcloud-registry
+  namespace: flux-system
+rules:
+  - apiGroups: [fluxcd.controlplane.io]
+    resources: [resourcesetinputproviders]
+    verbs: [get, list, watch, create, update, patch, delete]
+  # mcloud apps list / status: whether an app's deploy applied.
+  - apiGroups: [kustomize.toolkit.fluxcd.io]
+    resources: [kustomizations]
+    verbs: [get, list, watch]
+  - apiGroups: [source.toolkit.fluxcd.io]
+    resources: [gitrepositories]
+    verbs: [get, list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: maxcloud-developers-registry
+  namespace: flux-system
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: maxcloud-registry
+subjects:
+  - apiGroup: rbac.authorization.k8s.io
+    kind: Group
+    name: authelia:maxcloud-developers
+---
+# What `admin` doesn't include in an app's namespace: restoring and
+# recovering its database (mcloud db restore/recover annotate the Database).
+# Bound per app to its owners by the registry.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: maxcloud-app-developer
+rules:
+  - apiGroups: [maxcloud.gronblom.dev]
+    resources: [databases]
+    verbs: [get, list, watch, patch]

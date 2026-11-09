@@ -1,0 +1,58 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "description": "Run by .github/workflows/renovate.yaml (self-hosted, as our own GitHub App). A merge to main is a deploy (Flux), so nothing is automerged: every update is a PR, checked by the validate workflow, merged by hand.",
+  "extends": ["config:recommended", ":semanticCommits"],
+  "timezone": "Europe/Helsinki",
+  "schedule": ["* 0-8 * * 1"],
+  "minimumReleaseAge": "3 days",
+  "labels": ["dependencies"],
+  "flux": {
+    "description": "HelmRelease chart versions, OCIRepository and GitRepository tags.",
+    "managerFilePatterns": ["/^(clusters|infrastructure|apps)/.+\\.ya?ml$/"]
+  },
+  "kubernetes": {
+    "description": "Container images in plain manifests (Authelia, hello).",
+    "managerFilePatterns": ["/^(clusters|infrastructure|apps)/.+\\.ya?ml$/"]
+  },
+  "customManagers": [
+    {
+      "description": "Versions with a `# renovate: datasource=... depName=...` comment on the line above.",
+      "customType": "regex",
+      "managerFilePatterns": ["/^\\.github/workflows/.+\\.ya?ml$/"],
+      "matchStrings": ["# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)\\s+\\w+: (?<currentValue>\\S+)"]
+    }
+  ],
+  "packageRules": [
+    {
+      "description": "Providers and modules come from the OpenTofu registry, like `tofu init` (and the lock files) use.",
+      "matchDatasources": ["terraform-provider", "terraform-module"],
+      "registryUrls": ["https://registry.opentofu.org"]
+    },
+    {
+      "description": "One PR for the UpCloud provider across all four stacks.",
+      "matchDatasources": ["terraform-provider"],
+      "groupName": "OpenTofu providers"
+    },
+    {
+      "description": "Local tooling and CI actions deploy nothing: one PR each.",
+      "matchManagers": ["mise"],
+      "groupName": "mise tools"
+    },
+    {
+      "matchManagers": ["github-actions"],
+      "groupName": "GitHub Actions"
+    },
+    {
+      "description": "kubectl must stay within one minor version of the cluster; minor bumps wait for a cluster upgrade.",
+      "matchManagers": ["mise"],
+      "matchDepNames": ["kubectl"],
+      "matchUpdateTypes": ["major", "minor"],
+      "dependencyDashboardApproval": true
+    },
+    {
+      "description": "Knative supports upgrading one minor version at a time: one PR per minor, merged in order.",
+      "matchPackageNames": ["knative-operator"],
+      "separateMultipleMinor": true
+    }
+  ]
+}

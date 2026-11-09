@@ -1,0 +1,23 @@
+# Cluster-wide pieces of the run platform (Knative apps in their own
+# namespaces). Per-namespace guardrails come from the app registry,
+# apps/maxcloud/resourceset.yaml.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - priorityclass.yaml
+  - admission.yaml
+  # Flux objects and ClusterIssuer certificates: not in app namespaces.
+  - tenant-kinds.yaml
+  # Which Knative names and Traefik Middlewares apps may make, and which
+  # pods they may connect to (none of the platform's).
+  - tenant-routing.yaml
+  - tenant-egress.yaml
+  # Which hostnames apps may ask Traefik's in-cluster entrypoint for (one
+  # more policy per app comes from the app registry).
+  - traefik-ingress.yaml
+  - rbac.yaml
+  - registry-admission.yaml
+  # Custom hostnames: who may have which (domains.yaml), checked on registry
+  # entries and on every route in an app namespace.
+  - domains.yaml
+  - route-admission.yaml

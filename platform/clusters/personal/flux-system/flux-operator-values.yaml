@@ -1,0 +1,18 @@
+# Helm values for the Flux Operator chart. Shared by the bootstrap install
+# (infra/flux) and the Flux-managed HelmRelease (via the generated ConfigMap).
+# Requests sized to what the operator uses (2m CPU, ~150Mi idle, 2026-11-04)
+# instead of the chart's 100m / 64Mi: CPU requests are the scarce resource when
+# one node runs everything. Helm merges this with the chart's defaults, so the
+# limits (2 CPU, 1Gi) stay as they are.
+resources:
+  requests:
+    cpu: 25m
+    memory: 160Mi
+# The operator's own lockdown (--default-service-account=flux-operator): a
+# ResourceSet without serviceAccountName applies as the `flux-operator` SA of
+# its own namespace instead of as the operator. Ours are in flux-system, where
+# that SA is the operator's own (cluster-admin, from this chart), so they work
+# as before; one anywhere else gets nothing. The FluxInstance is never
+# impersonated. See docs/kb/flux/multitenant-lockdown.md.
+multitenancy:
+  enabled: true

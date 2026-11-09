@@ -1,0 +1,78 @@
+# Scrape configs for things installed before the Prometheus
+# Operator CRDs exist. Their charts can create these too, but then a fresh
+# cluster (DR rebuild) would fail to install them until kube-prometheus-stack
+# is up. Here, in infra-configs, the CRDs are guaranteed to exist.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: cert-manager
+  namespace: monitoring
+spec:
+  namespaceSelector:
+    matchNames: [cert-manager]
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: cert-manager
+      app.kubernetes.io/component: controller
+  endpoints:
+    - port: http-metrics
+      interval: 60s
+---
+# Flux Operator reports the Ready status of every Flux object
+# (flux_resource_info), which is what the FluxResourceNotReady alert uses.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: flux-operator
+  namespace: monitoring
+spec:
+  namespaceSelector:
+    matchNames: [flux-system]
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: flux-operator
+  endpoints:
+    - port: http
+      interval: 60s
+---
+# Every CloudNativePG Postgres instance, in any namespace: a new database
+# cluster is monitored (and covered by the homelab.cnpg alerts) without any
+# config of its own.
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: cnpg-instances
+  namespace: monitoring
+spec:
+  namespaceSelector:
+    any: true
+  selector:
+    matchLabels:
+      cnpg.io/podRole: instance
+  podMetricsEndpoints:
+    - port: metrics
+      interval: 30s
+      relabelings:
+        # Database cluster name and current role (primary/replica) on every
+        # series, for alerts and the CloudNativePG dashboard.
+        - sourceLabels: [__meta_kubernetes_pod_label_cnpg_io_cluster]
+          targetLabel: cluster
+        - sourceLabels: [__meta_kubernetes_pod_label_cnpg_io_instanceRole]
+          targetLabel: role
+---
+# The CloudNativePG operator itself. The dashboard uses its metrics to find
+# the operator's namespace.
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: cnpg-operator
+  namespace: monitoring
+spec:
+  namespaceSelector:
+    matchNames: [cnpg-system]
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: cloudnative-pg
+  podMetricsEndpoints:
+    - port: metrics
+      interval: 60s

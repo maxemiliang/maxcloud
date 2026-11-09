@@ -1,0 +1,26 @@
+# Workloads. Waits for the whole platform (ingress, certificates, DNS) first.
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: apps
+  namespace: flux-system
+spec:
+  # Applied as kustomize-controller (cluster-admin); see flux-instance.yaml.
+  serviceAccountName: kustomize-controller
+  dependsOn:
+    - name: infra-configs
+  interval: 1h
+  retryInterval: 2m
+  # Waits for the per-app Flux Kustomizations it creates (wait: true), so
+  # it must outlast their timeouts (up to 10m).
+  timeout: 15m
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  path: ./apps
+  prune: true
+  wait: true
+  decryption:
+    provider: sops
+    secretRef:
+      name: sops-age

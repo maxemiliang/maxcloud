@@ -1,0 +1,143 @@
+# Authelia's configuration file, turned into the authelia-config ConfigMap by
+# kustomization.yaml (the name gets a content hash, so editing this file
+# restarts Authelia). No secrets in here: they're read from the
+# authelia-secrets Secret, through AUTHELIA_*_FILE environment variables
+# (deployment.yaml) or the template filter's `secret` function below. The
+# filter runs over the whole file, comments included: no double braces in
+# comments.
+# Reference: https://www.authelia.com/configuration/
+server:
+  address: 'tcp://:9091/'
+  # Don't write /app/.healthcheck.env (only used by the image's Docker
+  # HEALTHCHECK script): the root filesystem is read-only, and Kubernetes
+  # probes /api/health directly.
+  disable_healthcheck: true
+
+log:
+  level: 'info'
+
+theme: 'auto'
+
+# Users live in a file (authelia-users Secret): one person, no LDAP needed.
+authentication_backend:
+  # Resetting a forgotten password needs an email; change it in git instead.
+  password_reset:
+    disable: true
+  file:
+    path: '/config/users/users_database.yml'
+
+# Second factors. Passkeys can also be used to log in without a password.
+webauthn:
+  display_name: 'homelab'
+  enable_passkey_login: true
+totp:
+  issuer: 'lab.gronblom.dev'
+
+# The session cookie is valid for every *.lab.gronblom.dev host, which is
+# what makes forward auth (one login for every admin tool) work later.
+session:
+  cookies:
+    - domain: 'lab.gronblom.dev'
+      authelia_url: 'https://auth.lab.gronblom.dev'
+      inactivity: '1 hour'
+      expiration: '12 hours'
+      remember_me: '1 month'
+
+# Forward auth (Traefik ForwardAuth middleware) checks requests against
+# these rules. Nothing uses it yet; Grafana logs in through OIDC instead.
+access_control:
+  default_policy: 'deny'
+  rules:
+    - domain: '*.lab.gronblom.dev'
+      subject: 'group:admins'
+      policy: 'two_factor'
+
+# Locks a user out for 10 minutes after 5 failed logins in 2 minutes.
+regulation:
+  max_retries: 5
+  find_time: '2 minutes'
+  ban_time: '10 minutes'
+
+# SQLite on the authelia-data volume: registered passkeys and TOTP secrets
+# (encrypted with storage.encryption_key), plus login history.
+storage:
+  local:
+    path: '/data/db.sqlite3'
+
+# Registering a passkey or TOTP device first asks for a one-time code
+# "sent by email". With one user, a file is enough:
+#   kubectl -n authelia exec deploy/authelia -- cat /data/notification.txt
+notifier:
+  filesystem:
+    filename: '/data/notification.txt'
+
+identity_providers:
+  oidc:
+    jwks:
+      - key_id: 'main'
+        algorithm: 'RS256'
+        use: 'sig'
+        key: {{ secret "/secrets/oidc-jwks-key.pem" | mindent 10 "|" | msquote }}
+
+    # Grafana reads name, email and groups from the ID token instead of the
+    # userinfo endpoint, so put them there.
+    # https://www.authelia.com/integration/openid-connect/clients/grafana/
+    claims_policies:
+      grafana:
+        id_token: ['email', 'name', 'groups', 'preferred_username']
+      # The Kubernetes API server reads the user and groups from the ID
+      # token (UKS cluster authentication, infra/cluster-auth).
+      kubernetes:
+        id_token: ['groups', 'preferred_username', 'email']
+
+    lifespans:
+      custom:
+        # mcloud and kubectl: a passkey login a working day, refreshed in
+        # between (refresh tokens rotate on use).
+        cli:
+          id_token: '1h'
+          access_token: '1h'
+          refresh_token: '12h'
+
+    clients:
+      - client_id: 'grafana'
+        client_name: 'Grafana'
+        # A hash of the secret; Grafana has the secret itself
+        # (grafana-oidc Secret in the monitoring namespace).
+        client_secret: '{{ secret "/secrets/grafana-client-secret-digest" }}'
+        public: false
+        authorization_policy: 'two_factor'
+        claims_policy: 'grafana'
+        require_pkce: true
+        pkce_challenge_method: 'S256'
+        redirect_uris:
+          - 'https://grafana.lab.gronblom.dev/login/generic_oauth'
+        scopes: ['openid', 'profile', 'groups', 'email']
+        response_types: ['code']
+        grant_types: ['authorization_code']
+        access_token_signed_response_alg: 'none'
+        userinfo_signed_response_alg: 'none'
+        token_endpoint_auth_method: 'client_secret_basic'
+
+      # mcloud and kubectl log in to the cluster with this (mcloud login):
+      # the device code flow, or the browser on a fixed loopback port. A
+      # public client: a CLI can't keep a secret. The cluster's API server
+      # accepts its ID tokens (audience "kubernetes").
+      - client_id: 'kubernetes'
+        client_name: 'Kubernetes (mcloud, kubectl)'
+        public: true
+        authorization_policy: 'two_factor'
+        claims_policy: 'kubernetes'
+        lifespan: 'cli'
+        require_pkce: true
+        pkce_challenge_method: 'S256'
+        redirect_uris:
+          - 'http://127.0.0.1:18000/callback'
+        scopes: ['openid', 'profile', 'email', 'groups', 'offline_access']
+        response_types: ['code']
+        grant_types:
+          - 'authorization_code'
+          - 'refresh_token'
+          - 'urn:ietf:params:oauth:grant-type:device_code'
+        token_endpoint_auth_method: 'none'
+        userinfo_signed_response_alg: 'none'

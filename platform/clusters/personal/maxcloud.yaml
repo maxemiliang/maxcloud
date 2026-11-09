@@ -1,0 +1,57 @@
+# The maxcloud controller (apps' buckets, databases and domains, their image
+# pull credentials, and backups of registry entries and secrets), from the public
+# maxcloud repo at a release tag: its controller/config has the CRDs, RBAC
+# and Deployment.
+# Its namespace, config and credentials come from
+# infrastructure/controllers/maxcloud.
+#
+# A Kustomization of its own that nothing depends on: a controller that
+# can't start (say, an expired token) shows up here as not ready without
+# holding back infra-configs and apps. Apps whose registry entry has buckets,
+# db or domains need its CRDs; on a fresh cluster the registry retries until
+# they're there.
+# From controller/v0.11.0: Domains (custom hostnames, the registry field
+# domains), routed only within the ConfigMap maxcloud-domains
+# (infrastructure/configs/run/domains.yaml).
+# From controller/v0.12.0: names TraefikServices by Traefik's safe naming
+# when MAXCLOUD_TRAEFIK_SAFE_NAMING is on (infrastructure/controllers/
+# maxcloud/config.yaml, with safeNaming in the Traefik release), and the
+# security audit's fixes (bounded reads, app-sync validation, secrets
+# copies deleted with every entry).
+# From controller/v0.13.0: registration IDs (a re-registered app name gets
+# none of the old app's buckets or database until an admin adopts them)
+# and the owners field (docs/kb/data/maxcloud-app-owners-and-registrations.md).
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: GitRepository
+metadata:
+  name: maxcloud
+  namespace: flux-system
+spec:
+  interval: 1h
+  url: https://github.com/maxemiliang/maxcloud.git
+  ref:
+    tag: controller/v0.13.0
+  ignore: |
+    /*
+    !/controller/config/
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: maxcloud-controller
+  namespace: flux-system
+spec:
+  # Applied as kustomize-controller (cluster-admin); see flux-instance.yaml.
+  serviceAccountName: kustomize-controller
+  # Its namespace, ConfigMap and Secret.
+  dependsOn:
+    - name: infra-controllers
+  interval: 1h
+  retryInterval: 2m
+  timeout: 5m
+  sourceRef:
+    kind: GitRepository
+    name: maxcloud
+  path: ./controller/config
+  prune: true
+  wait: true

@@ -1,0 +1,102 @@
+# Platform layer. Flux Kustomizations, applied in order:
+#   infra-crds:        CRDs that no chart ships (Gateway API)
+#   infra-controllers: Helm charts that install controllers and their CRDs
+#   infra-configs:     objects that use those CRDs (ClusterIssuer, Gateway, ...)
+# Splitting them is what makes CRD ordering work: each layer only starts once
+# the previous one is healthy (dependsOn + wait).
+#
+# Gateway API CRDs come straight from the upstream repo at a pinned tag.
+# Traefik 3.7 supports the Standard channel of v1.6.3.
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: GitRepository
+metadata:
+  name: gateway-api
+  namespace: flux-system
+spec:
+  interval: 24h
+  url: https://github.com/kubernetes-sigs/gateway-api
+  ref:
+    tag: v1.6.3
+  # Only fetch the Standard-channel CRDs, not the whole repo.
+  ignore: |
+    /*
+    !/config/crd/standard/
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: infra-crds
+  namespace: flux-system
+spec:
+  # Applied as kustomize-controller (cluster-admin); see flux-instance.yaml.
+  serviceAccountName: kustomize-controller
+  interval: 1h
+  retryInterval: 2m
+  timeout: 5m
+  sourceRef:
+    kind: GitRepository
+    name: gateway-api
+  path: ./config/crd/standard
+  # Never prune CRDs: deleting a CRD deletes every object of that kind.
+  prune: false
+  wait: true
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: infra-controllers
+  namespace: flux-system
+spec:
+  # Applied as kustomize-controller (cluster-admin); see flux-instance.yaml.
+  serviceAccountName: kustomize-controller
+  dependsOn:
+    - name: infra-crds
+  interval: 1h # full re-apply / drift correction; git changes are picked up within 1m anyway
+  retryInterval: 2m # after a failure, retry sooner than `interval`
+  timeout: 10m
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  path: ./infrastructure/controllers
+  # Delete objects from the cluster when they're removed from git.
+  prune: true
+  # Ready only when everything it applied is healthy (Deployments rolled out,
+  # HelmReleases installed), not just "kubectl apply succeeded".
+  wait: true
+  decryption:
+    provider: sops
+    secretRef:
+      name: sops-age
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: infra-configs
+  namespace: flux-system
+spec:
+  # Applied as kustomize-controller (cluster-admin); see flux-instance.yaml.
+  serviceAccountName: kustomize-controller
+  dependsOn:
+    - name: infra-controllers
+  interval: 1h
+  retryInterval: 2m
+  timeout: 10m
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  path: ./infrastructure/configs
+  prune: true
+  # Includes waiting for Certificates to be issued; DNS-01 takes a few minutes.
+  wait: true
+  healthCheckExprs:
+    # A KnativeServing has no conditions until the operator first reconciles
+    # it, which the default check counts as ready, so `apps` started before
+    # Knative's webhook existed. Ready only once Ready=True; anything else
+    # counts as in progress.
+    - apiVersion: operator.knative.dev/v1beta1
+      kind: KnativeServing
+      current: "status.conditions.exists(e, e.type == 'Ready' && e.status == 'True')"
+  decryption:
+    provider: sops
+    secretRef:
+      name: sops-age

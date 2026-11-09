@@ -1,0 +1,127 @@
+# zot, maxcloud's container registry: https://registry.gronblom.dev. Images
+# live in Object Storage (bucket maxcloud-images, tofu: infra/storage). zot's
+# metadata database is in an emptyDir: every start rebuilds it from the
+# bucket, taking push times from the objects' modification times. Pull times
+# are lost on a restart, so retention rules use push times only.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: zot
+spec:
+  replicas: 1
+  # One pod at a time: two would each keep their own metadata over the same
+  # bucket. Pushes, and pulls of images a node hasn't cached, fail while it
+  # starts.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: zot
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: zot
+    spec:
+      enableServiceLinks: false
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: zot
+          image: ghcr.io/project-zot/zot:v2.1.23
+          args: [serve, /etc/zot/config.json]
+          envFrom:
+            # AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY of the S3 user zot.
+            - secretRef:
+                name: zot-s3
+          ports:
+            - name: http
+              containerPort: 5000
+          startupProbe:
+            httpGet:
+              path: /startupz
+              port: http
+            periodSeconds: 5
+            # Rebuilding the metadata from the bucket can take a while.
+            failureThreshold: 60
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /livez
+              port: http
+            periodSeconds: 30
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          resources:
+            requests:
+              cpu: 25m
+              memory: 128Mi
+            limits:
+              memory: 1Gi
+          volumeMounts:
+            - name: config
+              mountPath: /etc/zot
+              readOnly: true
+            - name: meta
+              mountPath: /var/lib/zot
+            - name: tmp
+              mountPath: /tmp
+            # The API server's CA, for checking apps' pull tokens against
+            # the cluster's token issuer.
+            - name: kube-ca
+              mountPath: /etc/kube-ca
+              readOnly: true
+      volumes:
+        # Written by the maxcloud controller from zot-base (kustomization).
+        - name: config
+          configMap:
+            name: zot-config
+        - name: meta
+          emptyDir: {}
+        - name: tmp
+          emptyDir: {}
+        - name: kube-ca
+          configMap:
+            name: kube-root-ca.crt
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: zot
+spec:
+  selector:
+    app.kubernetes.io/name: zot
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+---
+# DNS-only, not through Cloudflare's proxy: its free plan caps request
+# bodies at 100 MB, and image layers can be larger.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: zot
+spec:
+  parentRefs:
+    - name: public
+      namespace: traefik
+      sectionName: https-public
+  hostnames:
+    - registry.gronblom.dev
+  rules:
+    - backendRefs:
+        - name: zot
+          port: 80

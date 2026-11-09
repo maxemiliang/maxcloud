@@ -1,0 +1,45 @@
+# One route per DNS zone, because Cloudflare proxying is set per route.
+# sectionName pins each route to one listener, and so to one certificate.
+# No route is needed for plain HTTP: Traefik's web entrypoint redirects every
+# request to HTTPS before routing.
+#
+# DNS-only: hello.lab.gronblom.dev CNAME -> UpCloud LB. Clients talk TLS
+# straight to Traefik, which serves the *.lab.gronblom.dev certificate.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: hello-lab
+  namespace: hello
+spec:
+  parentRefs:
+    - name: public
+      namespace: traefik
+      sectionName: https-lab
+  hostnames:
+    - hello.lab.gronblom.dev
+  rules:
+    - backendRefs:
+        - name: hello
+          port: 80
+---
+# Proxied: clients talk TLS to Cloudflare (its free edge certificate), and
+# Cloudflare opens a second TLS connection to Traefik, which serves the
+# *.gronblom.dev certificate. Requires SSL/TLS mode "Full (strict)" on the zone.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: hello-public
+  namespace: hello
+  annotations:
+    external-dns.kubernetes.io/cloudflare-proxied: "true"
+spec:
+  parentRefs:
+    - name: public
+      namespace: traefik
+      sectionName: https-public
+  hostnames:
+    - hello.gronblom.dev
+  rules:
+    - backendRefs:
+        - name: hello
+          port: 80

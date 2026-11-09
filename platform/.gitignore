@@ -1,0 +1,47 @@
+# --- Secrets -----------------------------------------------------------------
+# Local env vars (API tokens, state passphrase). Template: .env.example
+.env
+.env.*
+!.env.example
+mise.local.toml
+
+# age private keys. Your key belongs in ~/.config/sops/age/keys.txt, never here.
+*.agekey
+keys.txt
+age.key
+# GitHub App private keys and other PEM keys
+*.pem
+
+# Plaintext copies made while editing SOPS files by hand
+*.dec.yaml
+*.decrypted.*
+
+# Kubeconfigs (infra/flux uses an ephemeral resource, so none should be written,
+# but in case one gets exported for debugging)
+kubeconfig
+*.kubeconfig
+kubeconfig.yaml
+
+# --- OpenTofu ----------------------------------------------------------------
+**/.terraform/*
+*.tfstate
+*.tfstate.*
+*.tfplan
+tfplan
+crash.log
+crash.*.log
+# Variable files can hold secrets. Commit *.tfvars.example instead.
+*.tfvars
+*.tfvars.json
+!*.tfvars.example
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+# Keep .terraform.lock.hcl committed: it pins provider checksums.
+
+# --- Editors / OS ------------------------------------------------------------
+.DS_Store
+.idea/
+.vscode/
+*.swp

@@ -1,0 +1,52 @@
+# The controller updates GitOps apps' registry entries from the maxcloud.yaml
+# in their repos, read from Flux's artifacts (maxcloud repo, controller
+# README, "maxcloud.yaml from the app's repo"). It needs to reach
+# source-controller, which Flux's own policies only open to flux-system...
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-maxcloud-artifacts
+  namespace: flux-system
+spec:
+  podSelector:
+    matchLabels:
+      app: source-controller
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: maxcloud-system
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: maxcloud-controller
+      ports:
+        - port: http
+---
+# ...and it writes the entries as this user, not as itself, so the limits
+# on what developers may ask for (infrastructure/configs/run/
+# registry-admission.yaml) apply to a maxcloud.yaml too.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: maxcloud-app-sync
+  namespace: flux-system
+rules:
+  - apiGroups: [fluxcd.controlplane.io]
+    resources: [resourcesetinputproviders]
+    verbs: [get, update]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: maxcloud-app-sync
+  namespace: flux-system
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: maxcloud-app-sync
+subjects:
+  - apiGroup: rbac.authorization.k8s.io
+    kind: User
+    name: maxcloud:app-sync

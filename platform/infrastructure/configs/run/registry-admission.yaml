@@ -1,0 +1,469 @@
+# Rules for the app registry's entries (ResourceSetInputProviders labelled
+# run.gronblom.dev/app in flux-system), now that apps register in the cluster
+# (mcloud) and not only through git.
+#
+# An entry's `name` becomes the app's namespace, and removing the entry
+# deletes that namespace. So for everyone: the name must be the entry's own,
+# a plain DNS label without "--", and not a namespace the registry doesn't
+# own. The registry would take over an existing namespace (Flux Operator
+# applies onto it as cluster-admin, RoleBindings included) and delete it
+# with the entry, so the list must name every namespace not made by the
+# registry: the platform's (infrastructure/), and the ones UpCloud and the
+# bootstrap make (cilium-secrets, flux-operator-bootstrap). Nor auth or
+# grafana, Authelia's and Grafana's hostnames.
+#
+# `repo`, `path` and `branch` go into the registry's templates as they are
+# (apps/maxcloud/resourceset.yaml), so they must be plain names: a newline
+# in `path` could rewrite the app's Kustomization (another source, no
+# targetNamespace, Flux's own service account). The same rules as mcloud's
+# (internal/registry/entry.go in maxcloud).
+#
+# The other values go into the same templates, and a value Kubernetes
+# rejects (a bucket Bad_Name, pods: -5) stops the one ResourceSet that
+# renders every app, so they're checked here too: for everyone, the
+# controller's app sync included, since it copies maxcloud.yaml as written.
+# Bucket names: the controller's naming.Bucket (controller/internal/naming).
+# Owners: Authelia usernames, the same rule as mcloud's ParseOwners.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: maxcloud-registry-names
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [fluxcd.controlplane.io]
+        apiVersions: ["*"]
+        operations: [CREATE, UPDATE]
+        resources: [resourcesetinputproviders]
+  matchConditions:
+    - name: app-entries-only
+      expression: "has(object.metadata.labels) && object.metadata.labels[?'run.gronblom.dev/app'].orValue('') == 'true'"
+    # Letting go of an entry being deleted (the maxcloud controller removes
+    # its finalizer) is always allowed, as long as the values stay: an entry
+    # that a later rule or allowlist change refuses mustn't hang in deletion.
+    - name: not-finalizing
+      expression: >-
+        !(request.operation == 'UPDATE' && has(object.metadata.deletionTimestamp) &&
+          object.spec == oldObject.spec)
+  variables:
+    - name: values
+      expression: "has(object.spec.defaultValues) ? object.spec.defaultValues : {}"
+    - name: name
+      expression: "'name' in variables.values ? string(variables.values['name']) : ''"
+    - name: repo
+      expression: "'repo' in variables.values ? string(variables.values['repo']) : ''"
+    - name: path
+      expression: >-
+        'path' in variables.values ?
+        (string(variables.values['path']).startsWith('./') ? string(variables.values['path']).substring(2) : string(variables.values['path'])) : ''
+    - name: branch
+      expression: "'branch' in variables.values ? string(variables.values['branch']) : ''"
+    - name: buckets
+      expression: >-
+        ('buckets' in variables.values ? string(variables.values['buckets']) : '')
+        .split(',').map(b, b.trim()).filter(b, b != '')
+    - name: owners
+      expression: >-
+        ('owners' in variables.values ? string(variables.values['owners']) : '')
+        .split(',').map(o, o.trim()).filter(o, o != '')
+    - name: str
+      expression: >-
+        ['cpu', 'memory', 'pods', 'dbSize', 'dbInstances', 'db', 'deploy']
+        .filter(k, k in variables.values)
+        .map(k, [k, string(variables.values[k])])
+  validations:
+    - expression: "variables.name == object.metadata.name"
+      messageExpression: "'the entry is ' + object.metadata.name + ' but its name input is ' + variables.name + ': they must be the same (the name becomes the namespace)'"
+      reason: Invalid
+    - expression: "variables.name.matches('^[a-z]([a-z0-9]|-[a-z0-9])*$') && size(variables.name) <= 30"
+      message: "app name: lowercase letters, digits and single dashes, starting with a letter, at most 30 characters"
+      reason: Invalid
+    - expression: >-
+        !(variables.name in ['default', 'flux-system', 'traefik', 'knative-serving', 'knative-operator',
+        'keda', 'monitoring', 'cnpg-system', 'cert-manager', 'external-dns', 'authelia', 'kured',
+        'maxcloud-system', 'registry', 'hello', 'auth', 'grafana']) &&
+        !['kube-', 'flux-', 'cilium', 'upcloud'].exists(p, variables.name.startsWith(p))
+      message: "app name: reserved for the platform"
+      reason: Forbidden
+    - expression: "variables.repo == '' || variables.repo.matches('^[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?/[A-Za-z0-9._-]+$')"
+      message: "repo: <owner>/<repo>"
+      reason: Invalid
+    - expression: >-
+        variables.path == '' ||
+        (variables.path.matches('^[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*$') &&
+          !variables.path.split('/').exists(s, s == '.' || s == '..'))
+      message: "path: a relative directory such as deploy/k8s"
+      reason: Invalid
+    - expression: "variables.branch == '' || (variables.branch.matches('^[A-Za-z0-9._/-]+$') && !variables.branch.contains('..'))"
+      message: "branch: not a valid branch name"
+      reason: Invalid
+    - expression: >-
+        variables.buckets.all(b,
+          b.matches('^[a-z0-9]([a-z0-9]|-[a-z0-9])*(:public)?$') &&
+          b.split(':')[0] != 'db' && !b.split(':')[0].endsWith('-s3alias') &&
+          size('mc-' + variables.name + '--' + b.split(':')[0]) <= 63)
+      messageExpression: >-
+        'buckets: comma-separated names of lowercase letters, digits and single dashes, optionally :public' +
+        ' (not db, not ending in -s3alias, and mc-' + variables.name + '--<bucket> at most 63 characters)'
+      reason: Invalid
+    - expression: >-
+        variables.buckets.map(b, b.split(':')[0]).all(n,
+          size(variables.buckets.filter(b, b.split(':')[0] == n)) == 1)
+      message: "buckets: each bucket once (a and a:public are the same bucket)"
+      reason: Invalid
+    - expression: >-
+        variables.str.all(kv,
+          kv[0] in ['cpu', 'memory', 'dbSize'] ?
+            isQuantity(kv[1]) && quantity(kv[1]).isGreaterThan(quantity('0')) :
+          kv[0] == 'pods' ? kv[1].matches('^[1-9][0-9]{0,3}$') :
+          kv[0] == 'dbInstances' ? kv[1].matches('^[1-9]$') :
+          kv[0] == 'db' ? kv[1] in ['', 'true', 'false'] :
+          kv[1] in ['', 'gitops', 'direct'])
+      message: "cpu, memory and dbSize: quantities above 0; pods and dbInstances: whole numbers from 1; db: true or false; deploy: gitops or direct"
+      reason: Invalid
+    - expression: >-
+        size(variables.owners) <= 20 &&
+        variables.owners.all(o, size(o) <= 64 && o.matches('^[A-Za-z0-9]([A-Za-z0-9._@-]*[A-Za-z0-9])?$'))
+      message: "owners: at most 20 comma-separated Authelia usernames (letters, digits, and . _ @ - inside)"
+      reason: Invalid
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: maxcloud-registry-names
+spec:
+  policyName: maxcloud-registry-names
+  validationActions: [Deny]
+  matchResources:
+    namespaceSelector:
+      matchLabels:
+        kubernetes.io/metadata.name: flux-system
+---
+# The ceiling on what an entry may ask for: registering an app makes a
+# namespace with that quota, so "may register apps" mustn't mean "may take
+# the cluster". Admins (Authelia's admins group), Flux (entries from git)
+# and the maxcloud controller (restoring entries from its copy) are exempt.
+#
+# Nor may anyone else point an app at this repo: an entry without `repo`
+# deploys `path` from the homelab repo itself (run-demo does), and this repo
+# is private. Such an entry needs `repo` or `deploy: direct`; an existing one
+# from git may be updated as long as its path stays.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: maxcloud-registry-limits
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [fluxcd.controlplane.io]
+        apiVersions: ["*"]
+        operations: [CREATE, UPDATE]
+        resources: [resourcesetinputproviders]
+  matchConditions:
+    - name: app-entries-only
+      expression: "has(object.metadata.labels) && object.metadata.labels[?'run.gronblom.dev/app'].orValue('') == 'true'"
+    # Letting go of an entry being deleted (the maxcloud controller removes
+    # its finalizer) is always allowed, as long as the values stay: an entry
+    # that a later rule or allowlist change refuses mustn't hang in deletion.
+    - name: not-finalizing
+      expression: >-
+        !(request.operation == 'UPDATE' && has(object.metadata.deletionTimestamp) &&
+          object.spec == oldObject.spec)
+    - name: not-exempt
+      expression: >-
+        !request.userInfo.groups.exists(g, g in ['authelia:admins', 'kubeadm:cluster-admins', 'system:masters']) &&
+        !(request.userInfo.username in ['system:serviceaccount:flux-system:kustomize-controller',
+        'system:serviceaccount:maxcloud-system:maxcloud-controller'])
+  variables:
+    - name: values
+      expression: "has(object.spec.defaultValues) ? object.spec.defaultValues : {}"
+    - name: old
+      expression: >-
+        request.operation == 'UPDATE' && has(oldObject.spec.defaultValues) ? oldObject.spec.defaultValues : {}
+  validations:
+    - expression: >-
+        string(variables.values[?'repo'].orValue('')) != '' ||
+        string(variables.values[?'deploy'].orValue('')) == 'direct' ||
+        (request.operation == 'UPDATE' && string(variables.old[?'repo'].orValue('')) == '' &&
+          string(variables.old[?'path'].orValue('')) == string(variables.values[?'path'].orValue('')))
+      message: "repo: an app kept in the homelab repo is an admin's to register (give it repo: <owner>/<repo>, or deploy: direct)"
+      reason: Forbidden
+    - expression: "!('cpu' in variables.values) || quantity(string(variables.values['cpu'])).compareTo(quantity('1')) <= 0"
+      message: "quota: cpu at most 1 (ask an admin for more)"
+      reason: Forbidden
+    - expression: "!('memory' in variables.values) || quantity(string(variables.values['memory'])).compareTo(quantity('4Gi')) <= 0"
+      message: "quota: memory at most 4Gi (ask an admin for more)"
+      reason: Forbidden
+    - expression: "!('pods' in variables.values) || int(string(variables.values['pods'])) <= 40"
+      message: "quota: pods at most 40 (ask an admin for more)"
+      reason: Forbidden
+    - expression: "!('dbSize' in variables.values) || quantity(string(variables.values['dbSize'])).compareTo(quantity('10Gi')) <= 0"
+      message: "database: size at most 10Gi (ask an admin for more)"
+      reason: Forbidden
+    - expression: "!('dbInstances' in variables.values) || int(string(variables.values['dbInstances'])) <= 2"
+      message: "database: at most 2 instances"
+      reason: Forbidden
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: maxcloud-registry-limits
+spec:
+  policyName: maxcloud-registry-limits
+  validationActions: [Deny]
+  matchResources:
+    namespaceSelector:
+      matchLabels:
+        kubernetes.io/metadata.name: flux-system
+---
+# An entry's `domains` (custom hostnames, "<host>:<service>[:proxied]",
+# comma-separated) only within what an admin allowed the app: the ConfigMap
+# maxcloud-system/maxcloud-domains (domains.yaml). For everyone, the
+# maxcloud controller's app sync and admins included: the list is where an
+# admin says yes.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: maxcloud-registry-domains
+spec:
+  failurePolicy: Fail
+  paramKind:
+    apiVersion: v1
+    kind: ConfigMap
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [fluxcd.controlplane.io]
+        apiVersions: ["*"]
+        operations: [CREATE, UPDATE]
+        resources: [resourcesetinputproviders]
+  matchConditions:
+    - name: app-entries-only
+      expression: "has(object.metadata.labels) && object.metadata.labels[?'run.gronblom.dev/app'].orValue('') == 'true'"
+    # Letting go of an entry being deleted (the maxcloud controller removes
+    # its finalizer) is always allowed, as long as the values stay: an entry
+    # that a later rule or allowlist change refuses mustn't hang in deletion.
+    - name: not-finalizing
+      expression: >-
+        !(request.operation == 'UPDATE' && has(object.metadata.deletionTimestamp) &&
+          object.spec == oldObject.spec)
+    - name: has-domains
+      expression: >-
+        has(object.spec.defaultValues) && 'domains' in object.spec.defaultValues &&
+        string(object.spec.defaultValues['domains']).trim() != ''
+  variables:
+    - name: app
+      expression: "object.metadata.name"
+    - name: domains
+      expression: >-
+        string(object.spec.defaultValues['domains']).split(',').map(d, d.trim()).filter(d, d != '')
+    - name: allowed
+      expression: >-
+        (has(params.data) && variables.app in params.data ? params.data[variables.app] : '')
+        .split(',').map(p, p.trim().lowerAscii()).filter(p, p != '')
+    # The hostnames the list doesn't allow. `*.zone` allows one level below
+    # zone, as the controller and route-admission.yaml read it.
+    - name: refused
+      expression: >-
+        variables.domains.map(d, d.split(':')[0]).filter(h,
+          !variables.allowed.exists(p, h == p ||
+            (p.startsWith('*.') && h.endsWith(p.substring(1)) && size(h) >= size(p) &&
+              !h.substring(0, size(h) - size(p) + 1).contains('.'))))
+  validations:
+    - expression: >-
+        variables.domains.all(d,
+          d.matches('^([a-z0-9]([-a-z0-9]*[a-z0-9])?\\.)+[a-z]([-a-z0-9]*[a-z0-9])?:[a-z]([-a-z0-9]*[a-z0-9])?(:proxied)?$'))
+      message: "domains: comma-separated <host>:<service>, optionally :proxied (paja.lankkupelit.fi:web:proxied)"
+      reason: Invalid
+    - expression: "size(variables.refused) == 0"
+      messageExpression: >-
+        'domains not allowed for app ' + variables.app + ': ' + variables.refused.join(', ') +
+        ' (an admin allows hostnames in ConfigMap maxcloud-system/maxcloud-domains)'
+      reason: Forbidden
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: maxcloud-registry-domains
+spec:
+  policyName: maxcloud-registry-domains
+  validationActions: [Deny]
+  paramRef:
+    name: maxcloud-domains
+    namespace: maxcloud-system
+    parameterNotFoundAction: Deny
+  matchResources:
+    namespaceSelector:
+      matchLabels:
+        kubernetes.io/metadata.name: flux-system
+---
+# Who may change or remove an app: its owners (why and how:
+# docs/kb/data/maxcloud-app-owners-and-registrations.md). An entry's `owners` are
+# Authelia usernames (apps/maxcloud/resourceset.yaml makes each admin in the
+# app's namespace, so owning an app means its Secrets and database). For
+# everyone but admins (Authelia's admins group, the cluster's admin
+# certificate), Flux (entries from git),
+# Flux Operator (its finalizer) and the maxcloud controller (IDs, its
+# finalizer, restoring entries from its copy):
+#   - registering an app (CREATE) takes an Authelia login, and the
+#     requester among the owners;
+#   - changing or removing one (UPDATE, DELETE) takes being among its
+#     owners before the change; an entry without owners is an admin's;
+#   - an app keeps at least one owner;
+#   - the controller's app sync (maxcloud:app-sync, what an app repo's
+#     maxcloud.yaml writes) never changes owners: a push mustn't grant
+#     access.
+# Taking the run.gronblom.dev/app label off an entry unregisters the app as
+# surely as deleting it, so an entry counts if it's an app's before or
+# after the change. No `not-finalizing` exemption here, unlike the policies
+# above: only the controller and Flux Operator, both exempt, remove the
+# finalizers, and a non-owner taking the controller's off would skip
+# deleting the app's secrets' copies.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: maxcloud-registry-owners
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [fluxcd.controlplane.io]
+        apiVersions: ["*"]
+        operations: [CREATE, UPDATE, DELETE]
+        resources: [resourcesetinputproviders]
+  matchConditions:
+    - name: app-entries-only
+      expression: >-
+        (request.operation != 'DELETE' && has(object.metadata.labels) &&
+          object.metadata.labels[?'run.gronblom.dev/app'].orValue('') == 'true') ||
+        (request.operation != 'CREATE' && has(oldObject.metadata.labels) &&
+          oldObject.metadata.labels[?'run.gronblom.dev/app'].orValue('') == 'true')
+    # Admins: Authelia's group, and the cluster's own admin certificate
+    # (upctl kubernetes config: kubernetes-admin in kubeadm:cluster-admins,
+    # not system:masters; docs/kb/ops/admin-certificate-not-system-masters.md).
+    - name: not-exempt
+      expression: >-
+        !request.userInfo.groups.exists(g, g in ['authelia:admins', 'kubeadm:cluster-admins', 'system:masters']) &&
+        !(request.userInfo.username in ['system:serviceaccount:flux-system:kustomize-controller',
+        'system:serviceaccount:flux-system:flux-operator',
+        'system:serviceaccount:maxcloud-system:maxcloud-controller'])
+  variables:
+    # The requester's Authelia username ("" for anyone else).
+    - name: me
+      expression: >-
+        request.userInfo.username.startsWith('authelia:') ? request.userInfo.username.substring(9) : ''
+    - name: appSync
+      expression: "request.userInfo.username == 'maxcloud:app-sync'"
+    - name: newRaw
+      expression: >-
+        request.operation != 'DELETE' && has(object.spec.defaultValues) ?
+        string(object.spec.defaultValues[?'owners'].orValue('')) : ''
+    - name: oldRaw
+      expression: >-
+        request.operation != 'CREATE' && has(oldObject.spec.defaultValues) ?
+        string(oldObject.spec.defaultValues[?'owners'].orValue('')) : ''
+    - name: newOwners
+      expression: "variables.newRaw.split(',').map(o, o.trim()).filter(o, o != '')"
+    - name: oldOwners
+      expression: "variables.oldRaw.split(',').map(o, o.trim()).filter(o, o != '')"
+  validations:
+    - expression: "!variables.appSync || (request.operation == 'UPDATE' && variables.newRaw == variables.oldRaw)"
+      message: "owners: an app's maxcloud.yaml can't change who owns it (owners change with mcloud apps owners)"
+      reason: Forbidden
+    - expression: >-
+        variables.appSync || request.operation != 'CREATE' ||
+        (variables.me != '' && variables.me in variables.newOwners)
+      messageExpression: >-
+        variables.me == '' ? 'registering an app takes an Authelia login (mcloud login)' :
+        'owners: include yourself (' + variables.me + ') when registering an app (mcloud does)'
+      reason: Forbidden
+    - expression: >-
+        variables.appSync || request.operation == 'CREATE' ||
+        (variables.me != '' && variables.me in variables.oldOwners)
+      messageExpression: >-
+        size(variables.oldOwners) == 0 ?
+        'app ' + request.name + ' has no owners: only an admin may change or remove it' :
+        'only the owners of app ' + request.name + ' (' + variables.oldOwners.join(', ') + ') or an admin may change or remove it'
+      reason: Forbidden
+    - expression: "variables.appSync || request.operation != 'UPDATE' || size(variables.newOwners) > 0"
+      message: "owners: an app keeps at least one owner (add the new owner before removing the last)"
+      reason: Forbidden
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: maxcloud-registry-owners
+spec:
+  policyName: maxcloud-registry-owners
+  validationActions: [Deny]
+  matchResources:
+    namespaceSelector:
+      matchLabels:
+        kubernetes.io/metadata.name: flux-system
+---
+# An entry's registration ID (annotation maxcloud.gronblom.dev/registration)
+# decides whether it gets the buckets and database backups under its name
+# (maxcloud controller README, "Registrations"), so only the controller
+# sets or changes it, and Flux, for entries in this repo (git is an
+# admin's; run-demo declares its ID there). Nobody else, admins included:
+# an admin hands old data to a new entry with
+# maxcloud.gronblom.dev/adopt-registration=<old ID>, which only admins
+# (and git) may set or change. Flux Operator's and the controller's
+# finalizer updates keep the annotations, so they pass.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: maxcloud-registry-registration
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [fluxcd.controlplane.io]
+        apiVersions: ["*"]
+        operations: [CREATE, UPDATE]
+        resources: [resourcesetinputproviders]
+  matchConditions:
+    - name: app-entries-only
+      expression: >-
+        (has(object.metadata.labels) && object.metadata.labels[?'run.gronblom.dev/app'].orValue('') == 'true') ||
+        (request.operation == 'UPDATE' && has(oldObject.metadata.labels) &&
+          oldObject.metadata.labels[?'run.gronblom.dev/app'].orValue('') == 'true')
+    - name: not-controller
+      expression: "request.userInfo.username != 'system:serviceaccount:maxcloud-system:maxcloud-controller'"
+  variables:
+    - name: annotations
+      expression: "has(object.metadata.annotations) ? object.metadata.annotations : {}"
+    - name: old
+      expression: >-
+        request.operation == 'UPDATE' && has(oldObject.metadata.annotations) ? oldObject.metadata.annotations : {}
+    - name: flux
+      expression: "request.userInfo.username == 'system:serviceaccount:flux-system:kustomize-controller'"
+    - name: admin
+      expression: >-
+        request.userInfo.groups.exists(g, g in ['authelia:admins', 'kubeadm:cluster-admins', 'system:masters'])
+  validations:
+    - expression: >-
+        variables.flux ||
+        variables.annotations[?'maxcloud.gronblom.dev/registration'].orValue('') ==
+        variables.old[?'maxcloud.gronblom.dev/registration'].orValue('')
+      message: "maxcloud.gronblom.dev/registration: an entry's registration ID is the maxcloud controller's to set (or git's, for an entry in the homelab repo)"
+      reason: Forbidden
+    - expression: >-
+        variables.flux || variables.admin ||
+        variables.annotations[?'maxcloud.gronblom.dev/adopt-registration'].orValue('') ==
+        variables.old[?'maxcloud.gronblom.dev/adopt-registration'].orValue('')
+      message: "maxcloud.gronblom.dev/adopt-registration: only an admin may give an entry an earlier registration's data"
+      reason: Forbidden
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: maxcloud-registry-registration
+spec:
+  policyName: maxcloud-registry-registration
+  validationActions: [Deny]
+  matchResources:
+    namespaceSelector:
+      matchLabels:
+        kubernetes.io/metadata.name: flux-system

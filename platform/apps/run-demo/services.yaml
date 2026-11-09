@@ -1,0 +1,49 @@
+# Public: https://hello--run-demo.gronblom.dev (<name>--<namespace>, from the
+# label below). Proxied by Cloudflare, like hello.gronblom.dev.
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: hello
+  namespace: run-demo
+  labels:
+    run.gronblom.dev/expose: public
+  annotations:
+    # Knative copies the service's annotations to its HTTPRoute, where
+    # external-dns reads them.
+    external-dns.kubernetes.io/cloudflare-proxied: "true"
+spec:
+  template:
+    metadata:
+      annotations:
+        # Scale to zero when idle (the default), at most 2 pods.
+        autoscaling.knative.dev/max-scale: "2"
+    spec:
+      priorityClassName: tenant
+      containers:
+        - image: traefik/whoami:v1.12.0@sha256:c4717a8d1f0134a7444e24f881160e033991f23027c6c5a9a3f8fd22e70d1d44
+          args: ["--port", "8080"]
+          ports:
+            - containerPort: 8080
+          securityContext:
+            # The image doesn't set a user; Pod Security `restricted` needs a
+            # non-root one.
+            runAsUser: 65532
+---
+# Private: no label, so cluster-local only (http://whoami.run-demo.svc.cluster.local).
+# sso.yaml puts it on https://run-demo.lab.gronblom.dev behind Authelia.
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: whoami
+  namespace: run-demo
+spec:
+  template:
+    spec:
+      priorityClassName: tenant
+      containers:
+        - image: traefik/whoami:v1.12.0@sha256:c4717a8d1f0134a7444e24f881160e033991f23027c6c5a9a3f8fd22e70d1d44
+          args: ["--port", "8080"]
+          ports:
+            - containerPort: 8080
+          securityContext:
+            runAsUser: 65532

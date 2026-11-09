@@ -1,0 +1,60 @@
+# Event-driven jobs: one Kubernetes Job per pending row in the app's `jobs`
+# table, started by KEDA; nothing runs while the queue is empty. Good for
+# work that takes a while or should be isolated (a build, a report, an
+# upload to process).
+#
+# Events get into the table however they arrive:
+#   - a webhook: the app's Knative service checks it and INSERTs a row
+#   - an upload: the app hands out a presigned URL and INSERTs a row when the
+#     client confirms the upload
+#   - a schedule: a CronJob (cronjob.yaml) INSERTs a row, or does the work
+# The table and how a Job claims a row are the app's choice; claim with
+# `SELECT ... FOR UPDATE SKIP LOCKED` so parallel Jobs never take the same
+# one. Libraries do this for you: River (Go), pg-boss (Node.js),
+# Procrastinate (Python). KEDA only needs the query below to count the
+# backlog. Needs the app's database (db: true in maxcloud.yaml, or
+# database.yaml) for the db-app Secret, and the TriggerAuthentication db
+# from the end of database.yaml.
+apiVersion: keda.sh/v1alpha1
+kind: ScaledJob
+metadata:
+  name: process-jobs
+spec:
+  # Seconds between queue checks.
+  pollingInterval: 15
+  # At most this many Jobs at once.
+  maxReplicaCount: 3
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  triggers:
+    - type: postgresql
+      metadata:
+        query: "SELECT count(*) FROM jobs WHERE state = 'pending'"
+        # One Job per pending row.
+        targetQueryValue: "1"
+      authenticationRef:
+        name: db
+  jobTargetRef:
+    backoffLimit: 2
+    ttlSecondsAfterFinished: 86400
+    template:
+      spec:
+        priorityClassName: tenant
+        restartPolicy: Never
+        securityContext:
+          runAsNonRoot: true
+          seccompProfile:
+            type: RuntimeDefault
+        containers:
+          - name: process
+            image: app
+            # Claims one pending job, runs it, exits.
+            command: ["./process-one-job"]
+            env:
+              - name: DATABASE_URL
+                valueFrom:
+                  secretKeyRef: {name: db-app, key: uri}
+            securityContext:
+              allowPrivilegeEscalation: false
+              capabilities:
+                drop: [ALL]

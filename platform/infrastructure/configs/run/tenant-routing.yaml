@@ -1,0 +1,169 @@
+# What an app's routing objects may say, in namespaces labelled
+# run.gronblom.dev/tenant. Hostnames on routes: route-admission.yaml.
+
+# Knative names. A public service is <service>--<app>.gronblom.dev, and a
+# tagged revision <tag>-<service>--<app> (infrastructure/configs/knative/
+# serving.yaml). App names have no "--"; if service names and tags have none
+# either, everything before the "--" belongs to the app after it, and no
+# app can take another's hostname. Public buckets are <bucket>--<app> too.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: run-tenant-knative-names
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [serving.knative.dev]
+        apiVersions: ["*"]
+        operations: [CREATE, UPDATE]
+        resources: [services, routes]
+  validations:
+    - expression: "!object.metadata.name.contains('--')"
+      message: "Knative service and route names may not contain '--' (the hostname is <service>--<app>.gronblom.dev)"
+      reason: Invalid
+    - expression: >-
+        !has(object.spec.traffic) ||
+        object.spec.traffic.all(t, !has(t.tag) || !t.tag.contains('--'))
+      message: "traffic tags may not contain '--' (the hostname is <tag>-<service>--<app>.gronblom.dev)"
+      reason: Invalid
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: run-tenant-knative-names
+spec:
+  policyName: run-tenant-knative-names
+  validationActions: [Deny]
+  matchResources:
+    namespaceSelector:
+      matchLabels:
+        run.gronblom.dev/tenant: "true"
+---
+# Traefik Middlewares (rbac.yaml lets apps make them, for the Authelia
+# forward-auth on an SSO route). Traefik itself sends the requests a
+# Middleware names, and Traefik may reach every namespace: a forwardAuth
+# address of http://loki-gateway.monitoring/... or an `errors` middleware
+# whose service is an ExternalName Service (the CRD provider allows those,
+# for the maxcloud controller) would let an app use Traefik to get past
+# tenant-egress.yaml. So forwardAuth only to Authelia, and no `errors` or
+# `plugin`; the rest only change the request or response.
+# Of those, `headers` may not set Host or Knative-Serving-*: Traefik makes
+# a customRequestHeaders Host the request's Host, so with an SSO route's
+# backend (traefik-knative) it would pick another app's service, and the
+# activator picks the revision by Knative-Serving-*. Same rule for routes
+# below (run-tenant-route-rewrites).
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: run-tenant-middlewares
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [traefik.io, traefik.containo.us]
+        apiVersions: ["*"]
+        operations: [CREATE, UPDATE]
+        resources: [middlewares]
+  validations:
+    - expression: >-
+        object.spec.all(k, k in ['addPrefix', 'basicAuth', 'buffering', 'chain', 'circuitBreaker',
+        'compress', 'contentType', 'digestAuth', 'forwardAuth', 'grpcWeb', 'headers', 'inFlightReq',
+        'ipAllowList', 'ipWhiteList', 'passTLSClientCert', 'rateLimit', 'redirectRegex',
+        'redirectScheme', 'replacePath', 'replacePathRegex', 'retry', 'stripPrefix', 'stripPrefixRegex'])
+      message: "Middleware: not one apps may use (errors and plugin can make Traefik call other services)"
+      reason: Forbidden
+    - expression: >-
+        !has(object.spec.forwardAuth) ||
+        string(object.spec.forwardAuth.address).matches('^http://authelia\\.authelia\\.svc\\.cluster\\.local/api/authz/[a-z-]+(\\?[^#]*)?$')
+      message: "forwardAuth: only to Authelia, http://authelia.authelia.svc.cluster.local/api/authz/forward-auth"
+      reason: Forbidden
+    - expression: >-
+        !has(object.spec.headers) || !has(object.spec.headers.customRequestHeaders) ||
+        object.spec.headers.customRequestHeaders.all(k,
+          k.lowerAscii() != 'host' && !k.lowerAscii().startsWith('knative-serving-'))
+      message: "headers: customRequestHeaders may not set Host or Knative-Serving-* (they decide which app gets the request)"
+      reason: Forbidden
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: run-tenant-middlewares
+spec:
+  policyName: run-tenant-middlewares
+  validationActions: [Deny]
+  matchResources:
+    namespaceSelector:
+      matchLabels:
+        run.gronblom.dev/tenant: "true"
+---
+# Where an app's routes may send a request. An SSO route's backend is
+# Traefik's own in-cluster entrypoint (traefik-knative; the registry grants
+# every app that backend), which routes by Host alone, and the activator
+# routes by Knative-Serving-Namespace/-Revision. So a route in an app
+# namespace may only:
+#   - rewrite the Host (URLRewrite) to one of the app's own cluster-local
+#     names, <service>.<app>.svc.cluster.local;
+#   - not set Host with a RequestHeaderModifier;
+#   - set Knative-Serving-Namespace only to the app itself (maxcloud
+#     Domain routes copy Knative's, which set it).
+# On a rule's filters and on each backendRef's. Hostnames on routes:
+# route-admission.yaml. Traefik also strips Knative-Serving-* from every
+# incoming request (infrastructure/controllers/traefik), so a client can't
+# send its own through a route that doesn't set them.
+# Knative's controller is exempt, as in route-admission.yaml: its routes
+# only name the app's own revisions.
+# Audit M3, private/docs/research/tenant-cluster-local-isolation.md.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: run-tenant-route-rewrites
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [gateway.networking.k8s.io]
+        apiVersions: ["*"]
+        operations: [CREATE, UPDATE]
+        resources: [httproutes, grpcroutes]
+  matchConditions:
+    - name: not-knative
+      expression: "request.userInfo.username != 'system:serviceaccount:knative-serving:controller'"
+  variables:
+    - name: ns
+      expression: "object.metadata.namespace"
+    # Every list of filters: each rule's, and each of its backendRefs'.
+    # (flatten: Kubernetes 1.34+.)
+    - name: filterLists
+      expression: >-
+        (has(object.spec.rules) ? object.spec.rules : []).map(r, has(r.filters) ? r.filters : []) +
+        (has(object.spec.rules) ? object.spec.rules : []).map(r, has(r.backendRefs) ? r.backendRefs : [])
+          .map(bs, bs.map(b, has(b.filters) ? b.filters : [])).flatten()
+  validations:
+    - expression: >-
+        variables.filterLists.all(fs, fs.all(f, f.type != 'URLRewrite' || !has(f.urlRewrite.hostname) ||
+          f.urlRewrite.hostname.endsWith('.' + variables.ns + '.svc.cluster.local')))
+      messageExpression: >-
+        'URLRewrite hostname: only the app\'s own <service>.' + variables.ns + '.svc.cluster.local'
+      reason: Forbidden
+    - expression: >-
+        variables.filterLists.all(fs, fs.all(f, f.type != 'RequestHeaderModifier' ||
+          ((has(f.requestHeaderModifier.set) ? f.requestHeaderModifier.set : []) +
+           (has(f.requestHeaderModifier.add) ? f.requestHeaderModifier.add : [])).all(h,
+             h.name.lowerAscii() != 'host' &&
+             (h.name.lowerAscii() != 'knative-serving-namespace' || h.value == variables.ns))))
+      messageExpression: >-
+        'RequestHeaderModifier: no Host, and Knative-Serving-Namespace only ' + variables.ns
+      reason: Forbidden
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: run-tenant-route-rewrites
+spec:
+  policyName: run-tenant-route-rewrites
+  validationActions: [Deny]
+  matchResources:
+    namespaceSelector:
+      matchLabels:
+        run.gronblom.dev/tenant: "true"

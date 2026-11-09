@@ -1,0 +1,63 @@
+# Apps can't open connections to the platform's pods. Loki (no auth, a
+# delete API), Alertmanager (silences), the maxcloud controller's metrics,
+# zot, Authelia, source-controller's artifacts and the rest only answer
+# their real clients, none of which is an app.
+#
+# A deny on the apps' side, not allow-lists on every platform namespace:
+# one object, and nothing the platform does is in its way (webhooks from the
+# control plane, kubelet probes, scrapes). Cilium deny rules win over any
+# allow, so an app's own NetworkPolicies can't undo it, and
+# enableDefaultDeny: false means it doesn't make other egress default-deny.
+#
+# Still allowed, besides the internet:
+# - other app namespaces (each has a default-deny ingress of its own);
+# - traefik: the cluster-local routes (http://<svc>.<app>.svc.cluster.local
+#   is an ExternalName to traefik-knative) and the public hostnames. Which
+#   hostnames an app may ask for there: traefik-ingress.yaml;
+# - CoreDNS in kube-system;
+# - the API server and nodes (identities, not namespaced pods):
+#   CloudNativePG's instance manager runs in the app's database pods and
+#   talks to the API server.
+# Not knative-serving: the activator serves any app's revision to whoever
+# names it (a Knative-Serving-Namespace/-Revision header, or a Host of
+# <revision>.<app>.svc.cluster.local) and doesn't check who's asking. Apps
+# never need it: Traefik is what calls it, for services scaled to zero.
+# Audit M3, private/docs/research/tenant-cluster-local-isolation.md.
+# Traefik can still reach everything, so what apps may make Traefik do is
+# limited too (tenant-routing.yaml: Middlewares, Host rewrites).
+# 169.254.169.254: UpCloud's metadata service (the node's user data).
+apiVersion: cilium.io/v2
+kind: CiliumClusterwideNetworkPolicy
+metadata:
+  name: run-tenant-egress
+spec:
+  description: "Apps (run.gronblom.dev/tenant namespaces) can't connect to platform pods"
+  endpointSelector:
+    matchLabels:
+      k8s:io.cilium.k8s.namespace.labels.run.gronblom.dev/tenant: "true"
+  enableDefaultDeny:
+    egress: false
+    ingress: false
+  egressDeny:
+    - toEndpoints:
+        # Exists first: a selector of only DoesNotExist/NotIn also matches
+        # identities without labels of a namespace, such as the API server's
+        # CIDR identity (100.64.0.0/10 is in paja's own egress policy), which
+        # cut the database pods off the API server.
+        - matchExpressions:
+            - key: k8s:io.kubernetes.pod.namespace
+              operator: Exists
+            - key: k8s:io.cilium.k8s.namespace.labels.run.gronblom.dev/tenant
+              operator: DoesNotExist
+            - key: k8s:io.kubernetes.pod.namespace
+              operator: NotIn
+              values: [traefik, kube-system]
+        - matchExpressions:
+            - key: k8s:io.kubernetes.pod.namespace
+              operator: In
+              values: [kube-system]
+            - key: k8s:k8s-app
+              operator: NotIn
+              values: [coredns]
+    - toCIDR:
+        - 169.254.169.254/32

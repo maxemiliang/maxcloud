@@ -1,0 +1,48 @@
+# A Postgres database for the app, run by CloudNativePG. It also serves as
+# the app's job queue (queue-job.yaml, queue-worker.yaml).
+#
+# CloudNativePG writes the Secret `db-app` with the connection details:
+# uri, host, port, dbname, user, password. Point the app at it, e.g.
+#   env:
+#     - name: DATABASE_URL
+#       valueFrom: {secretKeyRef: {name: db-app, key: uri}}
+#
+# No backups. Prefer the registry's database instead of this file
+# (db: true in maxcloud.yaml): the same Cluster db and Secret db-app, with
+# continuous backups, restores to a point in time and branches, run by the
+# maxcloud controller. An app can't have both (both are Cluster db). With
+# db: true, copy only the TriggerAuthentication at the end of this file,
+# for the queue examples.
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: db
+spec:
+  # 2 = a primary and a streaming replica on the other node, so a node drain
+  # fails over instead of taking the database down. 1 saves ~150Mi.
+  instances: 2
+  priorityClassName: tenant
+  storage:
+    # The default StorageClass keeps the disk if the claim is deleted.
+    size: 2Gi
+  resources:
+    requests:
+      cpu: 20m
+      memory: 128Mi
+    limits:
+      memory: 512Mi
+  bootstrap:
+    initdb:
+      database: app
+      owner: app
+---
+# How KEDA logs in to count pending jobs: the same connection URI.
+apiVersion: keda.sh/v1alpha1
+kind: TriggerAuthentication
+metadata:
+  name: db
+spec:
+  secretTargetRef:
+    - parameter: connection
+      name: db-app
+      key: uri

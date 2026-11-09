@@ -1,0 +1,139 @@
+# Loki: stores and indexes logs (shipped by Alloy, see alloy.yaml), queried
+# from Grafana. Monolithic mode: one pod runs every Loki component. Log chunks
+# and the index live in the `loki` bucket (infra/storage); the pod's volume only
+# holds the write-ahead log and data that hasn't been uploaded yet.
+#
+# The Loki chart moved from grafana/helm-charts to grafana-community, which
+# publishes it as an OCI artifact.
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: OCIRepository
+metadata:
+  name: loki
+  namespace: monitoring
+spec:
+  interval: 12h
+  url: oci://ghcr.io/grafana-community/helm-charts/loki
+  ref:
+    tag: "20.2.1"
+  layerSelector:
+    mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
+    operation: copy
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: loki
+  namespace: monitoring
+spec:
+  interval: 1h
+  serviceAccountName: flux-helm # infrastructure/controllers/flux-helm.yaml
+  timeout: 10m
+  # For the ServiceMonitor CRD.
+  dependsOn:
+    - name: kube-prometheus-stack
+  chartRef:
+    kind: OCIRepository
+    name: loki
+  install:
+    remediation:
+      retries: 3
+  upgrade:
+    remediation:
+      retries: 3
+  values:
+    deploymentMode: Monolithic
+
+    loki:
+      # Single tenant. With auth enabled, every client must send an
+      # X-Scope-OrgID header.
+      auth_enabled: false
+      commonConfig:
+        replication_factor: 1
+
+      # Never edit an existing entry: Loki reads old data with the schema it
+      # was written with. To change it, append an entry with a future `from`.
+      schemaConfig:
+        configs:
+          - from: "2026-11-01"
+            store: tsdb
+            object_store: s3
+            schema: v13
+            index:
+              prefix: index_
+              period: 24h
+
+      storage:
+        type: s3
+        bucketNames:
+          chunks: loki
+          ruler: loki
+        s3:
+          endpoint: https://q6c58.upcloudobjects.com
+          region: europe-1
+          s3ForcePathStyle: true
+          # No keys here: Loki's AWS SDK reads AWS_ACCESS_KEY_ID and
+          # AWS_SECRET_ACCESS_KEY from the environment (loki-s3 Secret below).
+
+      limits_config:
+        retention_period: 720h # 30 days
+      compactor:
+        # The compactor deletes chunks older than retention_period.
+        retention_enabled: true
+        delete_request_store: s3
+
+      # Detects recurring log line patterns, used by Grafana's Logs Drilldown.
+      pattern_ingester:
+        enabled: true
+      analytics:
+        reporting_enabled: false
+
+    singleBinary:
+      replicas: 1
+      persistence:
+        size: 5Gi
+        storageClass: upcloud-block-storage-maxiops-encrypted-delete
+      # A PDB on a single replica would block every node drain.
+      podDisruptionBudget:
+        enabled: false
+      extraEnvFrom:
+        - secretRef:
+            name: loki-s3
+      extraEnv:
+        # Same as CNPG's ObjectStore: UpCloud rejects the checksums the AWS
+        # SDK sends by default (XAmzContentSHA256Mismatch).
+        - name: AWS_REQUEST_CHECKSUM_CALCULATION
+          value: when_required
+        - name: AWS_RESPONSE_CHECKSUM_VALIDATION
+          value: when_required
+      resources:
+        requests:
+          cpu: 50m
+          memory: 256Mi
+        limits:
+          memory: 1Gi
+
+    # The simple-scalable targets default to 3 replicas each, even in
+    # Monolithic mode.
+    read:
+      replicas: 0
+    write:
+      replicas: 0
+    backend:
+      replicas: 0
+
+    # Off: things only needed at scale or for testing. The gateway is an nginx
+    # in front of a multi-pod Loki; memcached caches would ask for 9 GiB.
+    gateway:
+      enabled: false
+    chunksCache:
+      enabled: false
+    resultsCache:
+      enabled: false
+    lokiCanary:
+      enabled: false
+    test:
+      enabled: false
+
+    monitoring:
+      serviceMonitor:
+        enabled: true

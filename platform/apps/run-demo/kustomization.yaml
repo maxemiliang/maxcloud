@@ -1,0 +1,13 @@
+# Smoke test for the run platform, kept in this repo: one public and one
+# SSO-protected Knative service, and a webhook -> queue -> KEDA Job pipeline.
+#
+# Registered in apps/maxcloud/apps/run-demo.yaml, which gives it its
+# namespace and guardrails and applies this directory into it as the app's
+# own reconciler, exactly like an app from another repo. Not part of the
+# `apps` Kustomization itself.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - services.yaml
+  - sso.yaml
+  - queue.yaml

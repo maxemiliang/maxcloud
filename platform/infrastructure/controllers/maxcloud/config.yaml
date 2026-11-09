@@ -1,0 +1,43 @@
+# Which Object Storage instance the controller manages: maxcloud-apps, from
+# infra/storage (tofu output maxcloud_apps_id / maxcloud_apps_endpoint).
+# The controller reads this at start: restart it after changing anything.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: maxcloud-controller
+  namespace: maxcloud-system
+data:
+  MAXCLOUD_OBJECT_STORAGE_ID: 12ed50d6-c98c-42fb-8476-810f203b9e59
+  MAXCLOUD_S3_ENDPOINT: https://tl8dc.upcloudobjects.com
+  MAXCLOUD_S3_REGION: europe-1
+  # Apps' databases get disks that are deleted with their Cluster: the
+  # bucket keeps the data, and a restore starts on a new disk. With the
+  # default (Retain) class every restore left a billed Released disk.
+  MAXCLOUD_DB_STORAGE_CLASS: upcloud-block-storage-maxiops-encrypted-delete
+  # Public buckets also get https://<bucket>--<app>.gronblom.dev/, proxied by
+  # Cloudflare, through the public Gateway (Traefik's crossProviderNamespaces
+  # and allowExternalNameServices make that possible).
+  MAXCLOUD_PUBLIC_DOMAIN: gronblom.dev
+  MAXCLOUD_PUBLIC_GATEWAY: traefik/public/https-public
+  # Name those routes' TraefikServices by Traefik's safe naming
+  # (<namespace>_<name>), as providers.kubernetesCRD.safeNaming in
+  # infrastructure/controllers/traefik/release.yaml: the two go together.
+  MAXCLOUD_TRAEFIK_SAFE_NAMING: "true"
+  # Every app namespace gets pull credentials for maxcloud's registry (zot,
+  # infrastructure/controllers/registry): tokens of its ServiceAccount
+  # maxcloud-image-pull, in the Secret maxcloud-registry.
+  MAXCLOUD_IMAGE_REGISTRY: registry.gronblom.dev
+  # ...and writes the registry's configuration there: zot-base plus one
+  # access rule per app (Role: infrastructure/controllers/registry).
+  MAXCLOUD_ZOT_NAMESPACE: registry
+  # The discovery document (discovery.yaml): the API server mcloud login
+  # writes into its kubeconfig (the cluster's load balancer; a rebuilt
+  # cluster gets a new one: take it from the admin kubeconfig, upctl
+  # kubernetes config), the login provider, and the oldest mcloud the
+  # platform works with. The CA it reads from the cluster itself.
+  MAXCLOUD_API_SERVER: https://lb-0a04a7febf0a49d285ab1523a8c2691a-1.upcloudlb.com:7443
+  MAXCLOUD_OIDC_ISSUER: https://auth.lab.gronblom.dev
+  MAXCLOUD_OIDC_CLIENT_ID: kubernetes
+  # v0.14.0: keeps an entry's owners when it changes the entry (older
+  # mcloud drops them, which admission only stops for developers).
+  MAXCLOUD_MIN_MCLOUD_VERSION: v0.14.0

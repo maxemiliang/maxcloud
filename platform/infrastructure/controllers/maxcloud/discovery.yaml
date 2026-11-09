@@ -1,0 +1,29 @@
+# The platform describes itself at https://maxcloud.gronblom.dev/.well-known/
+# maxcloud.json (the controller serves it, from MAXCLOUD_API_SERVER and
+# friends in config.yaml): the API server and its CA, the login provider, the
+# image registry and the oldest mcloud that works. mcloud login reads it, so
+# a new machine needs no admin kubeconfig. Only that one path is routed.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: maxcloud-discovery
+  namespace: maxcloud-system
+  annotations:
+    external-dns.kubernetes.io/cloudflare-proxied: "true"
+spec:
+  parentRefs:
+    - name: public
+      namespace: traefik
+      sectionName: https-public
+  hostnames:
+    - maxcloud.gronblom.dev
+  rules:
+    - matches:
+        - path:
+            type: Exact
+            value: /.well-known/maxcloud.json
+          method: GET
+      backendRefs:
+        # From the maxcloud repo's controller/config (controller/v0.10.0+).
+        - name: maxcloud-controller
+          port: 8082

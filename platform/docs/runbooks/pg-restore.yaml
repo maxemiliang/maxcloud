@@ -1,0 +1,48 @@
+# Restore a CloudNativePG cluster from the backup bucket into a NEW cluster.
+# Not part of any Flux Kustomization: applied by hand, see postgres-restore.md.
+#
+# Placeholders (replaced with sed before applying):
+#   SOURCE_CLUSTER  name of the cluster whose backups to restore (its folder
+#                   in s3://pg-backups/)
+#   TARGET_TIME     restore to this point in time, as printed by `select now()`
+#                   (e.g. "2026-10-29 10:40:12.123456+00")
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: SOURCE_CLUSTER-restore
+spec:
+  instances: 1
+  imageName: ghcr.io/cloudnative-pg/postgresql:18.6-minimal-trixie
+  storage:
+    size: 2Gi
+    # Disposable: the disk is deleted together with the cluster's PVC.
+    storageClass: upcloud-block-storage-maxiops-encrypted-delete
+  postgresql:
+    parameters:
+      shared_buffers: 64MB
+      max_wal_size: 512MB
+  resources:
+    requests:
+      cpu: 50m
+      memory: 256Mi
+    limits:
+      memory: 512Mi
+
+  bootstrap:
+    recovery:
+      source: origin
+      # The operator picks the latest base backup completed before the target,
+      # then replays archived WAL up to it.
+      recoveryTarget:
+        targetTime: "TARGET_TIME"
+
+  # Read-only source: the ObjectStore in this namespace, under SOURCE_CLUSTER's
+  # folder. Deliberately no `plugins:` WAL archiver on this cluster, so the
+  # restore test never writes into the bucket.
+  externalClusters:
+    - name: origin
+      plugin:
+        name: barman-cloud.cloudnative-pg.io
+        parameters:
+          barmanObjectName: pg-backups
+          serverName: SOURCE_CLUSTER

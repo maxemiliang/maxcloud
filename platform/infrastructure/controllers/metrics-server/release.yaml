@@ -1,0 +1,45 @@
+# metrics-server: powers `kubectl top` and the resource metrics API.
+# UKS doesn't ship it.
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: HelmRepository
+metadata:
+  name: metrics-server
+  namespace: kube-system
+spec:
+  interval: 12h
+  url: https://kubernetes-sigs.github.io/metrics-server/
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: metrics-server
+  namespace: kube-system
+spec:
+  interval: 1h
+  serviceAccountName: flux-helm # infrastructure/controllers/flux-helm.yaml
+  chart:
+    spec:
+      chart: metrics-server
+      version: "3.14.0"
+      sourceRef:
+        kind: HelmRepository
+        name: metrics-server
+  install:
+    remediation:
+      retries: 3
+  upgrade:
+    remediation:
+      retries: 3
+  values:
+    args:
+      # UKS kubelet serving certificates don't include the node IPs, so
+      # verification fails (UpCloud's own guide adds this flag). The traffic
+      # stays on the private node network.
+      - --kubelet-insecure-tls
+    resources:
+      # The chart requests 200Mi; on a 2-node cluster it needs a few tens of Mi.
+      requests:
+        cpu: 20m
+        memory: 48Mi
+      limits:
+        memory: 128Mi

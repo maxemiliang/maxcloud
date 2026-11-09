@@ -1,0 +1,90 @@
+# CloudNativePG: runs PostgreSQL clusters declared as `Cluster` resources
+# (primary + streaming replicas, failover, rolling updates).
+#
+# Backups use the Barman Cloud plugin (CNPG-I) rather than the operator's
+# built-in barmanObjectStore, which is deprecated and removed in CNPG 1.31.
+# The plugin adds a sidecar to each Postgres pod that archives WAL and uploads
+# base backups to an S3 `ObjectStore` (see apps/*/ for the per-app ones).
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: HelmRepository
+metadata:
+  name: cnpg
+  namespace: cnpg-system
+spec:
+  interval: 12h
+  url: https://cloudnative-pg.github.io/charts
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: cloudnative-pg
+  namespace: cnpg-system
+spec:
+  interval: 1h
+  serviceAccountName: flux-helm # infrastructure/controllers/flux-helm.yaml
+  chart:
+    spec:
+      chart: cloudnative-pg
+      version: "0.29.1" # CNPG 1.30.1
+      sourceRef:
+        kind: HelmRepository
+        name: cnpg
+  install:
+    remediation:
+      retries: 3
+  upgrade:
+    remediation:
+      retries: 3
+  values:
+    # CRDs are chart templates (crds.create, the default), so they're upgraded
+    # with the chart; no install/upgrade.crds policy needed.
+    resources:
+      requests:
+        cpu: 20m
+        memory: 64Mi
+      limits:
+        memory: 256Mi
+    # The official CloudNativePG dashboard, as a ConfigMap labelled
+    # grafana_dashboard=1; Grafana's sidecar loads it from any namespace.
+    # Metrics come from the PodMonitors in infrastructure/configs/monitoring,
+    # not from the chart's podMonitorEnabled (that needs the Prometheus
+    # Operator CRDs before this chart installs).
+    monitoring:
+      grafanaDashboard:
+        create: true
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: plugin-barman-cloud
+  namespace: cnpg-system
+spec:
+  interval: 1h
+  serviceAccountName: flux-helm # infrastructure/controllers/flux-helm.yaml
+  # The plugin must run in the operator's namespace, and its chart creates
+  # cert-manager Certificates (operator <-> plugin mTLS). On a fresh cluster,
+  # wait for both instead of failing the first install.
+  dependsOn:
+    - name: cloudnative-pg
+    - name: cert-manager
+      namespace: cert-manager
+  chart:
+    spec:
+      chart: plugin-barman-cloud
+      version: "0.8.1" # plugin v0.15.1
+      sourceRef:
+        kind: HelmRepository
+        name: cnpg
+  install:
+    remediation:
+      retries: 3
+  upgrade:
+    remediation:
+      retries: 3
+  values:
+    resources:
+      requests:
+        cpu: 10m
+        memory: 32Mi
+      limits:
+        memory: 128Mi

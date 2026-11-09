@@ -1,0 +1,27 @@
+# Runs scripts/validate.sh on every pull request (Renovate's included) and on
+# main: manifests build and match their schemas, OpenTofu stacks validate and
+# their lock files match. A green check means "safe to merge", not "tested on
+# the cluster".
+name: validate
+
+on:
+  pull_request: {}
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # The tool versions pinned in mise.toml, so CI checks with the same
+      # kustomize/kubeconform/tofu as a local run.
+      - uses: jdx/mise-action@6612f0ef07ed2a736cd1e00a94a065522dd41195 # v5.2.5
+        with:
+          install_args: opentofu kustomize kubeconform
+
+      - run: scripts/validate.sh

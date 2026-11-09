@@ -1,0 +1,53 @@
+# Weekly check of Cloudflare's edge IP ranges. When they change, opens (or
+# updates) a PR against main; merging it is the deploy. Nothing is pushed to
+# main directly.
+#
+# Pushes and opens the PR as the Renovate GitHub App (see renovate.yaml), not
+# with GITHUB_TOKEN: PRs opened with GITHUB_TOKEN don't trigger other
+# workflows, so the validate check wouldn't run on them.
+name: cloudflare-ips
+
+on:
+  schedule:
+    - cron: "23 6 * * 1" # Mondays 06:23 UTC
+  workflow_dispatch: {}
+
+# The job's own GITHUB_TOKEN needs nothing: the app's token does the writing.
+permissions: {}
+
+concurrency: cloudflare-ips
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        id: app-token
+        with:
+          client-id: ${{ vars.RENOVATE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.RENOVATE_APP_PRIVATE_KEY }}
+
+      # The push in the last step uses the token checkout stores in git config.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          token: ${{ steps.app-token.outputs.token }}
+
+      - run: scripts/update-cloudflare-ips.sh
+
+      - name: Open a PR if the ranges changed
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          if git diff --quiet; then
+            echo "Cloudflare IP ranges unchanged."
+            exit 0
+          fi
+          branch=automation/cloudflare-ips
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -C "$branch"
+          git commit -am "chore(cluster): update Cloudflare IP ranges"
+          git push --force origin "$branch"
+          if ! gh pr view "$branch" >/dev/null 2>&1; then
+            gh pr create --base main --head "$branch" --fill
+          fi

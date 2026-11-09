@@ -1,0 +1,33 @@
+# The maxcloud controller renders zot's configuration (zot-base plus one
+# access rule per app, from the app registry) into zot-config, and restarts
+# zot when the base changes. Only these objects, in this namespace.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: maxcloud-controller
+rules:
+  - apiGroups: [""]
+    resources: [configmaps]
+    resourceNames: [zot-base, zot-config]
+    verbs: [get, update]
+  # create can't be limited by name.
+  - apiGroups: [""]
+    resources: [configmaps]
+    verbs: [create]
+  - apiGroups: [apps]
+    resources: [deployments]
+    resourceNames: [zot]
+    verbs: [get, patch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: maxcloud-controller
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: maxcloud-controller
+subjects:
+  - kind: ServiceAccount
+    name: maxcloud-controller
+    namespace: maxcloud-system

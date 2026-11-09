@@ -1,0 +1,9 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: kured
+  labels:
+    # kured needs the host's PID namespace (to signal systemd) and a hostPath
+    # (to see the reboot sentinel), both forbidden by the baseline and
+    # restricted Pod Security levels. Explicit, so it's a visible exception.
+    pod-security.kubernetes.io/enforce: privileged

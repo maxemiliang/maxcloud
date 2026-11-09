@@ -1,0 +1,155 @@
+# Event-driven jobs, end to end:
+#   POST http://webhook.run-demo.svc.cluster.local/jobs  ->  a row in `jobs`
+#   KEDA sees pending rows  ->  one Job per row  ->  the Job marks it done.
+#
+# A real app would receive the webhook in its own Knative service (check the
+# signature, insert the row, answer 200). Here PostgREST plays that part, so
+# the demo needs no image of its own.
+#
+# Try it (from your laptop, through a throwaway pod):
+#   kubectl -n run-demo run post --rm -it --restart=Never --image=curlimages/curl:8.17.0 \
+#     --overrides='{"spec":{"priorityClassName":"tenant","securityContext":{"runAsNonRoot":true,"runAsUser":100,"seccompProfile":{"type":"RuntimeDefault"}},"containers":[{"name":"post","image":"curlimages/curl:8.17.0","args":["-s","-X","POST","-H","Content-Type: application/json","-d","{\"payload\":{\"hello\":\"world\"}}","http://webhook.run-demo.svc.cluster.local/jobs"],"securityContext":{"allowPrivilegeEscalation":false,"capabilities":{"drop":["ALL"]}}}]}}'
+#   kubectl -n run-demo get jobs -w
+#
+# The queue: one small Postgres instance without backups (demo data only),
+# on the StorageClass that deletes its disk with the claim.
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: queue-db
+  namespace: run-demo
+spec:
+  instances: 1
+  priorityClassName: tenant
+  storage:
+    size: 1Gi
+    storageClass: upcloud-block-storage-maxiops-encrypted-delete
+  resources:
+    requests:
+      cpu: 20m
+      memory: 128Mi
+    limits:
+      memory: 512Mi
+  bootstrap:
+    initdb:
+      database: app
+      owner: app
+      postInitApplicationSQL:
+        - >-
+          CREATE TABLE jobs (
+            id bigserial PRIMARY KEY,
+            payload jsonb NOT NULL DEFAULT '{}',
+            state text NOT NULL DEFAULT 'pending',
+            created_at timestamptz NOT NULL DEFAULT now(),
+            done_at timestamptz
+          )
+        - CREATE INDEX jobs_pending ON jobs (id) WHERE state = 'pending'
+        - ALTER TABLE jobs OWNER TO app
+        - ALTER SEQUENCE jobs_id_seq OWNER TO app
+---
+# The webhook receiver: PostgREST turns POST /jobs into an INSERT. Private
+# (cluster-local), scales to zero like any Knative service.
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: webhook
+  namespace: run-demo
+spec:
+  template:
+    metadata:
+      annotations:
+        autoscaling.knative.dev/max-scale: "1"
+    spec:
+      priorityClassName: tenant
+      containers:
+        - image: postgrest/postgrest:v16.5@sha256:1347d7552b88f17832912c06afbf7c43209af6eeeb60834b04aae12c9bd9d5cc
+          ports:
+            - containerPort: 3000
+          env:
+            # Written by CloudNativePG: the app user's connection URI.
+            - name: PGRST_DB_URI
+              valueFrom:
+                secretKeyRef:
+                  name: queue-db-app
+                  key: uri
+            # Unauthenticated requests act as the table's owner. Fine for a
+            # cluster-local demo; a real receiver checks the sender first.
+            - name: PGRST_DB_ANON_ROLE
+              value: app
+            - name: PGRST_DB_SCHEMAS
+              value: public
+---
+# How KEDA logs in to run the queue-length query: the same URI, read from the
+# Secret in this namespace.
+apiVersion: keda.sh/v1alpha1
+kind: TriggerAuthentication
+metadata:
+  name: queue-db
+  namespace: run-demo
+spec:
+  secretTargetRef:
+    - parameter: connection
+      name: queue-db-app
+      key: uri
+---
+# Every 10 seconds KEDA counts pending rows and starts Jobs to match (one per
+# row, at most 3 at a time). Nothing runs while the queue is empty.
+apiVersion: keda.sh/v1alpha1
+kind: ScaledJob
+metadata:
+  name: process-jobs
+  namespace: run-demo
+spec:
+  pollingInterval: 10
+  maxReplicaCount: 3
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  triggers:
+    - type: postgresql
+      metadata:
+        query: "SELECT count(*) FROM jobs WHERE state = 'pending'"
+        targetQueryValue: "1"
+      authenticationRef:
+        name: queue-db
+  jobTargetRef:
+    backoffLimit: 2
+    ttlSecondsAfterFinished: 3600
+    template:
+      spec:
+        priorityClassName: tenant
+        restartPolicy: Never
+        securityContext:
+          runAsNonRoot: true
+          seccompProfile:
+            type: RuntimeDefault
+        containers:
+          - name: process
+            # Postgres' own image, for psql: already on the nodes for CNPG.
+            image: ghcr.io/cloudnative-pg/postgresql:18.6-minimal-trixie@sha256:26d15a12723510b0b416e8aec2bc65f2da7ac9b77ef3182a0911e4b8b991420a
+            env:
+              - name: DATABASE_URL
+                valueFrom:
+                  secretKeyRef:
+                    name: queue-db-app
+                    key: uri
+            # Claims one pending row (SKIP LOCKED: parallel Jobs never take
+            # the same one), "works" for 5 seconds, marks it done.
+            command:
+              - psql
+              - $(DATABASE_URL)
+              - -v
+              - ON_ERROR_STOP=1
+              - -c
+              - >-
+                WITH next AS (
+                  SELECT id FROM jobs WHERE state = 'pending'
+                  ORDER BY id FOR UPDATE SKIP LOCKED LIMIT 1
+                )
+                UPDATE jobs SET state = 'done', done_at = now()
+                FROM next, pg_sleep(5)
+                WHERE jobs.id = next.id
+                RETURNING jobs.id, jobs.payload
+            securityContext:
+              allowPrivilegeEscalation: false
+              capabilities:
+                drop: [ALL]

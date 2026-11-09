@@ -1,0 +1,42 @@
+# An app repo is applied as a ServiceAccount bound to the built-in `admin`
+# ClusterRole in the app's namespace (apps/maxcloud/resourceset.yaml).
+# `admin` can't change the namespace's ResourceQuota or LimitRange, which is
+# the point.
+# Knative adds its own resources to `admin`; this adds the rest an app may
+# need. Aggregated: Kubernetes merges these rules into `admin` itself.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: run-tenant-extras
+  labels:
+    rbac.authorization.k8s.io/aggregate-to-admin: "true"
+rules:
+  # Own routes, e.g. the SSO route in front of a private service.
+  - apiGroups: [gateway.networking.k8s.io]
+    resources: [httproutes, grpcroutes]
+    verbs: [get, list, watch, create, update, patch, delete]
+  # The Authelia forward-auth Middleware those routes reference.
+  - apiGroups: [traefik.io]
+    resources: [middlewares]
+    verbs: [get, list, watch, create, update, patch, delete]
+  # A Postgres database with backups.
+  - apiGroups: [postgresql.cnpg.io]
+    resources: [clusters, backups, scheduledbackups, poolers, databases]
+    verbs: [get, list, watch, create, update, patch, delete]
+  - apiGroups: [barmancloud.cnpg.io]
+    resources: [objectstores]
+    verbs: [get, list, watch, create, update, patch, delete]
+  # The app's buckets, database and custom hostnames (maxcloud controller):
+  # readable, to see their names and status. Only the registry creates them.
+  - apiGroups: [maxcloud.gronblom.dev]
+    resources: [buckets, databases, domains]
+    verbs: [get, list, watch]
+  # Branches of the app's database are the app's own to make and delete
+  # (mcloud db branch): throwaway copies, inside the app's quota.
+  - apiGroups: [maxcloud.gronblom.dev]
+    resources: [databasebranches]
+    verbs: [get, list, watch, create, delete]
+  # The app's own metrics and alerts.
+  - apiGroups: [monitoring.coreos.com]
+    resources: [podmonitors, servicemonitors, prometheusrules]
+    verbs: [get, list, watch, create, update, patch, delete]

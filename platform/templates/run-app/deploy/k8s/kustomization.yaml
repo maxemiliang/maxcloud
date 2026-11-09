@@ -1,0 +1,12 @@
+# What Flux applies from this repo, into the app's own namespace. Flux only
+# fetches deploy/k8s/, so copy what you need from ../examples into this
+# directory and list it under `resources`. Only local files: Flux refuses
+# remote bases (a URL under `resources`).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - service.yaml
+# The deploy workflow replaces `app` with the image it built, pinned by
+# digest, and commits the change here.
+images:
+  - name: app

@@ -1,0 +1,102 @@
+# The maxcloud controller (apps' buckets in the maxcloud-apps Object
+# Storage, and their databases). It exports bucket sizes, database phases,
+# its UpCloud token's expiry and controller-runtime's reconcile metrics.
+# The databases' own backups are covered by the homelab.cnpg alerts like
+# any CloudNativePG cluster.
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: maxcloud-controller
+  namespace: monitoring
+spec:
+  namespaceSelector:
+    matchNames: [maxcloud-system]
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: maxcloud-controller
+  podMetricsEndpoints:
+    - port: metrics
+      interval: 60s
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: maxcloud
+  namespace: monitoring
+spec:
+  groups:
+    - name: homelab.maxcloud
+      rules:
+        # A Bucket that can't be reconciled (UpCloud API errors) keeps
+        # failing and retrying; its Ready condition has the message.
+        - alert: MaxcloudReconcileErrors
+          expr: sum by (controller) (increase(controller_runtime_reconcile_errors_total{namespace="maxcloud-system"}[15m])) > 0
+          for: 30m
+          labels:
+            severity: warning
+          annotations:
+            summary: "maxcloud-controller keeps failing to reconcile {{ $labels.controller }}s"
+            description: >-
+              Check: kubectl get maxcloud -A (the READY column, then the Ready
+              condition of the ones that aren't), and
+              kubectl -n maxcloud-system logs deploy/maxcloud-controller --tail=50
+        - alert: MaxcloudControllerDown
+          expr: absent(up{namespace="maxcloud-system", pod=~"maxcloud-controller-.*"} == 1)
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "maxcloud-controller isn't running"
+            description: >-
+              Buckets keep working, but new or changed ones wait. Check:
+              flux get kustomizations maxcloud-controller, and
+              kubectl -n maxcloud-system get pods
+        # The controller won't guess when it can't account for an app's
+        # backups: a person has to pick a generation.
+        - alert: MaxcloudDatabaseBlocked
+          expr: maxcloud_database_phase{phase="Blocked"} == 1
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "The database of app {{ $labels.app }} is blocked"
+            description: >-
+              The maxcloud controller won't create or restore it on its own.
+              Check: kubectl -n {{ $labels.app }} get database db -o yaml (the
+              Blocked condition says why), then pick a backup generation:
+              kubectl -n {{ $labels.app }} annotate database db maxcloud.gronblom.dev/recover-from=<n>
+              (maxcloud controller/README.md, "How a database comes back").
+        # Creating or restoring normally takes minutes.
+        - alert: MaxcloudDatabaseNotReady
+          expr: (maxcloud_database_phase{phase="Creating"} == 1) or (maxcloud_database_phase{phase="Restoring"} == 1)
+          for: 1h
+          labels:
+            severity: warning
+          annotations:
+            summary: "The database of app {{ $labels.app }} has been {{ $labels.phase }} for an hour"
+            description: >-
+              Check: kubectl -n {{ $labels.app }} get database,cluster,backup, and
+              kubectl -n {{ $labels.app }} logs db-1 (or the newest db-* pod).
+        # The sub-account token is made for 364 days (UpCloud's maximum is
+        # 365); the controller can't renew it itself.
+        - alert: MaxcloudTokenExpiringSoon
+          expr: maxcloud_upcloud_token_expiry_timestamp_seconds - time() < 30 * 86400
+          labels:
+            severity: warning
+          annotations:
+            summary: "The maxcloud controller's UpCloud token expires in {{ $value | humanizeDuration }}"
+            description: >-
+              Make a new token for the maxcloud_controller sub-account and
+              re-create infrastructure/controllers/maxcloud/controller-credentials.sops.yaml
+              (homelab README, Procedures: "Renew the maxcloud controller's UpCloud token").
+        # The instance is billed per started 250 GB.
+        - alert: MaxcloudStorageNearNextStep
+          expr: (sum(maxcloud_bucket_size_bytes) % 250e9) > 225e9
+          for: 1h
+          labels:
+            severity: info
+          annotations:
+            summary: "Apps' buckets hold {{ $value | humanize1024 }}B past the last 250 GB step"
+            description: >-
+              The maxcloud-apps instance bills another €5/month at the next
+              250 GB. kubectl get maxcloud -A shows which apps hold what.

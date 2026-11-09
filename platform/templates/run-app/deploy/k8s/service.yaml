@@ -1,0 +1,47 @@
+# The app as a Knative service: scales to zero when idle and back up on the
+# first request (about a second), new revision on every deploy.
+#
+# Private by default: reachable inside the cluster only, at
+# http://web.<namespace>.svc.cluster.local. To publish it on the internet at
+# https://web--<namespace>.gronblom.dev, add the label below. For a login page
+# in front of a private service instead, see ../examples/sso.yaml.
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: web
+  # labels:
+  #   run.gronblom.dev/expose: public
+  # annotations:
+  #   # Serve through Cloudflare's proxy (copied to the HTTPRoute, where
+  #   # external-dns reads it).
+  #   external-dns.kubernetes.io/cloudflare-proxied: "true"
+spec:
+  template:
+    # Defaults: scale to zero after ~1 min idle, at most 3 pods.
+    # metadata:
+    #   annotations:
+    #     autoscaling.knative.dev/min-scale: "1"  # never scale to zero
+    #     autoscaling.knative.dev/max-scale: "3"
+    spec:
+      # Required in run namespaces: app pods yield to the platform when the
+      # cluster is full (e.g. during a node drain).
+      priorityClassName: tenant
+      containers:
+        - image: app
+          # The app must listen on $PORT (8080), and on SIGTERM stop its
+          # server and exit 0 (see README.md, "Shutting down").
+          ports:
+            - containerPort: 8080
+          # Defaults if unset: 10m CPU / 64Mi requested, 256Mi memory limit.
+          # resources:
+          #   requests: {cpu: 10m, memory: 128Mi}
+          #   limits: {memory: 512Mi}
+          # Images built with buildpacks run as a non-root user already. A
+          # Dockerfile image without a USER needs one here (any non-zero
+          # UID), because the namespace only allows non-root containers.
+          # securityContext:
+          #   runAsUser: 65532
+          # env:
+          #   - name: DATABASE_URL
+          #     valueFrom:
+          #       secretKeyRef: {name: db-app, key: uri}

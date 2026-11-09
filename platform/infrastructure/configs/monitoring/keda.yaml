@@ -1,0 +1,41 @@
+# KEDA (event-driven jobs and workers on the run platform). Its operator
+# exports, per ScaledJob/ScaledObject, the value each trigger last read
+# (keda_scaler_metrics_value: the queue length) and its errors.
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: keda
+  namespace: monitoring
+spec:
+  namespaceSelector:
+    matchNames: [keda]
+  selector:
+    matchExpressions:
+      - key: app.kubernetes.io/name
+        operator: In
+        values: [keda-operator, keda-operator-metrics-apiserver, keda-admission-webhooks]
+  podMetricsEndpoints:
+    - port: metrics
+      interval: 30s
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: keda
+  namespace: monitoring
+spec:
+  groups:
+    # Failed Jobs are KubeJobFailed (kube-prometheus-stack). This covers KEDA
+    # not being able to read the queue at all, in which case nothing starts.
+    - name: homelab.keda
+      rules:
+        - alert: KedaScalerErrors
+          expr: sum by (namespace, scaledObject, type) (rate(keda_scaler_detail_errors_total[5m])) > 0
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "KEDA can't read the trigger of {{ $labels.type }} {{ $labels.namespace }}/{{ $labels.scaledObject }}"
+            description: >-
+              Queued work isn't being started. Usually the database is down or
+              the query is wrong. Check: kubectl -n keda logs deploy/keda-operator --tail=50 | grep {{ $labels.scaledObject }}

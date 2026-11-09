@@ -1,0 +1,64 @@
+# A queue worker that scales to zero: KEDA runs 0 pods while the app's `jobs`
+# table has nothing pending, and up to 3 as the backlog grows. For many
+# short jobs, where a Job per row (queue-job.yaml) would be slow. The worker
+# loops: claim a row (SELECT ... FOR UPDATE SKIP LOCKED), do it, repeat.
+# Needs the app's database (db: true in maxcloud.yaml, or database.yaml) for
+# the db-app Secret, and the TriggerAuthentication db from the end of
+# database.yaml.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: queue-worker
+spec:
+  # No `replicas`: KEDA owns the count. Setting it here would make every
+  # Flux sync fight KEDA.
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: queue-worker
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: queue-worker
+    spec:
+      priorityClassName: tenant
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      # Time to finish the job in hand when scaled down.
+      terminationGracePeriodSeconds: 60
+      containers:
+        - name: worker
+          image: app
+          command: ["./worker"]
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef: {name: db-app, key: uri}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+---
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: queue-worker
+spec:
+  scaleTargetRef:
+    name: queue-worker
+  minReplicaCount: 0
+  maxReplicaCount: 3
+  pollingInterval: 15
+  # Seconds the queue must stay empty before scaling back to 0.
+  cooldownPeriod: 300
+  triggers:
+    - type: postgresql
+      metadata:
+        query: "SELECT count(*) FROM jobs WHERE state = 'pending'"
+        # Aim for at most 20 pending jobs per worker.
+        targetQueryValue: "20"
+        # Start the first worker as soon as anything is pending.
+        activationTargetQueryValue: "0"
+      authenticationRef:
+        name: db

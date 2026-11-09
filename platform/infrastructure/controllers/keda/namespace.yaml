@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: keda
+  labels:
+    # The chart runs all three pods non-root, read-only, with no capabilities.
+    pod-security.kubernetes.io/enforce: restricted

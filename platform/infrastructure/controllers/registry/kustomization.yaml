@@ -1,0 +1,35 @@
+# maxcloud's container registry (zot). README, "The image registry".
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: registry
+resources:
+  - namespace.yaml
+  # AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY of the S3 user zot (tofu:
+  # infra/storage); the README's "The image registry" writes it.
+  # Secret zot-s3: private/secrets/registry/zot-s3.sops.yaml.
+  - deployment.yaml
+  # zot reads the cluster's token signing keys (apps' pull tokens).
+  - issuer-discovery.yaml
+  # The maxcloud controller writes zot's configuration.
+  - controller-access.yaml
+configMapGenerator:
+  # The base configuration. zot doesn't read it: the maxcloud controller
+  # adds one access rule per app and writes the result to the ConfigMap
+  # zot-config, which zot runs with, and restarts zot when this changes.
+  # A fixed name, so the controller can find it.
+  - name: zot-base
+    files:
+      - config.json
+    options:
+      disableNameSuffixHash: true
+  # A first zot-config (the base, no app rules yet), so zot can start
+  # before the controller has written one: on a new cluster Flux waits for
+  # zot before it deploys the controller. Created once, never updated
+  # (IfNotPresent): after that it's the controller's.
+  - name: zot-config
+    files:
+      - config.json
+    options:
+      disableNameSuffixHash: true
+      annotations:
+        kustomize.toolkit.fluxcd.io/ssa: IfNotPresent
