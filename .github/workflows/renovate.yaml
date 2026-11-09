@@ -1,8 +1,7 @@
 # Self-hosted Renovate: runs in this repo's own Actions, as a GitHub App that
 # only this repo's owner controls (no third-party service gets repo access).
-# What it updates and when it may open PRs is in each repo's renovate.json
-# (this one, and maxemiliang/maxcloud's); this workflow
-# only decides when Renovate runs.
+# What it updates and when it may open PRs is in renovate.json; this
+# workflow only decides when Renovate runs.
 #
 # Needs, in the repo settings (Secrets and variables → Actions):
 #   variable RENOVATE_APP_CLIENT_ID   the GitHub App's Client ID
@@ -35,7 +34,7 @@ jobs:
           client-id: ${{ vars.RENOVATE_APP_CLIENT_ID }}
           private-key: ${{ secrets.RENOVATE_APP_PRIVATE_KEY }}
           owner: ${{ github.repository_owner }}
-          repositories: homelab,maxcloud
+          repositories: maxcloud
 
       # PRs opened with an app token (unlike GITHUB_TOKEN) trigger other
       # workflows, so the validate check runs on every Renovate PR.
@@ -44,7 +43,7 @@ jobs:
           token: ${{ steps.app-token.outputs.token }}
         env:
           # This repo and maxcloud (mcloud, the SDKs, the run-deploy workflow).
-          RENOVATE_REPOSITORIES: maxemiliang/homelab,maxemiliang/maxcloud
+          RENOVATE_REPOSITORIES: maxemiliang/maxcloud
           # Each repo has its own renovate.json: no onboarding PR, and never
           # run without it.
           RENOVATE_ONBOARDING: "false"

@@ -48,7 +48,7 @@ mise install
 schemas, OpenTofu stacks and lock files, the knowledge base). CI runs it on
 every pull request.
 
-Dependency updates come from Renovate ([`renovate.json`](renovate.json)) as
+Dependency updates come from Renovate ([`renovate.json`](../renovate.json)) as
 weekly PRs. Nothing is merged automatically, because merging to main deploys.
 Renovate is self-hosted: it runs in this repo's GitHub Actions
 ([`renovate.yaml`](../.github/workflows/renovate.yaml)) as our own GitHub App.

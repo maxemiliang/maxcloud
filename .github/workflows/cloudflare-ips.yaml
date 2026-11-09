@@ -4,7 +4,7 @@
 #
 # Pushes and opens the PR as the Renovate GitHub App (see renovate.yaml), not
 # with GITHUB_TOKEN: PRs opened with GITHUB_TOKEN don't trigger other
-# workflows, so the validate check wouldn't run on them.
+# workflows, so the platform check wouldn't run on them.
 name: cloudflare-ips
 
 on:
@@ -32,7 +32,7 @@ jobs:
         with:
           token: ${{ steps.app-token.outputs.token }}
 
-      - run: scripts/update-cloudflare-ips.sh
+      - run: platform/scripts/update-cloudflare-ips.sh
 
       - name: Open a PR if the ranges changed
         env:
@@ -46,7 +46,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git switch -C "$branch"
-          git commit -am "chore(cluster): update Cloudflare IP ranges"
+          git commit -am "chore(platform): update Cloudflare IP ranges"
           git push --force origin "$branch"
           if ! gh pr view "$branch" >/dev/null 2>&1; then
             gh pr create --base main --head "$branch" --fill

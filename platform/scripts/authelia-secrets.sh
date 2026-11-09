@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 # Generates Authelia's secrets and its one user, and writes them SOPS-encrypted:
-#   infrastructure/controllers/authelia/authelia-secrets.sops.yaml  random keys + OIDC signing key
-#   infrastructure/controllers/authelia/authelia-users.sops.yaml    the user (argon2id password hash)
-#   infrastructure/controllers/monitoring/grafana-oidc.sops.yaml    Grafana's OIDC client secret
+#   private/secrets/authelia/authelia-secrets.sops.yaml  random keys + OIDC signing key
+#   private/secrets/authelia/authelia-users.sops.yaml    the user (argon2id password hash)
+#   private/secrets/monitoring/grafana-oidc.sops.yaml    Grafana's OIDC client secret
+# private/ is the private repo's submodule at the repo root; commit and push
+# there afterwards.
 # Nothing secret is printed. Prompts for the user's details and password.
 # Needs docker (for the authelia CLI), openssl, kubectl and sops.
 #
@@ -10,11 +12,15 @@
 # registered passkeys/TOTP become unreadable (new storage encryption key), so
 # they have to be registered again.
 set -euo pipefail
-cd "$(git rev-parse --show-toplevel)"
+cd "$(dirname "$0")/.."
 
 image=ghcr.io/authelia/authelia:4.39.28
-authelia_dir=infrastructure/controllers/authelia
-monitoring_dir=infrastructure/controllers/monitoring
+authelia_dir=../private/secrets/authelia
+monitoring_dir=../private/secrets/monitoring
+[[ -d ../private/secrets ]] || {
+  echo "../private/secrets is missing: git submodule update --init --checkout private" >&2
+  exit 1
+}
 
 authelia() { docker run --rm "$image" authelia "$@"; }
 rand() { openssl rand -hex 32; }

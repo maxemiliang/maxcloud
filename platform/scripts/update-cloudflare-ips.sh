@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Regenerates infrastructure/controllers/traefik/cloudflare-ips.yaml (a Helm
 # values fragment for Traefik) from Cloudflare's published edge IP ranges.
-# Run weekly by .github/workflows/cloudflare-ips.yaml; safe to run locally.
+# Run weekly by the repo's .github/workflows/cloudflare-ips.yaml; safe to run locally.
 set -euo pipefail
+cd "$(dirname "$0")/.."
 
 out="infrastructure/controllers/traefik/cloudflare-ips.yaml"
 json=$(curl -fsS --retry 3 --max-time 30 https://api.cloudflare.com/client/v4/ips)

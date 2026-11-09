@@ -1,13 +1,19 @@
 ---
 name: kb
-description: The homelab's knowledge base (docs/kb/) - look things up in it and record new knowledge in it. Use before debugging or changing anything in this repo (search for the symptom, component or error first), and whenever something non-obvious is learned about the setup - a gotcha that cost time, a design decision and why, how a component really behaves, a number worth keeping - or when the user says to remember, note, record or add something to the knowledge base.
+description: The platform's (the homelab cluster's) knowledge base (platform/docs/kb/) - look things up in it and record new knowledge in it. Use before debugging or changing anything under platform/ (search for the symptom, component or error first), and whenever something non-obvious is learned about the setup - a gotcha that cost time, a design decision and why, how a component really behaves, a number worth keeping - or when the user says to remember, note, record or add something to the knowledge base.
 ---
 
 # Knowledge base
 
-`docs/kb/` holds what this setup taught us and isn't obvious from the code:
+`platform/docs/kb/` holds what this setup taught us and isn't obvious from the code:
 why things are the way they are, and the traps. One file per piece of
-knowledge, listed in `docs/kb/README.md`.
+knowledge, listed in `platform/docs/kb/README.md`.
+
+**This repo is public.** An entry about a security hole that is still
+open, or how to exploit one, goes in the private repo instead:
+`private/docs/kb/<area>/<slug>.md` (the `private/` submodule; same format,
+not checked by kb-check). Move it here once the hole is closed, and never
+put secret values in either.
 
 It is not for what the repo already says (manifests, the README's procedures,
 runbooks in `docs/runbooks/`) or what git history records. Link to those
@@ -18,7 +24,7 @@ instead. Session notes and to-do lists don't belong either.
 Before debugging or changing a component, search the entries:
 
 ```sh
-grep -ril '<symptom, error text, component>' docs/kb/
+grep -ril '<symptom, error text, component>' platform/docs/kb/
 ```
 
 Search by error message fragments, component names (traefik, knative, cnpg,
@@ -44,19 +50,19 @@ repo already shows).
 1. **Check for an existing entry** (search as above). Update it instead of
    adding a near-duplicate: add the new symptom, correct the fix, bump
    `updated:`. If an entry turns out wrong, fix or delete it, don't leave it.
-2. **Write the entry** at `docs/kb/<area>/<slug>.md`:
+2. **Write the entry** at `platform/docs/kb/<area>/<slug>.md`:
    - `<area>` is one of the index's sections; add a new one only if none fits.
    - `<slug>` is a few lowercase words naming the subject, e.g.
      `knative-external-probe-port`.
    - Use the template for its kind (below). Keep it short: someone hitting
      the problem at 2 a.m. should get the answer from the first lines.
-3. **List it in `docs/kb/README.md`** under its area, as
+3. **List it in `platform/docs/kb/README.md`** under its area, as
    `- [Title](area/slug.md): one-line hook`, and link related entries both
    ways (`See also:` lines).
 4. **Point the code at it** where that helps: a comment next to the
    workaround, e.g. `# See docs/kb/knative/external-probe-port.md.`
-5. **Check it:** `scripts/kb-check.sh` (frontmatter, index, links). It also
-   runs in `scripts/validate.sh`.
+5. **Check it:** `platform/scripts/kb-check.sh` (frontmatter, index, links). It also
+   runs in `platform/scripts/validate.sh`.
 6. **Commit only when the user asks** (the repo's rule). A knowledge-base
    entry is its own small commit, `docs(kb): ...`, unless it documents a
    change made in the same commit.

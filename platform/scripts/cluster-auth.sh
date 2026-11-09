@@ -9,7 +9,7 @@
 # Needs UPCLOUD_TOKEN: an API token of the homelab_api sub-account (it has
 # managed_kubernetes). Changes take up to a minute to reach the API server.
 set -euo pipefail
-cd "$(git rev-parse --show-toplevel)"
+cd "$(dirname "$0")/.."
 
 api=https://api.upcloud.com/1.3
 : "${UPCLOUD_TOKEN:?set UPCLOUD_TOKEN to an API token of the homelab_api sub-account}"

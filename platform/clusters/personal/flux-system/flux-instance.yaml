@@ -42,16 +42,14 @@ spec:
     domain: "cluster.local"
   sync:
     kind: GitRepository
-    url: "https://github.com/maxemiliang/homelab.git"
+    # The platform lives in the public maxcloud repo, so the sync needs no
+    # credentials. The Secret flux-system (GitHub App: githubAppID /
+    # githubAppInstallationOwner / githubAppPrivateKey, created by
+    # infra/flux, never committed) is for private sources: the private repo
+    # with the platform's secrets (secrets.yaml) and app repos.
+    url: "https://github.com/maxemiliang/maxcloud.git"
     ref: "refs/heads/main"
-    path: "clusters/personal"
-    # GitHub App auth: source-controller exchanges the app's private key for a
-    # short-lived installation token on each fetch. The same app (and secret)
-    # can later be used by GitRepositories for app repos.
-    provider: github
-    # githubAppID / githubAppInstallationOwner / githubAppPrivateKey;
-    # created by infra/flux, never committed.
-    pullSecret: "flux-system"
+    path: "platform/clusters/personal"
   kustomize:
     patches:
       # When a Kustomization is waiting for its objects to become healthy

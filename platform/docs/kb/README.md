@@ -8,7 +8,7 @@ piece of knowledge.
   `grep -ril '<error text or component>' docs/kb/`.
 - **Add to it** when something cost time, a decision was made, or you learn
   how something actually works. In Claude Code the `kb` skill
-  ([`.claude/skills/kb/SKILL.md`](../../.claude/skills/kb/SKILL.md)) does it
+  ([`.claude/skills/kb/SKILL.md`](../../../.claude/skills/kb/SKILL.md)) does it
   and describes the format; `scripts/kb-check.sh` checks it.
 
 Procedures live in [`../runbooks/`](../runbooks/) and the README, not here.

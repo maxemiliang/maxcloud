@@ -6,7 +6,7 @@
 #
 # Needs helm (mise.toml) and python3 with PyYAML.
 set -euo pipefail
-cd "$(git rev-parse --show-toplevel)"
+cd "$(dirname "$0")/.."
 out=scripts/schemas
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT

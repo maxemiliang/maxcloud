@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # Offline checks for everything Flux and OpenTofu would apply. Runs in CI on
-# every pull request (.github/workflows/validate.yaml) and locally the same way:
+# changes to platform/ (the repo's .github/workflows/platform.yaml) and locally the same way:
 #   scripts/validate.sh
 # Touches nothing: no cluster, no OpenTofu state, no credentials, no decryption.
 set -euo pipefail
-cd "$(git rev-parse --show-toplevel)"
+cd "$(dirname "$0")/.."
 
 # Kubernetes manifests: what each Flux Kustomization builds, validated against
 # the Kubernetes schemas plus CRD schemas from the community catalog. Kinds

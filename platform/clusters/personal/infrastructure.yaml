@@ -57,7 +57,7 @@ spec:
   sourceRef:
     kind: GitRepository
     name: flux-system
-  path: ./infrastructure/controllers
+  path: ./platform/infrastructure/controllers
   # Delete objects from the cluster when they're removed from git.
   prune: true
   # Ready only when everything it applied is healthy (Deployments rolled out,
@@ -84,7 +84,7 @@ spec:
   sourceRef:
     kind: GitRepository
     name: flux-system
-  path: ./infrastructure/configs
+  path: ./platform/infrastructure/configs
   prune: true
   # Includes waiting for Certificates to be issued; DNS-01 takes a few minutes.
   wait: true

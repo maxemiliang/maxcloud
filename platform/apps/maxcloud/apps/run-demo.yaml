@@ -20,6 +20,6 @@ spec:
   type: Static
   defaultValues:
     name: run-demo
-    path: apps/run-demo
+    path: platform/apps/run-demo
     buckets: "smoke,cdn:public"
     db: "true"
