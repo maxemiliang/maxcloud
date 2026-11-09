@@ -7,7 +7,6 @@
   "packages": {
     ".": {
       "release-type": "go",
-      "component": "mcloud",
       "include-component-in-tag": false,
       "exclude-paths": ["controller", "functions", "packages", "platform"]
     },
