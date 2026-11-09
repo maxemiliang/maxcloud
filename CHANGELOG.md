@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.14.1](https://github.com/maxemiliang/maxcloud/compare/v0.14.0...v0.14.1) (2026-11-09)
+
+
+### Bug Fixes
+
+* **functions:** readiness probes without periodSeconds, so instances are Ready as soon as they're up ([88cd45c](https://github.com/maxemiliang/maxcloud/commit/88cd45c2fb369685b2ea1ee4a3172919c18230e2))
+* **functions:** readiness probes without periodSeconds, so instances are Ready as soon as they're up ([f200f85](https://github.com/maxemiliang/maxcloud/commit/f200f85deb10ae9b8377cfe3fa524434020c6e11))
+* **mcloud:** apps kept in git live in maxcloud's platform/ ([ac0e9b3](https://github.com/maxemiliang/maxcloud/commit/ac0e9b3cdf2c90b63a2c9c35241e284c26e83625))
+
 ## [0.14.0](https://github.com/maxemiliang/maxcloud/compare/v0.13.0...v0.14.0) (2026-11-08)
 
 
