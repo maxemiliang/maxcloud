@@ -245,6 +245,7 @@ type Run struct {
 	Conclusion string `json:"conclusion"` // success, failure, cancelled, ...
 	HTMLURL    string `json:"html_url"`
 	Event      string `json:"event"`
+	Path       string `json:"path"` // the workflow file: .github/workflows/deploy.yaml
 }
 
 // RunsFor lists the workflow runs for a commit, newest first.
