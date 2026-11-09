@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.14.2](https://github.com/maxemiliang/maxcloud/compare/v0.14.1...v0.14.2) (2026-11-09)
+
+
+### Bug Fixes
+
+* **mcloud:** find the app's deploy workflow by its run-deploy call, not its name ([145e42f](https://github.com/maxemiliang/maxcloud/commit/145e42ff1f465c7b2a90394a2a4a7f1e222ee42b))
+* **mcloud:** find the app's deploy workflow by its run-deploy call, not its name ([01a63b3](https://github.com/maxemiliang/maxcloud/commit/01a63b31a9de3e8b53c5722054fe01a6f50892bd))
+* **mcloud:** find the GitHub repo when insteadOf rewrites origin to an SSH alias ([79c2196](https://github.com/maxemiliang/maxcloud/commit/79c2196644c8aa5368d9bb5ba04972e763dfae47))
+* **mcloud:** find the GitHub repo when insteadOf rewrites origin to an SSH alias ([51a1c9c](https://github.com/maxemiliang/maxcloud/commit/51a1c9c1b626aa03b0f5ebfaead3d9618a1b95c9))
+
 ## [0.14.1](https://github.com/maxemiliang/maxcloud/compare/v0.14.0...v0.14.1) (2026-11-09)
 
 
