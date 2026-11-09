@@ -453,8 +453,13 @@ func knativeService(f Function, o Options) obj {
 	c["ports"] = []any{obj{"containerPort": 8080}}
 	// Knative adds runAsNonRoot, seccomp and no capabilities itself.
 	if f.HealthPath != "" {
-		// Knative probes the container's port itself; no port here.
-		c["readinessProbe"] = obj{"httpGet": obj{"path": f.HealthPath}, "periodSeconds": 10}
+		// Knative probes the container's port itself; no port here. No
+		// periodSeconds either: without one, the queue-proxy probes every 50ms
+		// until the app answers, so a new instance takes requests as soon as
+		// it's up. With one, it checks once per kubelet probe (every 10s), and
+		// a cold start or rollout waits up to that long for nothing
+		// (platform/docs/kb/knative/readiness-probe-period.md).
+		c["readinessProbe"] = obj{"httpGet": obj{"path": f.HealthPath}}
 		c["livenessProbe"] = obj{
 			"httpGet": obj{"path": f.HealthPath}, "initialDelaySeconds": 30,
 			"periodSeconds": 30, "timeoutSeconds": 5, "failureThreshold": 3,
