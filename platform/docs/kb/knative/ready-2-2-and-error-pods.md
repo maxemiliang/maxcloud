@@ -4,7 +4,7 @@ kind: fact
 area: knative
 tags: [knative, queue-proxy, sigterm, pid1]
 learned: 2026-11-04
-updated: 2026-11-04
+updated: 2026-11-09
 where:
   - templates/run-app/README.md
 ---
@@ -23,4 +23,6 @@ where:
 - Paketo's Node.js image runs `npm start` through a `start.sh` that forwards
   SIGTERM; a Paketo Go image runs the binary directly as PID 1.
 - Cold start, measured 2026-11-04: ~0.75-0.9 s (Go whoami), ~1.3 s (Node
-  functions app) over HTTPS from zero; scale to zero after ~86 s idle.
+  functions app) over HTTPS from zero; scale to zero after ~86 s idle. A
+  readinessProbe with `periodSeconds` adds up to 10 s
+  ([readiness-probe-period](readiness-probe-period.md)).

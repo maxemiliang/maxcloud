@@ -29,6 +29,7 @@ Procedures live in [`../runbooks/`](../runbooks/) and the README, not here.
 - [Knative's activator and webhook HPAs need caps on a small cluster](knative/hpa-caps.md): and the PDBs that block drains
 - [READY 2/2 is app plus queue-proxy; Error pods mean the app ignored SIGTERM](knative/ready-2-2-and-error-pods.md): and measured cold starts
 - [maxcloud custom domains copy Knative's route; no DomainMapping](knative/custom-domains-copy-route.md): why, and what a DomainMapping does to the Host
+- [A readinessProbe with periodSeconds makes Knative pods Ready up to 10 s late](knative/readiness-probe-period.md): listening in 2 s, Ready in 10; what mcloud's `healthPath` used to do
 - [Knative's activator serves any app's revision to whoever names it](knative/activator-routes-by-header.md): `Knative-Serving-Namespace` headers; why apps can't reach it and Traefik strips them
 
 ## flux
