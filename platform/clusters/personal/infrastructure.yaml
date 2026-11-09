@@ -58,8 +58,12 @@ spec:
     kind: GitRepository
     name: flux-system
   path: ./platform/infrastructure/controllers
-  # Delete objects from the cluster when they're removed from git.
-  prune: true
+  # TEMPORARY (move to the maxcloud repo): the platform's Secrets move from
+  # this Kustomization to `secrets` (secrets.yaml). With prune on, the first
+  # reconcile from the new source could delete them before `secrets` takes
+  # them over. Back to true once `secrets` owns them:
+  #   kubectl get secret -A -l kustomize.toolkit.fluxcd.io/name=secrets
+  prune: false
   # Ready only when everything it applied is healthy (Deployments rolled out,
   # HelmReleases installed), not just "kubectl apply succeeded".
   wait: true
@@ -85,7 +89,12 @@ spec:
     kind: GitRepository
     name: flux-system
   path: ./platform/infrastructure/configs
-  prune: true
+  # TEMPORARY (move to the maxcloud repo): the platform's Secrets move from
+  # this Kustomization to `secrets` (secrets.yaml). With prune on, the first
+  # reconcile from the new source could delete them before `secrets` takes
+  # them over. Back to true once `secrets` owns them:
+  #   kubectl get secret -A -l kustomize.toolkit.fluxcd.io/name=secrets
+  prune: false
   # Includes waiting for Certificates to be issued; DNS-01 takes a few minutes.
   wait: true
   healthCheckExprs:

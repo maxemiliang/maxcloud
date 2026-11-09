@@ -1,0 +1,12 @@
+# private/: the private repo with the platform's secrets and the write-ups
+# about open security issues (platform/README.md, Secrets). Optional and
+# for people with access only: `update = none` keeps clones and
+# `git submodule update` from fetching it (check it out with
+# `git submodule update --init --checkout private`), and `ignore = all`
+# keeps its moving commit out of `git status`. Flux reads the repo itself.
+[submodule "private"]
+	path = private
+	url = https://github.com/maxemiliang/homelab.git
+	branch = main
+	update = none
+	ignore = all
