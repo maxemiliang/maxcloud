@@ -29,7 +29,7 @@ For completion and checking in an editor with the YAML language server, start th
 | `db` | boolean or object |  | A Postgres database (CloudNativePG), backed up continuously to the bucket mc-&lt;app&gt;--db; every function gets DATABASE\_URL. true, or its settings. false removes the database and keeps its backups. |
 | `db.size` | string | `1Gi` | Disk per instance, a Kubernetes quantity. Can grow, never shrink. |
 | `db.instances` | integer or string: 1, 2 | `1` | 1, or 2 for a replica on the other node. |
-| `domains` | list of objects |  | Hostnames of the app's own for its Knative services, besides &lt;service&gt;--&lt;app&gt;.gronblom.dev. Only the hostnames an admin allowed the app (the homelab repo's infrastructure/configs/run/domains.yaml), in zones the cluster has certificates for. Removing one removes its route and DNS record. |
+| `domains` | list of objects |  | Hostnames of the app's own for its Knative services, besides &lt;service&gt;--&lt;app&gt;.gronblom.dev. Only the hostnames an admin allowed the app (platform/infrastructure/configs/run/domains.yaml), in zones the cluster has certificates for. Removing one removes its route and DNS record. |
 | `domains[].host` | string, required |  | The hostname: lowercase, no wildcards. E.g. `shop.gronblom.dev` |
 | `domains[].service` | string, required |  | The Knative service it routes to: an HTTP function's name. It can stay private. |
 | `domains[].proxied` | boolean | `false` | Behind Cloudflare's proxy (WAF, caching, Access). Not for \*.lab.gronblom.dev. |

@@ -102,7 +102,7 @@
       ]
     },
     "domains": {
-      "description": "Hostnames of the app's own for its Knative services, besides <service>--<app>.gronblom.dev. Only the hostnames an admin allowed the app (the homelab repo's infrastructure/configs/run/domains.yaml), in zones the cluster has certificates for. Removing one removes its route and DNS record.",
+      "description": "Hostnames of the app's own for its Knative services, besides <service>--<app>.gronblom.dev. Only the hostnames an admin allowed the app (platform/infrastructure/configs/run/domains.yaml), in zones the cluster has certificates for. Removing one removes its route and DNS record.",
       "type": "array",
       "items": {
         "type": "object",

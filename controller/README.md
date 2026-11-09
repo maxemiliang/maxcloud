@@ -18,7 +18,7 @@ and AWS libraries.
 
 ## What an app gets
 
-The registry (homelab `apps/maxcloud`) creates a `Bucket` in the app's
+The registry (`platform/apps/maxcloud`) creates a `Bucket` in the app's
 namespace for every bucket in the app's entry. Apps can read these but not
 create them: what storage an app has is the registry's call.
 
@@ -187,7 +187,7 @@ leader), creates any entry that has a copy but isn't in the cluster. The
 registry then recreates the app, and its database restores itself from
 its backups. A finalizer on each entry deletes the copy first
 when the app is deleted on purpose, so a deleted app doesn't come back.
-Entries that live in the homelab repo aren't copied: git has them. They
+Entries that live in git (`platform/apps/maxcloud/apps/`) aren't copied: git has them. They
 get the finalizer too, for the app's secrets' and variables' copies
 (below).
 
@@ -203,7 +203,7 @@ database restores itself from `mc-<name>--db`. So:
   `maxcloud.gronblom.dev/registration`. The controller gives an entry
   mcloud made a random one the first time it sees it, and the entry's copy
   keeps it, so an entry restored after a rebuild is the same registration.
-  An entry from the homelab repo declares its own in git (any random value,
+  An entry from git (`platform/`) declares its own there (any random value,
   kept for good): the controller doesn't give those one, since Flux would
   race it, and a rebuild recreates them from git without a copy. Admission
   lets only the controller and Flux set or change it.
@@ -253,8 +253,8 @@ hand brings it straight back from the copy: to remove secrets, unset them
 with mcloud.
 
 Deleting the app's registry entry deletes the copy, with the entry's own
-copy (the same finalizer), whether mcloud made the entry or it's in the
-homelab repo, so an app made later under the same name starts without
+copy (the same finalizer), whether mcloud made the entry or it's in
+`platform/`, so an app made later under the same name starts without
 secrets. A Secret whose app has no registry entry isn't copied.
 
 The controller caches only Secrets labelled
@@ -314,7 +314,7 @@ the cluster's repo owns), plus one rule per app in the app registry:
 
 into the ConfigMap `zot-config`, which zot runs with. `<app>` is the
 entry's `name` value, else the entry's name; every entry labelled
-`run.gronblom.dev/app: "true"` counts, the homelab repo's too. So a repo
+`run.gronblom.dev/app: "true"` counts, those from `platform/` too. So a repo
 can push only to the apps whose registry entry names it, and an app reads
 only its own images. zot reloads the rules by itself. The controller
 reads the base again every 2 minutes. A change to the base (logins,
@@ -353,7 +353,7 @@ so the cluster's limits on what a developer may ask for apply: a
 `maxcloud.yaml` asking for more is refused, and the entry gets the reason
 in the annotation `maxcloud.gronblom.dev/sync-error` and a Warning event.
 `maxcloud.gronblom.dev/synced-revision` is the last revision handled.
-Entries in the homelab repo are left alone.
+Entries from git (`platform/`) are left alone.
 
 `maxcloud.gronblom.dev/synced-fields` lists the entry's keys the file
 declares, sorted: from `deploy`, `cpu`, `memory`, `pods`, `buckets`, `db`,

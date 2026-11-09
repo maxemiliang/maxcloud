@@ -8,8 +8,8 @@ domains:
   - {host: paja.lankkupelit.fi, service: web, proxied: true}
 ```
 
-- **An admin allows them first:** the homelab repo's
-  `infrastructure/configs/run/domains.yaml` lists the hostnames each app
+- **An admin allows them first:**
+  `platform/infrastructure/configs/run/domains.yaml` lists the hostnames each app
   may have. Admission refuses a registry entry (from `mcloud deploy`, or a
   pushed `maxcloud.yaml`) with any other, and refuses any route in the
   app's namespace with a hostname that isn't the app's.

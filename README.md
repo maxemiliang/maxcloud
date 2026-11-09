@@ -2,7 +2,7 @@
 
 Deploy apps and functions to my homelab, the way you would to Cloud Run or
 Firebase. maxcloud is Knative on the homelab cluster, deployed through Flux
-from [maxemiliang/homelab](https://github.com/maxemiliang/homelab).
+from [`platform/`](platform/) in this repo.
 
 This repo holds:
 

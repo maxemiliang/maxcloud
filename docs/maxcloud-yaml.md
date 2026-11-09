@@ -64,7 +64,7 @@ admin, an app gets at most:
 | `db.size` | 10Gi |
 | `db.instances` | 2 |
 
-The homelab repo's `infrastructure/configs/run/registry-admission.yaml`
+`platform/infrastructure/configs/run/registry-admission.yaml`
 sets these.
 
 ## Names

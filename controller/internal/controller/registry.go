@@ -23,8 +23,8 @@ import (
 )
 
 // The app registry's entries (the Flux Operator's ResourceSetInputProviders
-// in flux-system) that mcloud made in the cluster, as opposed to ones in the
-// homelab repo. Git keeps those safe through a cluster rebuild; for these,
+// in flux-system) that mcloud made in the cluster, as opposed to ones in git
+// (platform/). Git keeps those safe through a cluster rebuild; for these,
 // RegistryBackup keeps a copy of each in a bucket and puts back any that are
 // missing.
 var providerGVK = schema.GroupVersionKind{Group: "fluxcd.controlplane.io", Version: "v1", Kind: "ResourceSetInputProvider"}
@@ -58,7 +58,7 @@ type RegistryBackup struct {
 // +kubebuilder:rbac:groups=fluxcd.controlplane.io,resources=resourcesetinputproviders,verbs=get;list;watch;create;update;patch
 // +kubebuilder:rbac:groups=fluxcd.controlplane.io,resources=resourcesetinputproviders/finalizers,verbs=update
 
-// isAppEntry: any app's registry entry, mcloud's or from the homelab repo.
+// isAppEntry: any app's registry entry, mcloud's or from git (platform/).
 func isAppEntry(o client.Object) bool {
 	return o.GetNamespace() == RegistryNamespace && o.GetLabels()[appLabel] == "true"
 }
