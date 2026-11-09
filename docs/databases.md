@@ -7,7 +7,8 @@ there by itself if its cluster is lost. Every function gets
 `DATABASE_URL`. An app set up before this may have a `database.yaml` (what
 mcloud used to write for queue functions, with no backups): it keeps
 working, but the controller won't take it over. Moving it is a dump and
-restore (homelab `docs/runbooks/move-database-to-registry.md`).
+restore
+([move-database-to-registry](../platform/docs/runbooks/move-database-to-registry.md)).
 
 ```fish
 mcloud db migrate                   # apply migrations/*.sql (see Migrations)

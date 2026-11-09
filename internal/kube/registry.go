@@ -20,7 +20,7 @@ import (
 // guardrails, buckets and database.
 type RegistryEntry struct {
 	Entry *registry.Entry
-	// InGit: Flux applied it from the homelab repo (the platform's own apps,
+	// InGit: Flux applied it from git (platform/) (the platform's own apps,
 	// like run-demo). Those change in git, not with mcloud.
 	InGit bool
 	// SyncedFields are the registry keys (cpu, memory, pods, buckets, db,
@@ -94,7 +94,7 @@ func (c *Client) PutRegistryEntry(ctx context.Context, e *registry.Entry) error 
 		return err
 	}
 	if cur.GetLabels()[registry.FluxOwnerLabel] != "" {
-		return fmt.Errorf("app %s is registered in the homelab repo (apps/maxcloud/apps/%s.yaml): change it there", e.Name, e.Name)
+		return fmt.Errorf("app %s is registered in git (the maxcloud repo's platform/apps/maxcloud/apps/%s.yaml): change it there", e.Name, e.Name)
 	}
 	cur.Object["spec"] = want.Object["spec"]
 	labels := cur.GetLabels()

@@ -1,0 +1,86 @@
+# external-dns: publishes a Cloudflare DNS record for every HTTPRoute hostname
+# attached to the public Gateway. Records are CNAMEs to the UpCloud LB hostname,
+# which external-dns reads from the Gateway's .status.addresses (Traefik fills
+# that in, see providers.kubernetesGateway.statusAddress in the Traefik release).
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: HelmRepository
+metadata:
+  name: external-dns
+  namespace: external-dns
+spec:
+  interval: 12h
+  url: https://kubernetes-sigs.github.io/external-dns/
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: external-dns
+  namespace: external-dns
+spec:
+  interval: 1h
+  serviceAccountName: flux-helm # infrastructure/controllers/flux-helm.yaml
+  chart:
+    spec:
+      chart: external-dns
+      version: "1.23.0"
+      sourceRef:
+        kind: HelmRepository
+        name: external-dns
+  install:
+    remediation:
+      retries: 3
+  upgrade:
+    remediation:
+      retries: 3
+  values:
+    provider:
+      name: cloudflare
+    # Scoped token: DNS edit on the zones in domainFilters only, usable only
+    # from the NAT egress IP. Separate from cert-manager's token so each can be
+    # revoked alone.
+    env:
+      - name: CF_API_TOKEN
+        valueFrom:
+          secretKeyRef:
+            name: cloudflare-api-token
+            key: api-token
+
+    # Only HTTPRoutes, and only those attached to a Gateway in the traefik
+    # namespace (the public Gateway). Routes on any other Gateway are ignored.
+    sources:
+      - gateway-httproute
+    gatewayNamespace: traefik
+    # Never touch records outside these zones. Existing records in them that
+    # external-dns didn't create (no ownership TXT record) are left alone, even
+    # when a route wants the same name: lankkupelit.fi's play record is
+    # managed by lankkupaja's own OpenTofu.
+    domainFilters:
+      - gronblom.dev
+      - lankkupelit.fi
+
+    # sync: create, update and delete. Deleting is safe because of the TXT
+    # registry: external-dns only changes records it has an ownership TXT
+    # record for, so hand-made records in the zone (apex, MX, ...) are left alone.
+    policy: sync
+    registry: txt
+    # Written into every ownership TXT record. Never change it: records with
+    # the old ID would become unowned and stop being managed.
+    txtOwnerId: homelab-personal
+
+    # React to route changes immediately; the 5m loop only catches drift
+    # (e.g. a record edited by hand in the Cloudflare dashboard).
+    triggerLoopOnEvent: true
+    interval: 5m
+
+    # Records are DNS-only by default (the --cloudflare-proxied flag stays off).
+    # A route under *.gronblom.dev opts in to the Cloudflare proxy with the
+    # annotation external-dns.kubernetes.io/cloudflare-proxied: "true" on the
+    # HTTPRoute. Never on *.lab.gronblom.dev: Cloudflare's free edge certificate
+    # doesn't cover two-level names.
+
+    resources:
+      requests:
+        cpu: 10m
+        memory: 32Mi
+      limits:
+        memory: 128Mi

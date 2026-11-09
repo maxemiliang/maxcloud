@@ -16,7 +16,7 @@
 #   - ConfigMap maxcloud-domains (MAXCLOUD_DOMAINS_ALLOWLIST): the hostnames
 #     each app may have, for Domains; without it, no app gets one
 # Databases need CloudNativePG and its barman-cloud plugin in the cluster.
-# The homelab's are in its infrastructure/controllers/maxcloud.
+# The homelab's are in platform/infrastructure/controllers/maxcloud.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 namespace: maxcloud-system

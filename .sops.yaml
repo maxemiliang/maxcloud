@@ -1,0 +1,15 @@
+# SOPS picks the first rule whose path_regex matches the file being encrypted.
+#
+# Convention: the platform's Kubernetes Secrets are named
+# `<something>.sops.yaml` and live only in the private repo (private/secrets/;
+# this repo is public). This copy lets sops find the rules when run from
+# here. Only `data` and `stringData` are encrypted, so apiVersion/kind/metadata
+# stay readable in diffs and Flux can still work out what the object is.
+#
+# `age` is the PUBLIC key (recipient), which is safe to commit. To add a second
+# recipient (e.g. an offline backup key), separate them with a comma and then run
+# `sops updatekeys <file>` on the existing files.
+creation_rules:
+  - path_regex: '[^/]+\.sops\.ya?ml$'
+    encrypted_regex: '^(data|stringData)$'
+    age: 'age1s5mjgvz24gpuq46uhch3exsq4873vwa0wmyuvn745kmf4dv8y5dsclgqxa'

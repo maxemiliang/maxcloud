@@ -1,0 +1,18 @@
+# This repo's app on maxcloud: the whole app's definition. Set app: to the
+# app's name (its namespace, and part of its URLs). mcloud deploy registers
+# the app from this file the first time; after that a pushed change here
+# applies itself.
+app: my-app
+# The rest is optional. All fields: docs/maxcloud-yaml.md in the maxcloud
+# repo.
+# What the app may reserve (defaults: 200m CPU, 1Gi memory, 20 pods; up to
+# 1 CPU, 4Gi and 40 pods without an admin):
+# quota: {cpu: 500m, memory: 2Gi}
+# S3 buckets in UpCloud Object Storage (mc-<app>--<bucket>):
+# buckets: [uploads, assets:public]
+# A Postgres database (DATABASE_URL from the Secret db-app), backed up and
+# restorable to a point in time:
+# db: true            # or {size: 2Gi, instances: 2}
+# Hostnames of its own for a service, each one allowed for this app by an
+# admin first (infrastructure/configs/run/domains.yaml in the homelab repo):
+# domains: [{host: shop.lankkupelit.fi, service: web, proxied: true}]

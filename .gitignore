@@ -2,3 +2,20 @@
 /dist/
 node_modules/
 packages/*/dist/
+
+# Secrets never go in this repo, which is public: the platform's live in the
+# private repo (private/, see platform/README.md). Local env files, age and
+# PEM keys, plaintext copies of SOPS files and kubeconfigs, anywhere.
+.env
+.env.*
+!.env.example
+mise.local.toml
+*.agekey
+keys.txt
+age.key
+*.pem
+*.dec.yaml
+*.decrypted.*
+kubeconfig
+*.kubeconfig
+kubeconfig.yaml

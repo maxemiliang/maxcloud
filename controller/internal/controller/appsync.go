@@ -91,7 +91,7 @@ func (r *AppSync) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result,
 	if err := r.Get(ctx, types.NamespacedName{Namespace: RegistryNamespace, Name: repo.GetName()}, entry); err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
-	// Only entries mcloud manages: an app registered in the homelab repo
+	// Only entries mcloud manages: an app registered in git (platform/)
 	// changes there.
 	if !isMcloudEntry(entry) || entry.GetAnnotations()[SyncedRevisionAnnotation] == revision {
 		return ctrl.Result{}, nil

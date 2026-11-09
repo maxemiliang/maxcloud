@@ -1,0 +1,86 @@
+# Which hostnames a route in an app namespace may have. The public Gateway
+# takes routes from every namespace and external-dns publishes every
+# hostname on it, so without this an app could put a route on any name in
+# gronblom.dev or lankkupelit.fi (someone else's, or one nobody uses yet),
+# or claim another app's cluster-local name on Knative's local gateway.
+#
+# A route made by anyone in an app namespace (its Flux reconciler, its
+# developers, the maxcloud controller's Domain routes) may only have:
+#   - the app's own cluster-local names, <x>.<app>.svc.cluster.local (not
+#     the short forms <x>.<app> and <x>.<app>.svc: an app called `dev` or
+#     `fi` would get gronblom.dev or lankkupelit.fi);
+#   - hostnames an admin allowed the app in domains.yaml (ConfigMap
+#     maxcloud-system/maxcloud-domains).
+# Not <app>.lab.gronblom.dev by default: Authelia's session cookie is valid
+# for all of lab.gronblom.dev, so the app's pods would get an admin's
+# session (enough to log in to the cluster as them) from any page that
+# makes their browser load that hostname. Only an app an admin trusts that
+# far gets one, in domains.yaml.
+# And it must name them: a route without hostnames would take every hostname
+# of the listeners it attaches to.
+#
+# Knative's controller is exempt: it makes routes for <service>--<app>.gronblom.dev
+# and the cluster-local names from its domain-template, never names an app
+# chooses.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: run-tenant-route-hostnames
+spec:
+  failurePolicy: Fail
+  paramKind:
+    apiVersion: v1
+    kind: ConfigMap
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [gateway.networking.k8s.io]
+        apiVersions: ["*"]
+        operations: [CREATE, UPDATE]
+        resources: [httproutes, grpcroutes]
+  matchConditions:
+    - name: not-knative
+      expression: "request.userInfo.username != 'system:serviceaccount:knative-serving:controller'"
+  variables:
+    - name: app
+      expression: "object.metadata.namespace"
+    - name: hosts
+      expression: "has(object.spec.hostnames) ? object.spec.hostnames : []"
+    - name: allowed
+      expression: >-
+        (has(params.data) && variables.app in params.data ? params.data[variables.app] : '')
+        .split(',').map(p, p.trim().lowerAscii()).filter(p, p != '')
+    # Hostnames that are none of the above. In an allowed `*.zone`, the part
+    # before the zone must be a single label.
+    - name: refused
+      expression: >-
+        variables.hosts.filter(h,
+          !(h.endsWith('.' + variables.app + '.svc.cluster.local') ||
+            variables.allowed.exists(p, h == p ||
+              (p.startsWith('*.') && h.endsWith(p.substring(1)) && size(h) >= size(p) &&
+                !h.substring(0, size(h) - size(p) + 1).contains('.')))))
+  validations:
+    - expression: "size(variables.hosts) > 0"
+      message: "routes in app namespaces must list their hostnames: a route without any would take every hostname of its listeners"
+      reason: Forbidden
+    - expression: "size(variables.refused) == 0"
+      messageExpression: >-
+        'hostnames not allowed for app ' + variables.app + ': ' + variables.refused.join(', ') +
+        '. An app may use its cluster-local names and the hostnames' +
+        ' an admin allowed it in ConfigMap maxcloud-system/maxcloud-domains (maxcloud.yaml domains: makes their routes)'
+      reason: Forbidden
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: run-tenant-route-hostnames
+spec:
+  policyName: run-tenant-route-hostnames
+  validationActions: [Deny]
+  paramRef:
+    name: maxcloud-domains
+    namespace: maxcloud-system
+    parameterNotFoundAction: Deny
+  matchResources:
+    namespaceSelector:
+      matchLabels:
+        run.gronblom.dev/tenant: "true"

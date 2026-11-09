@@ -1,0 +1,8 @@
+# Who may do what with the cluster's API when logged in through Authelia
+# (UKS cluster authentication: infra/cluster-auth). Users and groups from
+# Authelia arrive prefixed "authelia:" so they can't pose as built-ins.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - admins.yaml
+  - developers.yaml

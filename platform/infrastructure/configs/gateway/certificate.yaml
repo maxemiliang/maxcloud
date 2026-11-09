@@ -1,0 +1,65 @@
+# Wildcard certificates for the Gateway's HTTPS listeners, so a new app only
+# needs an HTTPRoute, not its own certificate. Wildcards require DNS-01.
+#
+# Two zones of hostnames:
+#   *.lab.gronblom.dev  DNS-only (not proxied by Cloudflare): internal/admin tools.
+#   *.gronblom.dev      may be Cloudflare-proxied: one level deep, so it's covered
+#                       by Cloudflare's free Universal SSL edge certificate.
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: lab-wildcard
+  namespace: traefik
+spec:
+  secretName: lab-wildcard-tls
+  dnsNames:
+    - lab.gronblom.dev
+    - "*.lab.gronblom.dev"
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+    # New key on every renewal.
+    rotationPolicy: Always
+  issuerRef:
+    kind: ClusterIssuer
+    # letsencrypt-staging is kept for testing issuer changes without
+    # spending production rate limits.
+    name: letsencrypt-prod
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: root-wildcard
+  namespace: traefik
+spec:
+  secretName: root-wildcard-tls
+  # The apex (gronblom.dev) is deliberately left out; it isn't served by this cluster.
+  dnsNames:
+    - "*.gronblom.dev"
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+    rotationPolicy: Always
+  issuerRef:
+    kind: ClusterIssuer
+    name: letsencrypt-prod
+---
+# lankkupelit.fi, for apps outside gronblom.dev (lankkupaja). One level deep,
+# so Cloudflare-proxied hosts are covered by Cloudflare's edge certificate too.
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: lankkupelit-wildcard
+  namespace: traefik
+spec:
+  secretName: lankkupelit-wildcard-tls
+  # The apex (lankkupelit.fi) is deliberately left out; it isn't served by this cluster.
+  dnsNames:
+    - "*.lankkupelit.fi"
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+    rotationPolicy: Always
+  issuerRef:
+    kind: ClusterIssuer
+    name: letsencrypt-prod

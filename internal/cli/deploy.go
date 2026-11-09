@@ -31,7 +31,7 @@ change in the homelab platform).
 
 The app's settings (quota, buckets, database, domains, deploy) come from
 maxcloud.yaml: the first deploy registers the app, later ones bring its
-registry entry in line. No commit to the homelab repo.
+registry entry in line. No commit to the platform's git.
 
 How the app deploys is maxcloud.yaml's deploy: (gitops or direct) when it
 has one. Without it, the app keeps the mode it has: gitops for a new app,
@@ -63,7 +63,7 @@ namespace, with the source streamed to it.`,
 			defer cancel()
 			started := time.Now()
 			// The app's registry entry comes from maxcloud.yaml: registered on
-			// the first deploy, kept in line after that. No homelab commit.
+			// the first deploy, kept in line after that. No platform commit.
 			// How it deploys is the entry's: maxcloud.yaml's deploy: when it
 			// has one, else what the app was last switched to.
 			e, created, err := g.syncApp(ctx, k, p, direct, yes)

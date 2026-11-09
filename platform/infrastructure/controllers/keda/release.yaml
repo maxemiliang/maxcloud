@@ -1,0 +1,70 @@
+# KEDA: event-driven jobs and workers for the run platform. An app puts work
+# in a queue (a table in its Postgres database); KEDA polls the queue length
+# and starts Jobs (ScaledJob) or scales a worker Deployment from zero
+# (ScaledObject). Examples in templates/run-app/deploy/examples.
+#
+# Core only, no HTTP add-on: HTTP services scale to zero with Knative.
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: HelmRepository
+metadata:
+  name: kedacore
+  namespace: keda
+spec:
+  interval: 12h
+  url: https://kedacore.github.io/charts
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: keda
+  namespace: keda
+spec:
+  interval: 1h
+  serviceAccountName: flux-helm # infrastructure/controllers/flux-helm.yaml
+  chart:
+    spec:
+      chart: keda
+      version: "2.21.0"
+      sourceRef:
+        kind: HelmRepository
+        name: kedacore
+  install:
+    remediation:
+      retries: 3
+  upgrade:
+    remediation:
+      retries: 3
+  values:
+    # The CRDs (ScaledObject, ScaledJob, TriggerAuthentication, ...) are chart
+    # templates, so they're upgraded with the chart.
+
+    # Adds KEDA's resources to the built-in admin/edit/view roles, so app repos
+    # (applied as `admin` in their namespace) can create ScaledJobs.
+    rbac:
+      aggregateToDefaultRoles: true
+
+    # Requests sized to measured use: the chart's 100m per pod doesn't fit
+    # the CPU budget of one node during a drain. One replica each and no PDBs
+    # (the chart default), so a drain just restarts them elsewhere; scaling
+    # decisions pause for a minute meanwhile.
+    resources:
+      operator:
+        requests: {cpu: 10m, memory: 64Mi}
+        limits: {cpu: "1", memory: 512Mi}
+      metricServer:
+        requests: {cpu: 10m, memory: 48Mi}
+        limits: {cpu: "1", memory: 512Mi}
+      webhooks:
+        requests: {cpu: 10m, memory: 32Mi}
+        limits: {cpu: 500m, memory: 256Mi}
+
+    # Metrics endpoints only; the PodMonitor is in
+    # infrastructure/configs/monitoring/keda.yaml (the Prometheus Operator
+    # CRDs may not exist yet when this chart installs).
+    prometheus:
+      operator:
+        enabled: true
+      metricServer:
+        enabled: true
+      webhooks:
+        enabled: true

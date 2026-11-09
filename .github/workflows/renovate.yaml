@@ -1,0 +1,51 @@
+# Self-hosted Renovate: runs in this repo's own Actions, as a GitHub App that
+# only this repo's owner controls (no third-party service gets repo access).
+# What it updates and when it may open PRs is in renovate.json; this
+# workflow only decides when Renovate runs.
+#
+# Needs, in the repo settings (Secrets and variables → Actions):
+#   variable RENOVATE_APP_CLIENT_ID   the GitHub App's Client ID
+#   secret   RENOVATE_APP_PRIVATE_KEY one of the app's private keys (.pem)
+name: renovate
+
+on:
+  # Daily, so ticked boxes on the Dependency Dashboard and rebases are handled
+  # within a day. New PRs are only opened inside renovate.json's schedule
+  # (Monday mornings); 04:17 UTC is 06:17/07:17 in Helsinki.
+  schedule:
+    - cron: "17 4 * * *"
+  workflow_dispatch: {}
+
+# The job's own GITHUB_TOKEN needs nothing: Renovate uses the app's token.
+permissions: {}
+
+concurrency: renovate
+
+jobs:
+  renovate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      # Short-lived installation token for exactly the repos Renovate looks
+      # after (the app must be installed on each).
+      - uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        id: app-token
+        with:
+          client-id: ${{ vars.RENOVATE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.RENOVATE_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: maxcloud
+
+      # PRs opened with an app token (unlike GITHUB_TOKEN) trigger other
+      # workflows, so the validate check runs on every Renovate PR.
+      - uses: renovatebot/github-action@43b963bf5dd5e57f1f95c59765a018d782870211 # v46.3.11
+        with:
+          token: ${{ steps.app-token.outputs.token }}
+        env:
+          # This repo and maxcloud (mcloud, the SDKs, the run-deploy workflow).
+          RENOVATE_REPOSITORIES: maxemiliang/maxcloud
+          # Each repo has its own renovate.json: no onboarding PR, and never
+          # run without it.
+          RENOVATE_ONBOARDING: "false"
+          RENOVATE_REQUIRE_CONFIG: required
+          LOG_LEVEL: info

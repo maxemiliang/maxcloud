@@ -1,0 +1,51 @@
+# The private `web` service in the browser behind the homelab's Authelia
+# login: https://<name>.lab.gronblom.dev. Replace `changeme` below with the
+# app's name (its namespace). The hostname needs an admin's yes first
+# (infrastructure/configs/run/domains.yaml in the homelab repo): Authelia's
+# session cookie is valid for all of lab.gronblom.dev, so the app's pods
+# see the session of every admin who opens it. Only for apps trusted that
+# far. Authelia lets in members of the `admins` group with two-factor.
+#
+# Knative's own routes can't carry a login step, so this is a route of its
+# own: Authelia checks the request, then it goes to Traefik's in-cluster
+# entrypoint as a request for the service's cluster-local name. The homelab
+# repo's app registry grants this namespace's routes that backend
+# (apps/maxcloud/resourceset.yaml).
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: authelia
+spec:
+  forwardAuth:
+    address: http://authelia.authelia.svc.cluster.local/api/authz/forward-auth
+    trustForwardHeader: true
+    # Who is logged in, as request headers for the app.
+    authResponseHeaders: [Remote-User, Remote-Groups, Remote-Email, Remote-Name]
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: web-sso
+spec:
+  parentRefs:
+    - name: public
+      namespace: traefik
+      sectionName: https-lab
+  hostnames:
+    - changeme.lab.gronblom.dev
+  rules:
+    - filters:
+        # Auth first: Authelia must see the original hostname.
+        - type: ExtensionRef
+          extensionRef:
+            group: traefik.io
+            kind: Middleware
+            name: authelia
+        - type: URLRewrite
+          urlRewrite:
+            # <service>.<namespace>.svc.cluster.local
+            hostname: web.changeme.svc.cluster.local
+      backendRefs:
+        - name: traefik-knative
+          namespace: traefik
+          port: 80

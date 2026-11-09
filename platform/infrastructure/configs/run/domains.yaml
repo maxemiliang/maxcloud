@@ -1,0 +1,46 @@
+# The hostnames each maxcloud app may have, besides the ones the platform
+# gives it (<service>--<app>.gronblom.dev, <service>.<app>.svc.cluster.local).
+# An admin's call, kept here in git: apps can't change it.
+#
+# A name under lab.gronblom.dev (an SSO route,
+# templates/run-app/deploy/examples/sso.yaml) hands the app's pods the
+# Authelia session of every admin who opens it, or any page that loads it:
+# Authelia's cookie is valid for all of lab.gronblom.dev. That session can
+# log in to the cluster as cluster-admin. Allow one only to an app whose code
+# and namespace you trust as much as an admin.
+#
+# One key per app, its hostnames comma-separated. `*.zone` allows any name
+# exactly one level below zone (as a wildcard certificate covers it). Never
+# give an app a wildcard on a zone others use: *.gronblom.dev would let it
+# take registry.gronblom.dev.
+#
+# Who reads it:
+#   - admission, when an app's registry entry asks for `domains`
+#     (registry-admission.yaml) and when anything in an app namespace writes
+#     an HTTPRoute or GRPCRoute (route-admission.yaml);
+#   - the maxcloud controller, which routes a Domain only while its hostname
+#     is on the list here: taking one off takes its route down within 5
+#     minutes. Remove it from the app's maxcloud.yaml too.
+#
+# A hostname also needs an HTTPS listener whose certificate covers it
+# (infrastructure/configs/gateway): today *.gronblom.dev, *.lab.gronblom.dev
+# and *.lankkupelit.fi. Domains outside those zones aren't supported yet
+# (docs/kb/networking/custom-domains-outside-managed-zones.md).
+#
+# Don't delete it: both policies fail closed without it ("no params found
+# for policy binding with `Deny` parameterNotFoundAction"). Every route
+# change in app namespaces (Knative's too, so no deploys) and every registry
+# entry change is refused until Flux puts it back (infra-configs).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: maxcloud-domains
+  namespace: maxcloud-system
+data:
+  # Lankkupaja (github.com/maxemiliang/lankkupaja)
+  paja: paja.lankkupelit.fi
+  # maxoo, moving from Cloudflare Workers; behind Cloudflare Access
+  maxoo: maxoo.gronblom.dev
+  # The platform's own smoke test (apps/run-demo/sso.yaml: whoami behind
+  # Authelia). Under lab.gronblom.dev, so trusted like an admin (above).
+  run-demo: run-demo.lab.gronblom.dev

@@ -1,0 +1,23 @@
+# Every push to main builds this repo and deploys it to maxcloud
+# (maxemiliang/maxcloud, .github/workflows/run-deploy.yaml): image to the
+# maxcloud registry (registry.gronblom.dev/<app>/<app>, app: from
+# maxcloud.yaml), digest pinned in deploy/k8s, Flux applies it within a
+# minute.
+name: deploy
+
+on:
+  push:
+    branches: [main]
+    # The deploy commit itself only changes deploy/; manifest-only changes
+    # are applied by Flux without a build.
+    paths-ignore: ["deploy/**"]
+  workflow_dispatch: {}
+
+permissions: {}
+
+jobs:
+  deploy:
+    permissions:
+      contents: write # the deploy commit
+      id-token: write # pushing to the maxcloud registry, as this repo
+    uses: maxemiliang/maxcloud/.github/workflows/run-deploy.yaml@main

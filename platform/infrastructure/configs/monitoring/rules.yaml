@@ -1,0 +1,140 @@
+# Alerts for this cluster, on top of the kube-prometheus-stack defaults.
+# severity=warning and critical go to Telegram; info stays in Grafana.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: homelab
+  namespace: monitoring
+spec:
+  groups:
+    - name: homelab.storage
+      rules:
+        # The default StorageClass keeps the disk when its PVC is deleted
+        # (reclaimPolicy Retain). The PV then sits in Released, and UpCloud
+        # keeps billing the disk until someone deletes it.
+        - alert: PersistentVolumeReleased
+          expr: kube_persistentvolume_status_phase{phase="Released"} == 1
+          for: 1h
+          labels:
+            severity: warning
+          annotations:
+            summary: "PV {{ $labels.persistentvolume }} has had no claim for 1h"
+            description: >-
+              Its UpCloud disk is still billed. If the data isn't needed:
+              kubectl patch pv {{ $labels.persistentvolume }} -p
+              '{"spec":{"persistentVolumeReclaimPolicy":"Delete"}}'
+
+    - name: homelab.certificates
+      rules:
+        # Let's Encrypt certificates renew 30 days before expiry, so 14 days
+        # left means renewal has been failing for two weeks.
+        - alert: CertificateExpiringSoon
+          expr: certmanager_certificate_expiration_timestamp_seconds - time() < 14 * 24 * 3600
+          for: 1h
+          labels:
+            severity: warning
+          annotations:
+            summary: "Certificate {{ $labels.namespace }}/{{ $labels.name }} expires in {{ $value | humanizeDuration }}"
+            description: "Renewal is failing. Check: kubectl -n {{ $labels.namespace }} describe certificate {{ $labels.name }}"
+        - alert: CertificateExpiringSoon
+          expr: certmanager_certificate_expiration_timestamp_seconds - time() < 3 * 24 * 3600
+          for: 1h
+          labels:
+            severity: critical
+          annotations:
+            summary: "Certificate {{ $labels.namespace }}/{{ $labels.name }} expires in {{ $value | humanizeDuration }}"
+            description: "Renewal is failing. Check: kubectl -n {{ $labels.namespace }} describe certificate {{ $labels.name }}"
+        - alert: CertificateNotReady
+          expr: certmanager_certificate_ready_status{condition!="True"} == 1
+          for: 30m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Certificate {{ $labels.namespace }}/{{ $labels.name }} is not Ready"
+            description: "Check: kubectl -n {{ $labels.namespace }} describe certificate {{ $labels.name }}"
+
+    - name: homelab.flux
+      rules:
+        # A push to main is a deploy; this fires when it didn't apply.
+        # See docs/kb/monitoring/flux-alert-flapping.md.
+        # exported_namespace is the object's namespace (namespace is taken by
+        # the flux-operator target itself).
+        #
+        # flux_resource_info starts a new series whenever ready, reason or
+        # revision changes. An object that keeps failing reports
+        # ready="Unknown" for the moment of each retry, and a scrape landing
+        # there used to resolve the alert and fire it again 15m later: a
+        # "resolved" and a "firing" message with nothing fixed. So: one series
+        # per object, anything but Ready counts, and keep_firing_for rides
+        # out missed scrapes (flux-operator restarts, node reboots).
+        - alert: FluxResourceNotReady
+          expr: >-
+            max by (exported_namespace, kind, name) (
+              flux_resource_info{ready!="True", suspended="False"}
+            ) == 1
+          for: 15m
+          keep_firing_for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Flux {{ $labels.kind }} {{ $labels.exported_namespace }}/{{ $labels.name }} is not Ready"
+            description: "The error is in its Ready condition: flux get all -n {{ $labels.exported_namespace }} --status-selector ready=false"
+
+    # CloudNativePG databases (scraped by the cnpg-instances PodMonitor).
+    # Archiver metrics only exist on the primary; the backup plugin's metrics
+    # are reported by every instance, hence the max by (namespace, cluster).
+    - name: homelab.cnpg
+      rules:
+        # WAL archiving is what point-in-time recovery is built on, and
+        # unarchived WAL piles up on the primary's disk until it's full.
+        - alert: CNPGWALArchivingFailing
+          expr: cnpg_pg_stat_archiver_last_failed_time > cnpg_pg_stat_archiver_last_archived_time
+          for: 15m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Postgres {{ $labels.namespace }}/{{ $labels.cluster }} can't archive WAL to object storage"
+            description: "Check: kubectl -n {{ $labels.namespace }} logs {{ $labels.pod }} -c plugin-barman-cloud --tail=50"
+
+        # Base backups run daily at 05:00 UTC; 26h allows for a slow one.
+        # Also fires for a cluster that has never had a backup.
+        - alert: CNPGBackupTooOld
+          expr: time() - max by (namespace, cluster) (barman_cloud_cloudnative_pg_io_last_available_backup_timestamp) > 26 * 3600
+          for: 1h
+          labels:
+            severity: warning
+          annotations:
+            summary: "Postgres {{ $labels.namespace }}/{{ $labels.cluster }} has no base backup from the last 26h"
+            description: "Check: kubectl -n {{ $labels.namespace }} get backup --sort-by=.metadata.creationTimestamp"
+        - alert: CNPGBackupFailed
+          expr: >-
+            max by (namespace, cluster) (barman_cloud_cloudnative_pg_io_last_failed_backup_timestamp)
+            > max by (namespace, cluster) (barman_cloud_cloudnative_pg_io_last_available_backup_timestamp)
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "The last base backup of Postgres {{ $labels.namespace }}/{{ $labels.cluster }} failed"
+            description: "Check: kubectl -n {{ $labels.namespace }} get backup --sort-by=.metadata.creationTimestamp"
+
+        # The primary streams to fewer replicas than the cluster has running
+        # instances. 30m rides out kured reboots, where the replica on the
+        # rebooting node is gone for a few minutes.
+        - alert: CNPGReplicaNotStreaming
+          expr: >-
+            cnpg_pg_replication_streaming_replicas{role="primary"}
+            < on (namespace, cluster)
+            (count by (namespace, cluster) (cnpg_collector_up) - 1)
+          for: 30m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Postgres {{ $labels.namespace }}/{{ $labels.cluster }}: a replica isn't streaming from the primary"
+            description: "No failover target if the primary's node fails. Check: kubectl -n {{ $labels.namespace }} get cluster {{ $labels.cluster }}"
+        - alert: CNPGReplicationLagging
+          expr: cnpg_pg_replication_lag > 300
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Postgres replica {{ $labels.namespace }}/{{ $labels.pod }} is {{ $value | humanizeDuration }} behind the primary"

@@ -1,0 +1,99 @@
+# Knative Serving (the run platform). Knative exports OpenTelemetry metrics
+# in Prometheus format on port 9090 (config-observability in
+# infrastructure/configs/knative/serving.yaml).
+#
+# Control plane: activator, autoscaler, controller, webhooks. The autoscaler's
+# kn_revision_pods_* series (desired/actual/pending pods per revision) are the
+# useful ones; the rest is mostly Go runtime and work queue stats.
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: knative-serving
+  namespace: monitoring
+spec:
+  namespaceSelector:
+    matchNames: [knative-serving]
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: knative-serving
+  podMetricsEndpoints:
+    - port: metrics
+      interval: 30s
+---
+# Request metrics of every Knative service, from the queue-proxy sidecar in
+# each of its pods (port http-usermetric): request count, status codes and
+# latency, as seen in front of the app container.
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: knative-revisions
+  namespace: monitoring
+spec:
+  namespaceSelector:
+    any: true
+  selector:
+    matchExpressions:
+      - key: serving.knative.dev/revision
+        operator: Exists
+  podMetricsEndpoints:
+    - port: http-usermetric
+      interval: 30s
+      relabelings:
+        # The same label names the activator and autoscaler metrics use.
+        - sourceLabels: [__meta_kubernetes_pod_label_serving_knative_dev_service]
+          targetLabel: kn_service_name
+        - sourceLabels: [__meta_kubernetes_pod_label_serving_knative_dev_revision]
+          targetLabel: kn_revision_name
+      metricRelabelings:
+        # Keep request counts and latency only; the body size histograms
+        # would triple the series per pod for no use here.
+        - sourceLabels: [__name__]
+          regex: http_server_request_duration_seconds_(bucket|count|sum)
+          action: keep
+        # Per-pod address and OpenTelemetry bookkeeping.
+        - regex: server_address|server_port|otel_scope_.*|network_protocol_.*
+          action: labeldrop
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: knative
+  namespace: monitoring
+spec:
+  groups:
+    # A service that fails to deploy (image pull, crash on start, rejected by
+    # admission) leaves its Flux Kustomization not ready, which
+    # FluxResourceNotReady already reports; crash loops after scale-up are
+    # KubePodCrashLooping. These cover what neither sees.
+    - name: homelab.knative
+      rules:
+        # Pods the autoscaler asked for can't be scheduled: usually the
+        # namespace quota, or the node is full and app pods (priority
+        # `tenant`) are waiting for room, e.g. during a drain.
+        - alert: KnativeRevisionPodsPending
+          expr: max by (k8s_namespace_name, kn_service_name, kn_revision_name) (kn_revision_pods_pending_count) > 0
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "{{ $labels.k8s_namespace_name }}/{{ $labels.kn_service_name }} has pods Pending for 15m"
+            description: >-
+              Check: kubectl -n {{ $labels.k8s_namespace_name }} get events --field-selector reason=FailedScheduling;
+              kubectl -n {{ $labels.k8s_namespace_name }} describe quota tenant
+
+        # More than 5% server errors over 10 minutes, with some traffic.
+        # container="queue-proxy": the activator exports the same metric name.
+        - alert: KnativeServiceErrors
+          expr: >-
+            sum by (namespace, kn_service_name) (rate(http_server_request_duration_seconds_count{container="queue-proxy", http_response_status_code=~"5.."}[5m]))
+            /
+            sum by (namespace, kn_service_name) (rate(http_server_request_duration_seconds_count{container="queue-proxy"}[5m]))
+            > 0.05
+            and
+            sum by (namespace, kn_service_name) (rate(http_server_request_duration_seconds_count{container="queue-proxy"}[5m])) > 0.1
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "{{ $labels.namespace }}/{{ $labels.kn_service_name }}: {{ $value | humanizePercentage }} of requests fail with 5xx"
+            description: "Check: kubectl -n {{ $labels.namespace }} logs -l serving.knative.dev/service={{ $labels.kn_service_name }} -c user-container --tail=50"

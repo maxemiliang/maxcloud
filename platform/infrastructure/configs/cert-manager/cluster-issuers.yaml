@@ -1,0 +1,46 @@
+# Two ClusterIssuers with identical config, differing only in the ACME server:
+#   staging: untrusted certificates, generous rate limits. Use it to test.
+#   prod:    trusted certificates, strict rate limits (5 duplicate certs/week).
+# ClusterIssuers read their Secrets from the cert-manager namespace.
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-staging
+spec:
+  acme:
+    server: https://acme-staging-v02.api.letsencrypt.org/directory
+    # ACME account key, created by cert-manager on first use.
+    privateKeySecretRef:
+      name: letsencrypt-staging-account
+    solvers:
+      - dns01:
+          cloudflare:
+            # One token with DNS edit on every zone below.
+            apiTokenSecretRef:
+              name: cloudflare-api-token
+              key: api-token
+        # Zones this solver handles; a certificate for any other domain fails.
+        selector:
+          dnsZones:
+            - gronblom.dev
+            - lankkupelit.fi
+---
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-prod
+spec:
+  acme:
+    server: https://acme-v02.api.letsencrypt.org/directory
+    privateKeySecretRef:
+      name: letsencrypt-prod-account
+    solvers:
+      - dns01:
+          cloudflare:
+            apiTokenSecretRef:
+              name: cloudflare-api-token
+              key: api-token
+        selector:
+          dnsZones:
+            - gronblom.dev
+            - lankkupelit.fi

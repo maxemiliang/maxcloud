@@ -15,7 +15,7 @@ An app deploys one of two ways:
    a `wrangler.toml`.
 2. **Register the app.** The first `mcloud deploy` does it, from
    `maxcloud.yaml`. It adds the app's entry to the registry in the cluster,
-   with your login: no commit to the homelab repo, and you
+   with your login: no commit to `platform/`, and you
    [own](mcloud.md#owners) the app. From that entry the
    platform creates the app's namespace with its quota and guardrails, its
    buckets and database, and a reconciler for the app's `deploy/k8s`. After
@@ -92,9 +92,11 @@ A Nuxt app can be a function too: [`@max-cloud/nuxt`](../packages/nuxt/README.md
 builds its server as one HTTP function (and its scheduled tasks as
 scheduled ones), so the deploy workflow writes its manifests.
 
-Apps that aren't functions start from the homelab repo's
-`templates/run-app` and use the same workflow without `functions: true`.
-The homelab README's "Run an app" covers the platform side.
+Apps that aren't functions start from
+[`platform/templates/run-app`](../platform/templates/run-app) and use the
+same workflow without `functions: true`. The
+[platform README](../platform/README.md)'s "Run an app" covers the
+platform side.
 
 ## Seeing how it's doing
 

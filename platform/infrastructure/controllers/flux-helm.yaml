@@ -1,0 +1,99 @@
+# The identity helm-controller uses for the platform's HelmReleases.
+#
+# With the FluxInstance in multitenant mode (clusters/personal/flux-system),
+# helm-controller doesn't install a chart as itself. It impersonates the
+# HelmRelease's serviceAccountName, a ServiceAccount in the HelmRelease's own
+# namespace, and falls back to that namespace's `default` SA, which can do
+# nothing. These charts install CRDs, ClusterRoles and webhooks, so each
+# platform namespace with a HelmRelease gets a `flux-helm` SA bound to
+# cluster-admin, and every platform HelmRelease names it.
+#
+# A new platform HelmRelease needs `serviceAccountName: flux-helm`, and one in
+# a new namespace needs that namespace added here. Without them it fails with
+# `system:serviceaccount:<ns>:default cannot ...` before Helm touches the
+# release; what's already running keeps running.
+#
+# These SAs are as strong as cluster-admin. Nothing runs as them: impersonation
+# needs no token, so none is mounted. Only admins can make pods in these
+# namespaces anyway.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: flux-helm
+  namespace: cert-manager
+automountServiceAccountToken: false
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: flux-helm
+  namespace: cnpg-system
+automountServiceAccountToken: false
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: flux-helm
+  namespace: external-dns
+automountServiceAccountToken: false
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: flux-helm
+  namespace: keda
+automountServiceAccountToken: false
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: flux-helm
+  namespace: knative-operator
+automountServiceAccountToken: false
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: flux-helm
+  namespace: kube-system
+automountServiceAccountToken: false
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: flux-helm
+  namespace: kured
+automountServiceAccountToken: false
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: flux-helm
+  namespace: monitoring
+automountServiceAccountToken: false
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: flux-helm
+  namespace: traefik
+automountServiceAccountToken: false
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: flux-helm
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cluster-admin
+subjects:
+  - {kind: ServiceAccount, name: flux-helm, namespace: cert-manager}
+  - {kind: ServiceAccount, name: flux-helm, namespace: cnpg-system}
+  - {kind: ServiceAccount, name: flux-helm, namespace: external-dns}
+  - {kind: ServiceAccount, name: flux-helm, namespace: keda}
+  - {kind: ServiceAccount, name: flux-helm, namespace: knative-operator}
+  - {kind: ServiceAccount, name: flux-helm, namespace: kube-system}
+  - {kind: ServiceAccount, name: flux-helm, namespace: kured}
+  - {kind: ServiceAccount, name: flux-helm, namespace: monitoring}
+  - {kind: ServiceAccount, name: flux-helm, namespace: traefik}

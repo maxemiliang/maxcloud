@@ -1,0 +1,137 @@
+# Alloy: one pod per node (DaemonSet) that tails the logs of every container on
+# its node and pushes them to Loki.
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: HelmRepository
+metadata:
+  name: grafana
+  namespace: monitoring
+spec:
+  interval: 12h
+  url: https://grafana.github.io/helm-charts
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: alloy
+  namespace: monitoring
+spec:
+  interval: 1h
+  serviceAccountName: flux-helm # infrastructure/controllers/flux-helm.yaml
+  # Loki first, so the first logs aren't rejected while it starts. Also needs
+  # the ServiceMonitor CRD from kube-prometheus-stack, which Loki depends on.
+  dependsOn:
+    - name: loki
+  chart:
+    spec:
+      chart: alloy
+      version: "1.15.0"
+      sourceRef:
+        kind: HelmRepository
+        name: grafana
+  install:
+    remediation:
+      retries: 3
+  upgrade:
+    remediation:
+      retries: 3
+  values:
+    controller:
+      type: daemonset
+      volumes:
+        extra:
+          # Alloy's data directory (which byte of each log file it has already
+          # sent) lives on the node, so a restarted or upgraded Alloy carries
+          # on where it stopped instead of sending every log again.
+          - name: alloy-data
+            hostPath:
+              path: /var/lib/alloy
+              type: DirectoryOrCreate
+
+    alloy:
+      enableReporting: false
+      storagePath: /var/lib/alloy
+      mounts:
+        # The node's /var/log, read-only. Pod logs are in /var/log/pods.
+        varlog: true
+        extra:
+          - name: alloy-data
+            mountPath: /var/lib/alloy
+
+      resources:
+        requests:
+          cpu: 20m
+          memory: 96Mi
+        limits:
+          memory: 384Mi
+
+      configMap:
+        content: |
+          // Pods on this node. The chart sets HOSTNAME to the node name.
+          discovery.kubernetes "pods" {
+            role = "pod"
+            selectors {
+              role  = "pod"
+              field = "spec.nodeName=" + sys.env("HOSTNAME")
+            }
+          }
+
+          // Loki labels, kept few: every label combination is a separate
+          // stream, and many small streams make Loki slow.
+          discovery.relabel "pods" {
+            targets = discovery.kubernetes.pods.targets
+
+            rule {
+              source_labels = ["__meta_kubernetes_namespace"]
+              target_label  = "namespace"
+            }
+            rule {
+              source_labels = ["__meta_kubernetes_pod_name"]
+              target_label  = "pod"
+            }
+            rule {
+              source_labels = ["__meta_kubernetes_pod_container_name"]
+              target_label  = "container"
+            }
+            rule {
+              source_labels = ["__meta_kubernetes_pod_label_app_kubernetes_io_name"]
+              target_label  = "app"
+            }
+            rule {
+              source_labels = ["__meta_kubernetes_pod_node_name"]
+              target_label  = "node"
+            }
+            // The kubelet writes container logs to
+            // /var/log/pods/<namespace>_<pod>_<uid>/<container>/<restart>.log
+            rule {
+              source_labels = ["__meta_kubernetes_pod_uid", "__meta_kubernetes_pod_container_name"]
+              separator     = "/"
+              target_label  = "__path__"
+              replacement   = "/var/log/pods/*$1/*.log"
+            }
+          }
+
+          loki.source.file "pods" {
+            targets    = discovery.relabel.pods.output
+            forward_to = [loki.process.pods.receiver]
+            // __path__ is a glob (the * before the pod UID and the log file).
+            file_match {
+              enabled = true
+            }
+          }
+
+          loki.process "pods" {
+            // Lines are in the container runtime's CRI format
+            // (<time> <stdout|stderr> <P|F> <message>): keep the message, use
+            // the runtime's timestamp, and join lines it split.
+            stage.cri {}
+            forward_to = [loki.write.default.receiver]
+          }
+
+          loki.write "default" {
+            endpoint {
+              url = "http://loki.monitoring.svc.cluster.local:3100/loki/api/v1/push"
+            }
+          }
+
+    serviceMonitor:
+      enabled: true

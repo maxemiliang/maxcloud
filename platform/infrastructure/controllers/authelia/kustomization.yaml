@@ -1,0 +1,16 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: authelia
+resources:
+  - namespace.yaml
+  # Secrets authelia-secrets and authelia-users (both written by
+  # scripts/authelia-secrets.sh) come from the private repo:
+  # private/secrets/authelia/.
+  - deployment.yaml
+configMapGenerator:
+  # The generated name has a hash of configuration.yml in it, and the
+  # Deployment's reference is rewritten to match: editing the file rolls out
+  # a new pod (Authelia only reads its config at startup).
+  - name: authelia-config
+    files:
+      - configuration.yml

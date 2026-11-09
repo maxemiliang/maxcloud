@@ -50,7 +50,7 @@ func appsListCmd(g *globals) *cobra.Command {
 			for _, a := range apps {
 				where := "cluster"
 				if a.InGit {
-					where = "homelab git"
+					where = "platform git"
 				}
 				rows = append(rows, []string{u.Accent(a.Name), source(a.Entry), u.Dim(where), owners(a.Entry), u.Mark(a.Deploy.Status, a.Applied), u.Dim(shortRev(a.Revision)), truncate(a.Deploy.Message, 60)})
 			}
@@ -80,7 +80,7 @@ func source(e *registry.Entry) string {
 	}
 	repo, p := e.Repo, e.Path
 	if repo == "" {
-		repo = "the homelab repo"
+		repo = "the maxcloud repo"
 	}
 	if p == "" {
 		p = registry.DefaultPath
@@ -259,7 +259,7 @@ has no deploy:.`,
 				return fmt.Errorf("%s isn't registered (mcloud apps list)", name)
 			}
 			if cur.InGit {
-				return fmt.Errorf("%s is registered in the homelab repo: change apps/maxcloud/apps/%s.yaml there", name, name)
+				return fmt.Errorf("%s is registered in git: change platform/apps/maxcloud/apps/%s.yaml in the maxcloud repo", name, name)
 			}
 			// What the app's maxcloud.yaml declares is its to change: a value
 			// set here would be undone by the next push.
@@ -395,7 +395,7 @@ admin gives the new entry the old data.`,
 				return fmt.Errorf("%s isn't registered (mcloud apps list)", name)
 			}
 			if cur.InGit {
-				return fmt.Errorf("%s is registered in the homelab repo: remove apps/maxcloud/apps/%s.yaml there", name, name)
+				return fmt.Errorf("%s is registered in git: remove platform/apps/maxcloud/apps/%s.yaml in the maxcloud repo", name, name)
 			}
 			msg := fmt.Sprintf("Removes %s from the registry, which then deletes namespace %s and everything in it", name, name)
 			if st, err := k.AppStatus(ctx, name); err == nil && len(st.Databases) > 0 {

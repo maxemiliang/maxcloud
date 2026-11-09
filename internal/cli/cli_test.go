@@ -60,7 +60,7 @@ func TestShortRev(t *testing.T) {
 }
 
 func TestSource(t *testing.T) {
-	if got := source(&registry.Entry{Name: "d", Path: "apps/d"}); got != "the homelab repo:apps/d" {
+	if got := source(&registry.Entry{Name: "d", Path: "platform/apps/d"}); got != "the maxcloud repo:platform/apps/d" {
 		t.Error(got)
 	}
 	if got := source(&registry.Entry{Name: "s", Repo: "o/s", Branch: "prod"}); got != "o/s@prod:deploy/k8s" {

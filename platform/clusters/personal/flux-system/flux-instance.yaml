@@ -1,0 +1,91 @@
+# The FluxInstance tells the Flux Operator which Flux to run and what to sync.
+# infra/flux applies it once (bootstrap); after that, Flux reconciles this file
+# from git, so changes here take effect after a commit and push.
+apiVersion: fluxcd.controlplane.io/v1
+kind: FluxInstance
+metadata:
+  name: flux
+  namespace: flux-system
+spec:
+  distribution:
+    # Patch releases roll out automatically; minor upgrades are a deliberate edit.
+    version: "2.10.x"
+    registry: "ghcr.io/fluxcd"
+    artifact: "oci://ghcr.io/controlplaneio-fluxcd/flux-operator-manifests:latest"
+  # Only what we use. No notification-controller (alerts/webhooks) and no image
+  # automation; Renovate handles version bumps instead.
+  components:
+    - source-controller
+    - kustomize-controller
+    - helm-controller
+  cluster:
+    type: kubernetes
+    # small = concurrency 5, 512Mi memory limit per controller: plenty for one cluster.
+    size: small
+    # Flux's multi-tenancy lockdown, a second layer behind the admission
+    # policy in infrastructure/configs/run/tenant-kinds.yaml:
+    # - kustomize-controller and helm-controller apply a Kustomization or
+    #   HelmRelease as its serviceAccountName, and one without it as the
+    #   `default` SA of its own namespace, which can do nothing;
+    # - a source in another namespace is refused, and so are remote
+    #   kustomize bases (URLs under `resources`).
+    # So every platform object names its SA: kustomize-controller for the
+    # Kustomizations in clusters/personal, flux-helm for the HelmReleases
+    # (infrastructure/controllers/flux-helm.yaml). The operator sets
+    # kustomize-controller on the sync Kustomization (flux-system) itself,
+    # and app Kustomizations name their <app>-reconciler
+    # (apps/maxcloud/resourceset.yaml). Rollback: revert the commit that
+    # turned this on (docs/kb/flux/multitenant-lockdown.md).
+    multitenant: true
+    # NetworkPolicies that only allow traffic into flux-system from within it.
+    networkPolicy: true
+    domain: "cluster.local"
+  sync:
+    kind: GitRepository
+    # The platform lives in the public maxcloud repo, so the sync needs no
+    # credentials. The Secret flux-system (GitHub App: githubAppID /
+    # githubAppInstallationOwner / githubAppPrivateKey, created by
+    # infra/flux, never committed) is for private sources: the private repo
+    # with the platform's secrets (secrets.yaml) and app repos.
+    url: "https://github.com/maxemiliang/maxcloud.git"
+    ref: "refs/heads/main"
+    path: "platform/clusters/personal"
+  kustomize:
+    patches:
+      # When a Kustomization is waiting for its objects to become healthy
+      # (wait: true, up to its timeout) and a new commit arrives, stop waiting
+      # and apply the new commit. Without this, a fix for a broken rollout only
+      # lands after the broken one times out (up to 10 min).
+      - target:
+          kind: Deployment
+          name: kustomize-controller
+        patch: |
+          - op: add
+            path: /spec/template/spec/containers/0/args/-
+            value: --feature-gates=CancelHealthCheckOnNewRevision=true
+      # Requests sized to what the controllers use. Upstream asks for 100m CPU
+      # each, but idle they use 2-4m; with four Flux pods that was 300m of the
+      # ~2 cores one node has during a drain. CPU limits (from `size`) stay, so
+      # a reconcile can still burst. Memory requests go up to the measured use
+      # (93-187Mi, 2026-11-04), so the scheduler counts what they really take.
+      - target:
+          kind: Deployment
+          name: "(source|kustomize|helm)-controller"
+        patch: |
+          - op: add
+            path: /spec/template/spec/containers/0/resources/requests/cpu
+            value: 25m
+      - target:
+          kind: Deployment
+          name: source-controller
+        patch: |
+          - op: add
+            path: /spec/template/spec/containers/0/resources/requests/memory
+            value: 192Mi
+      - target:
+          kind: Deployment
+          name: "(kustomize|helm)-controller"
+        patch: |
+          - op: add
+            path: /spec/template/spec/containers/0/resources/requests/memory
+            value: 128Mi

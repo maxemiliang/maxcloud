@@ -1,0 +1,13 @@
+# App pods rank below everything else (platform pods have the default
+# priority 0). When one node has to hold everything during a drain and room
+# runs out, the scheduler evicts app pods to place platform pods, never the
+# other way round. preemptionPolicy Never: app pods never evict anything
+# themselves, they wait Pending.
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: tenant
+value: -100
+preemptionPolicy: Never
+globalDefault: false
+description: Apps on the run platform; preempted first when the cluster is full.

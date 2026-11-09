@@ -1,0 +1,126 @@
+{
+  "distSpecVersion": "1.1.1",
+  "storage": {
+    "rootDirectory": "/var/lib/zot",
+    "dedupe": false,
+    "storageDriver": {
+      "name": "s3",
+      "rootdirectory": "/zot",
+      "region": "europe-1",
+      "regionendpoint": "https://tl8dc.upcloudobjects.com",
+      "bucket": "maxcloud-images",
+      "forcepathstyle": true,
+      "secure": true,
+      "skipverify": false
+    },
+    "gc": true,
+    "gcDelay": "1h",
+    "gcInterval": "24h",
+    "gcTimeWindow": "05:00-08:00",
+    "retention": {
+      "dryRun": false,
+      "delay": "24h",
+      "policies": [
+        {
+          "repositories": [
+            "**"
+          ],
+          "deleteReferrers": true,
+          "deleteUntagged": true,
+          "keepTags": [
+            {
+              "mostRecentlyPushedCount": 10
+            },
+            {
+              "pushedWithin": "2160h"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "http": {
+    "address": "0.0.0.0",
+    "port": "5000",
+    "realm": "registry.gronblom.dev",
+    "compat": [
+      "docker2s2"
+    ],
+    "auth": {
+      "failDelay": 1,
+      "bearer": {
+        "realm": "https://registry.gronblom.dev/zot/auth/token",
+        "service": "registry.gronblom.dev",
+        "oidc": [
+          {
+            "issuer": "https://auth.lab.gronblom.dev",
+            "audiences": [
+              "kubernetes"
+            ],
+            "claimMapping": {
+              "username": "'authelia:' + claims.preferred_username",
+              "groups": "claims.groups.map(g, 'authelia:' + g)"
+            }
+          },
+          {
+            "issuer": "https://kubernetes.default.svc.cluster.local",
+            "audiences": [
+              "registry.gronblom.dev"
+            ],
+            "certificateAuthorityFile": "/etc/kube-ca/ca.crt",
+            "claimMapping": {
+              "variables": [
+                {
+                  "name": "sa",
+                  "expression": "claims['kubernetes.io']['serviceaccount']['name']"
+                },
+                {
+                  "name": "ns",
+                  "expression": "claims['kubernetes.io']['namespace']"
+                }
+              ],
+              "validations": [
+                {
+                  "expression": "vars.sa == 'maxcloud-image-pull' || vars.sa == 'maxcloud-image-push'",
+                  "message": "only an app's maxcloud-image-pull and maxcloud-image-push ServiceAccounts"
+                }
+              ],
+              "username": "vars.ns + (vars.sa == 'maxcloud-image-push' ? ':push' : ':pull')"
+            }
+          },
+          {
+            "issuer": "https://token.actions.githubusercontent.com",
+            "audiences": [
+              "registry.gronblom.dev"
+            ],
+            "claimMapping": {
+              "username": "'github:' + claims.repository"
+            }
+          }
+        ]
+      }
+    },
+    "accessControl": {
+      "repositories": {
+        "**": {
+          "policies": [],
+          "anonymousPolicy": []
+        }
+      },
+      "adminPolicy": {
+        "groups": [
+          "authelia:admins"
+        ],
+        "actions": [
+          "read",
+          "create",
+          "update",
+          "delete"
+        ]
+      }
+    }
+  },
+  "log": {
+    "level": "info"
+  }
+}

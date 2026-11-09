@@ -1,0 +1,18 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - namespace.yaml
+  - release.yaml
+configMapGenerator:
+  # Cloudflare's edge ranges as a Helm values fragment (generated file),
+  # merged into the HelmRelease through valuesFrom.
+  - name: traefik-cloudflare-ips
+    namespace: traefik
+    files:
+      - values.yaml=cloudflare-ips.yaml
+generatorOptions:
+  # A stable name, so the HelmRelease's valuesFrom can reference it.
+  disableNameSuffixHash: true
+  labels:
+    # Tells helm-controller to reconcile the HelmRelease as soon as the values change.
+    reconcile.fluxcd.io/watch: Enabled

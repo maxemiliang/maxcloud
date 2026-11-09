@@ -1,0 +1,73 @@
+apiVersion: gateway.networking.k8s.io/v1
+kind: GatewayClass
+metadata:
+  name: traefik
+spec:
+  controllerName: traefik.io/gateway-controller
+---
+# The one public entry point. HTTPRoutes in any namespace attach with
+# parentRefs: [{name: public, namespace: traefik}]; the route's hostnames decide
+# which listener (and so which certificate) serves it.
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: public
+  namespace: traefik
+spec:
+  gatewayClassName: traefik
+  listeners:
+    # Ports are Traefik's entrypoint (container) ports, not the LB's 80/443.
+    # Plain HTTP is redirected to HTTPS by Traefik's web entrypoint.
+    - name: web
+      protocol: HTTP
+      port: 8000
+      allowedRoutes:
+        namespaces:
+          from: All
+    # HTTPS listeners on the same port, told apart by SNI hostname, one per
+    # wildcard certificate. A wildcard matches any depth, so x.lab.gronblom.dev
+    # matches both gronblom.dev listeners; the more specific one (https-lab) wins.
+    - name: https-lab
+      protocol: HTTPS
+      port: 8443
+      hostname: "*.lab.gronblom.dev"
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - name: lab-wildcard-tls
+      allowedRoutes:
+        namespaces:
+          from: All
+    - name: https-public
+      protocol: HTTPS
+      port: 8443
+      hostname: "*.gronblom.dev"
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - name: root-wildcard-tls
+      allowedRoutes:
+        namespaces:
+          from: All
+    - name: https-lankkupelit
+      protocol: HTTPS
+      port: 8443
+      hostname: "*.lankkupelit.fi"
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - name: lankkupelit-wildcard-tls
+      allowedRoutes:
+        namespaces:
+          from: All
+    # Plain HTTP inside the cluster only: Traefik's `knative` entrypoint, which
+    # is on the ClusterIP Service traefik-knative and not on the LB. Knative
+    # probes public services through it (infrastructure/configs/knative) to
+    # check a new revision is routable before sending traffic to it; the `web`
+    # listener would answer with a redirect, and the HTTPS ones need TLS.
+    - name: in-cluster
+      protocol: HTTP
+      port: 8081
+      allowedRoutes:
+        namespaces:
+          from: All

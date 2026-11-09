@@ -1,0 +1,8 @@
+# maxcloud: apps on the run platform. resourceset.yaml is what every app
+# gets. Apps register in the cluster (mcloud deploy, from the app's own
+# maxcloud.yaml); apps/ holds only the platform's own (run-demo).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - resourceset.yaml
+  - apps/run-demo.yaml

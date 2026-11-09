@@ -1,0 +1,19 @@
+# zot verifies apps' pull tokens (ServiceAccount tokens, from the maxcloud
+# controller) against the cluster's own token issuer, and fetches its
+# discovery document and signing keys without logging in. Kubernetes allows
+# that only to ServiceAccounts by default; this lets anyone who can reach the
+# API server read them. They're public keys, and the API server only accepts
+# connections from the admin addresses and the NAT gateway anyway.
+# Approved 2026-11-06.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: service-account-issuer-discovery-unauthenticated
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: system:service-account-issuer-discovery
+subjects:
+  - apiGroup: rbac.authorization.k8s.io
+    kind: Group
+    name: system:unauthenticated

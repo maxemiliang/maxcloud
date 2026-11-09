@@ -1,0 +1,32 @@
+# Every pod in an app namespace (label run.gronblom.dev/tenant=true) must use
+# the `tenant` PriorityClass, so an app can't opt out of being preempted
+# first. The app template sets it in each workload; a pod without it is
+# rejected, which shows up as a FailedCreate event on its ReplicaSet or Job.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: run-tenant-priority
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: [v1]
+        operations: [CREATE]
+        resources: [pods]
+  validations:
+    - expression: "has(object.spec.priorityClassName) && object.spec.priorityClassName == 'tenant'"
+      message: "pods in run app namespaces must set priorityClassName: tenant"
+      reason: Forbidden
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: run-tenant-priority
+spec:
+  policyName: run-tenant-priority
+  validationActions: [Deny]
+  matchResources:
+    namespaceSelector:
+      matchLabels:
+        run.gronblom.dev/tenant: "true"

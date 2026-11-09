@@ -1,11 +1,14 @@
 # Every push and pull request: the code is formatted, vets clean, the tests
-# pass and mcloud builds.
+# pass and mcloud builds. Changes only to the cluster (platform/) are
+# checked by platform.yaml instead.
 name: ci
 
 on:
-  pull_request: {}
+  pull_request:
+    paths-ignore: ["platform/**"]
   push:
     branches: [main]
+    paths-ignore: ["platform/**"]
 
 permissions:
   contents: read

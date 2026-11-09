@@ -1,0 +1,25 @@
+# The run platform's smoke test, kept in this repo (apps/run-demo). Its
+# bucket smoke and database db check the maxcloud controller end to end.
+# No owners: an admin's app.
+apiVersion: fluxcd.controlplane.io/v1
+kind: ResourceSetInputProvider
+metadata:
+  name: run-demo
+  namespace: flux-system
+  labels:
+    run.gronblom.dev/app: "true"
+  annotations:
+    # Its registration ID: the maxcloud controller only gives an app's
+    # buckets and database backups to the registration they belong to.
+    # Entries from git declare theirs (the controller only gives mcloud's
+    # one), and a cluster rebuilt from git must find the same ID, so never
+    # change it: a new one leaves the app without its data until an admin
+    # adopts it (maxcloud.gronblom.dev/adopt-registration).
+    maxcloud.gronblom.dev/registration: "e40133abcdec69869a3ca94bb975741f"
+spec:
+  type: Static
+  defaultValues:
+    name: run-demo
+    path: platform/apps/run-demo
+    buckets: "smoke,cdn:public"
+    db: "true"

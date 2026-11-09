@@ -47,8 +47,9 @@ parent. So inside an app's repo, `mcloud status` is enough.
 `apps create`, `set`, `owners` and `delete` change the registry
 in the cluster (no commit anywhere), and show the change and ask first.
 Pass `--dry-run` to only see it, or `--yes` to skip the question. `delete`
-asks you to type the app's name. Apps registered in the homelab repo itself
-(the platform's own, like run-demo) change there instead.
+asks you to type the app's name. Apps registered in git
+(`platform/apps/maxcloud/apps/`: the platform's own, like run-demo) change
+there instead.
 
 ## Owners
 

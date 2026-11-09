@@ -1,0 +1,177 @@
+# Knative Serving, installed by the Knative Operator
+# (infrastructure/controllers/knative-operator) at the operator's own version.
+#
+# Routing goes through the existing Traefik instead of a second ingress:
+# net-gateway-api turns each Knative service into HTTPRoutes on
+#   traefik/public         for public services (TLS from the wildcard listeners)
+#   traefik/knative-local  for every service, inside the cluster (gateway.yaml)
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: knative-serving
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+---
+apiVersion: operator.knative.dev/v1beta1
+kind: KnativeServing
+metadata:
+  name: knative-serving
+  namespace: knative-serving
+spec:
+  ingress:
+    gateway-api:
+      enabled: true
+
+  config:
+    network:
+      ingress-class: gateway-api.ingress.networking.knative.dev
+      # One level below the domain (web--shop.gronblom.dev, not
+      # web.shop.gronblom.dev), so the existing *.gronblom.dev wildcard
+      # certificate and Cloudflare's free edge certificate both cover it.
+      # "--", which app names can't contain and service names in app
+      # namespaces may not (infrastructure/configs/run/tenant-routing.yaml):
+      # with "-", service hello-run in app demo would get run-demo's
+      # hello-run-demo. Public buckets' <bucket>--<app> share the scheme,
+      # so only an app's own service and bucket can clash.
+      domain-template: "{{.Name}}--{{.Namespace}}.{{.Domain}}"
+      # TLS is terminated by the Gateway's wildcard listeners, not by Knative
+      # (external-domain-tls stays Disabled: enabling it makes Knative add
+      # listeners to the Gateway itself). This only makes Knative report
+      # https:// URLs.
+      default-external-scheme: https
+
+    # Every service is cluster-local unless it opts in to a public domain with
+    # a label, so forgetting a label can't expose anything:
+    #   run.gronblom.dev/expose: public  ->  <name>--<namespace>.gronblom.dev
+    # Custom hostnames (e.g. x.lankkupelit.fi) are maxcloud Domains: the
+    # maxcloud controller copies a service's route onto the hostname
+    # (README, Run platform, Custom domains). Not DomainMappings: no
+    # ClusterDomainClaims are made (autocreate-cluster-domain-claims is off).
+    domain:
+      svc.cluster.local: ""
+      gronblom.dev: |
+        selector:
+          run.gronblom.dev/expose: public
+
+    gateway:
+      # Before a revision gets traffic, net-gateway-api sends a plain-HTTP probe
+      # to every Traefik pod on the `service`'s http port. Both gateways are
+      # probed through traefik-knative: the public Gateway's `in-cluster`
+      # listener serves the same routes on that port. (Through the main
+      # Service the probe would hit websecure without TLS, get a 404 and never
+      # mark a public service ready.)
+      # After changing this, restart net-gateway-api-controller: probes that
+      # are already running keep the old targets.
+      external-gateways: |
+        - class: traefik
+          gateway: traefik/public
+          service: traefik/traefik-knative
+          supported-features:
+          - HTTPRouteBackendRequestHeaderModification
+          - HTTPRouteHostRewrite
+      local-gateways: |
+        - class: traefik
+          gateway: traefik/knative-local
+          service: traefik/traefik-knative
+          supported-features:
+          - HTTPRouteBackendRequestHeaderModification
+          - HTTPRouteHostRewrite
+
+    autoscaler:
+      # Ceiling for services that don't set autoscaling.knative.dev/max-scale,
+      # and the highest value they may set. Every pod reserves CPU, and one
+      # node has to hold everything during a drain.
+      max-scale: "3"
+      max-scale-limit: "10"
+
+    defaults:
+      # Applied to a service's container when it sets no resources itself.
+      revision-cpu-request: 10m
+      revision-memory-request: 64Mi
+      revision-memory-limit: 256Mi
+
+    deployment:
+      # The queue-proxy sidecar Knative adds to every pod. Its default 25m CPU
+      # request adds up quickly; it uses a few millicores.
+      queue-sidecar-cpu-request: 5m
+      queue-sidecar-memory-request: 16Mi
+      queue-sidecar-memory-limit: 128Mi
+
+    features:
+      # seccomp RuntimeDefault, no capabilities and runAsNonRoot for app
+      # containers that don't say otherwise: what Pod Security `restricted`
+      # (the tenant namespaces' level) requires.
+      secure-pod-defaults: Enabled
+      # Lets services set priorityClassName (the `tenant` PriorityClass).
+      kubernetes.podspec-priorityclassname: enabled
+
+    observability:
+      # OpenTelemetry metrics, exposed for Prometheus to scrape
+      # (infrastructure/configs/monitoring/knative.yaml).
+      metrics-protocol: prometheus
+      request-metrics-protocol: prometheus
+
+  # Requests sized to measured use (the upstream ones add up to 720m CPU,
+  # more than a single node has left during a drain).
+  workloads:
+    # Two activators: for low-traffic services every request goes through
+    # one, and a single replica would mean an outage on every drain.
+    - name: activator
+      replicas: 2
+      resources:
+        - container: activator
+          requests: {cpu: 20m, memory: 48Mi}
+          limits: {cpu: "1", memory: 600Mi}
+    - name: autoscaler
+      resources:
+        - container: autoscaler
+          requests: {cpu: 20m, memory: 48Mi}
+          limits: {cpu: "1", memory: 512Mi}
+    # Only does work for services using the HPA autoscaling class
+    # (autoscaling.knative.dev/class: hpa.autoscaling.knative.dev).
+    - name: autoscaler-hpa
+      resources:
+        - container: autoscaler-hpa
+          requests: {cpu: 10m, memory: 32Mi}
+          limits: {cpu: 300m, memory: 256Mi}
+    - name: controller
+      resources:
+        - container: controller
+          requests: {cpu: 20m, memory: 64Mi}
+          limits: {cpu: "1", memory: 512Mi}
+    - name: webhook
+      resources:
+        - container: webhook
+          requests: {cpu: 20m, memory: 48Mi}
+          limits: {cpu: 500m, memory: 256Mi}
+    - name: net-gateway-api-controller
+      resources:
+        - container: controller
+          requests: {cpu: 10m, memory: 48Mi}
+          limits: {cpu: "1", memory: 512Mi}
+    - name: net-gateway-api-webhook
+      resources:
+        - container: webhook
+          requests: {cpu: 10m, memory: 24Mi}
+          limits: {cpu: 200m, memory: 200Mi}
+
+  # The activator and webhook HPAs scale on CPU relative to the request, so
+  # with the small requests above they'd scale out at the first burst (up to
+  # 21 and 5 pods). Cap them.
+  patches:
+    - target: {apiVersion: autoscaling/v2, kind: HorizontalPodAutoscaler, name: activator}
+      patch:
+        type: merge
+        content: '{"spec": {"maxReplicas": 3}}'
+    - target: {apiVersion: autoscaling/v2, kind: HorizontalPodAutoscaler, name: webhook}
+      patch:
+        type: merge
+        content: '{"spec": {"maxReplicas": 2}}'
+
+  # Upstream PDBs are minAvailable 80%, which with one or two replicas allows
+  # no evictions at all and blocks every drain (kured, node replacement).
+  podDisruptionBudgets:
+    - name: activator-pdb
+      maxUnavailable: 1
+    - name: webhook-pdb
+      maxUnavailable: 1

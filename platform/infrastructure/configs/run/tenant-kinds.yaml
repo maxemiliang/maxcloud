@@ -1,0 +1,93 @@
+# Objects an app may not make in its namespace: ones that a controller with
+# more rights than the app acts on. An app is `admin` in its namespace, and
+# the built-in `admin` role picks up every CRD whose edit role aggregates to
+# it (Flux's, Flux Operator's, cert-manager's), so RBAC alone allows these.
+
+# Flux and Flux Operator objects. Both run in multitenant mode
+# (clusters/personal/flux-system): a Kustomization, HelmRelease or
+# ResourceSet here would apply as a service account in this namespace, with
+# at most the app's rights, and couldn't use a source from another
+# namespace. This policy is the first layer: apps can't make them at all.
+# Apps get their one Kustomization from the registry, in flux-system
+# (apps/maxcloud/resourceset.yaml); they need none of these.
+# Status updates go through the status subresource, which this doesn't match.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: run-tenant-no-flux
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups:
+          - source.toolkit.fluxcd.io
+          - kustomize.toolkit.fluxcd.io
+          - helm.toolkit.fluxcd.io
+          - notification.toolkit.fluxcd.io
+          - image.toolkit.fluxcd.io
+          - fluxcd.controlplane.io
+        apiVersions: ["*"]
+        operations: [CREATE, UPDATE]
+        resources: ["*"]
+  validations:
+    - expression: "false"
+      messageExpression: >-
+        'app namespaces may not hold Flux objects (' + request.kind.kind + ').' +
+        ' An app gets its manifests applied by the registry (apps/maxcloud/resourceset.yaml)'
+      reason: Forbidden
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: run-tenant-no-flux
+spec:
+  policyName: run-tenant-no-flux
+  validationActions: [Deny]
+  matchResources:
+    namespaceSelector:
+      matchLabels:
+        run.gronblom.dev/tenant: "true"
+---
+# Certificates from a ClusterIssuer. letsencrypt-prod solves DNS-01 for all
+# of gronblom.dev and lankkupelit.fi, and cert-manager approves every
+# request, so an app could get a trusted certificate (and its key) for
+# auth.lab.gronblom.dev or *.gronblom.dev, outside domains.yaml, or burn the
+# zones' Let's Encrypt rate limits. Apps don't need certificates: the
+# Gateway's wildcard listeners terminate TLS. An Issuer of the app's own
+# (its own CA, its own DNS credentials) is still fine.
+# Covers what cert-manager itself makes from an Ingress's
+# cert-manager.io/cluster-issuer annotation too: no user is exempt.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: run-tenant-no-cluster-issuers
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [cert-manager.io]
+        apiVersions: ["*"]
+        operations: [CREATE, UPDATE]
+        resources: [certificates, certificaterequests]
+      - apiGroups: [acme.cert-manager.io]
+        apiVersions: ["*"]
+        operations: [CREATE, UPDATE]
+        resources: [orders, challenges]
+  validations:
+    - expression: >-
+        !(has(object.spec.issuerRef) && has(object.spec.issuerRef.kind) &&
+          object.spec.issuerRef.kind == 'ClusterIssuer')
+      message: "app namespaces may not use a ClusterIssuer: the platform's issuers cover every name in its zones"
+      reason: Forbidden
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: run-tenant-no-cluster-issuers
+spec:
+  policyName: run-tenant-no-cluster-issuers
+  validationActions: [Deny]
+  matchResources:
+    namespaceSelector:
+      matchLabels:
+        run.gronblom.dev/tenant: "true"

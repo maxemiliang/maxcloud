@@ -1,0 +1,69 @@
+# cert-manager: issues and renews TLS certificates (Let's Encrypt via
+# Cloudflare DNS-01; issuers live in infrastructure/configs/cert-manager).
+#
+# The chart is pulled from an OCI registry (OCIRepository) instead of a classic
+# Helm repository index; HelmRelease points at it with chartRef.
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: OCIRepository
+metadata:
+  name: cert-manager
+  namespace: cert-manager
+spec:
+  interval: 12h
+  url: oci://quay.io/jetstack/charts/cert-manager
+  ref:
+    tag: v1.21.3
+  layerSelector:
+    mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
+    operation: copy
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: cert-manager
+  namespace: cert-manager
+spec:
+  interval: 1h
+  serviceAccountName: flux-helm # infrastructure/controllers/flux-helm.yaml
+  chartRef:
+    kind: OCIRepository
+    name: cert-manager
+  install:
+    remediation:
+      retries: 3
+  upgrade:
+    remediation:
+      retries: 3
+  values:
+    crds:
+      # The chart installs and upgrades its CRDs as templates...
+      enabled: true
+      # ...and keeps them if the release is ever uninstalled (deleting the CRDs
+      # would delete every Certificate and its Secret reference).
+      keep: true
+
+    # Check DNS-01 propagation against public resolvers rather than the
+    # cluster's CoreDNS, so cached negative answers can't stall issuance.
+    dns01RecursiveNameservers: "1.1.1.1:53,1.0.0.1:53"
+    dns01RecursiveNameserversOnly: true
+
+    resources:
+      requests:
+        cpu: 10m
+        memory: 48Mi
+      limits:
+        memory: 192Mi
+    webhook:
+      resources:
+        requests:
+          cpu: 10m
+          memory: 24Mi
+        limits:
+          memory: 96Mi
+    cainjector:
+      resources:
+        requests:
+          cpu: 10m
+          memory: 48Mi
+        limits:
+          memory: 192Mi

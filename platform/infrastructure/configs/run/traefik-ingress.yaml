@@ -1,0 +1,94 @@
+# Which hostnames apps may ask Traefik's in-cluster entrypoint for.
+#
+# Port 8081 (Service traefik-knative) routes by Host alone, and every
+# app's cluster-local service is reachable there: http://<svc>.<app> is an
+# ExternalName to it. So the check is on the Traefik pods' ingress, per
+# app: an app's pods may send it only their own names (and public Knative
+# names). Apps can't write policies in this namespace, so they can't undo
+# it, unlike an egress rule on their own pods (their own NetworkPolicy to
+# traefik:8081 would cancel the L7 part). Audit M3,
+# private/docs/research/tenant-cluster-local-isolation.md.
+#
+# This is the base; apps/maxcloud/resourceset.yaml makes one more per app
+# (app-<name>, here in traefik).
+#
+# STAGE 1, OBSERVING: the HTTP rules below allow every Host, but requests
+# from apps to 8081 now go through Cilium's Envoy, so Hubble shows their
+# Host. Nothing is refused yet. Tightening, after watching:
+# private/docs/kb/networking/traefik-ingress-host-rules.md.
+#
+# Rules that must stay true (they're why public traffic can't be dropped):
+# - Any policy selecting the Traefik pods puts them into ingress
+#   default-deny. So this one, and every per-app one, allows everything
+#   but app pods on 8081, by itself: whichever of them exist, nothing else
+#   to Traefik can be dropped.
+# - No `enableDefaultDeny: false`: with it Cilium adds an allow-all to the
+#   HTTP rules (cilium/cilium#38841) and they never refuse anything.
+# - The port is 8081, Traefik's container port: Cilium translates
+#   traefik-knative:80 to it before policy.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: traefik-ingress
+  namespace: traefik
+spec:
+  description: "Traefik: open as before, except apps to 8081 (cluster-local routes) go through the L7 proxy"
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: traefik
+  ingress:
+    # Every port but 8081, from anything: the load balancer (it shows up as
+    # a CIDR identity, cidr:172.16.0.0/12,reserved:world, because paja's
+    # policy names that range), kubelet probes (host, 8080), Prometheus
+    # (9100), apps calling public names. `all` matches every identity,
+    # including those with no labels at all.
+    - fromEntities: [all]
+      toPorts:
+        - ports:
+            - port: "1"
+              endPort: 8080
+              protocol: ANY
+            - port: "8082"
+              endPort: 65535
+              protocol: ANY
+    # ICMP: unreachable/fragmentation needed (path MTU), time exceeded, echo.
+    - fromEntities: [all]
+      icmps:
+        - fields:
+            - {type: 3, family: IPv4}
+            - {type: 11, family: IPv4}
+            - {type: 8, family: IPv4}
+    # 8081 from pods that aren't apps: Knative's prober (net-gateway-api in
+    # knative-serving), Traefik itself (SSO routes come back through
+    # traefik-knative), platform clients. Exists first: a selector of only
+    # DoesNotExist also matches identities without namespace labels (CIDR,
+    # world, other nodes), as last time with the API server's
+    # (docs/kb/networking/tenant-egress-deny.md). Nothing like that uses
+    # 8081, so they're left out. (A node's own host reaches its local pods
+    # whatever the policy: Cilium's allow-localhost, for kubelet probes.)
+    - fromEndpoints:
+        - matchExpressions:
+            - key: k8s:io.kubernetes.pod.namespace
+              operator: Exists
+            - key: k8s:io.cilium.k8s.namespace.labels.run.gronblom.dev/tenant
+              operator: DoesNotExist
+      toPorts:
+        - ports:
+            - port: "8081"
+              protocol: TCP
+    # 8081 from any app. When tightened: public Knative names only
+    # (<svc>--<app>.gronblom.dev answers here too); each app's own names
+    # come from its own policy (L7 rules for the same port and peer add up).
+    # An app without its own policy then gets only these.
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.cilium.k8s.namespace.labels.run.gronblom.dev/tenant: "true"
+      toPorts:
+        - ports:
+            - port: "8081"
+              protocol: TCP
+          rules:
+            http:
+              # Stage 1: any Host. Tightened:
+              #   - host: '[-a-z0-9]+--[-a-z0-9]+\.gronblom\.dev(:[0-9]+)?'
+              - {}

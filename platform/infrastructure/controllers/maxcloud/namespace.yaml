@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: maxcloud-system
+  labels:
+    # The controller runs non-root, read-only, with no capabilities.
+    pod-security.kubernetes.io/enforce: restricted
