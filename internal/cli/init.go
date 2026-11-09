@@ -389,14 +389,26 @@ func checkPackageJSON(data []byte, latest string) []string {
 
 var remoteRe = regexp.MustCompile(`github\.com[:/]([^/]+/[^/]+?)(?:\.git)?/?$`)
 
-// originRepo is <owner>/<repo> of the origin remote, if it's on GitHub.
+// originRepo is <owner>/<repo> of the origin remote, if it's on GitHub. The
+// URL as configured comes first: `git remote get-url` applies
+// url.<base>.insteadOf, which can turn github.com into an SSH host alias
+// (git@github-personal:owner/repo) that no longer says it's GitHub.
 func originRepo() string {
-	out, err := exec.Command("git", "remote", "get-url", "origin").Output()
-	if err != nil {
-		return ""
+	var urls []string
+	for _, args := range [][]string{{"config", "--get", "remote.origin.url"}, {"remote", "get-url", "origin"}} {
+		if out, err := exec.Command("git", args...).Output(); err == nil {
+			urls = append(urls, strings.TrimSpace(string(out)))
+		}
 	}
-	if m := remoteRe.FindStringSubmatch(strings.TrimSpace(string(out))); m != nil {
-		return m[1]
+	return githubRepo(urls...)
+}
+
+// githubRepo is <owner>/<repo> of the first of urls that's on github.com.
+func githubRepo(urls ...string) string {
+	for _, u := range urls {
+		if m := remoteRe.FindStringSubmatch(u); m != nil {
+			return m[1]
+		}
 	}
 	return ""
 }
