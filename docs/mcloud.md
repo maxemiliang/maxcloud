@@ -62,7 +62,13 @@ without owners is an admin's.
 
 A deleted app's buckets and database backups stay in Object Storage, but
 they belong to that registration: registering the name again starts
-without them, unless an admin hands them over.
+without them. While the old buckets exist, the new app's Buckets and
+Database aren't Ready: `kubectl get maxcloud -n <app>` shows the reason
+`RegistrationMismatch`, with the old registration's ID. An admin then
+either hands the old data over (the annotation
+`maxcloud.gronblom.dev/adopt-registration` on the app's entry) or deletes
+the old buckets. How it works:
+[the controller's README](../controller/README.md#registrations-who-gets-an-apps-data).
 
 ## Output
 

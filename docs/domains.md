@@ -17,6 +17,11 @@ domains:
   `gronblom.dev`, `lab.gronblom.dev` or `lankkupelit.fi`. external-dns
   makes the DNS record. `proxied: true` puts it behind Cloudflare (WAF,
   caching, Cloudflare Access), not for `*.lab.gronblom.dev`.
+- **`lab.gronblom.dev` is for apps trusted like an admin.** Authelia's
+  session cookie covers all of `lab.gronblom.dev`, so an app there gets
+  the session of every admin who opens it, which is enough to log in to
+  the cluster as them. No app gets `<app>.lab.gronblom.dev` by default; an
+  admin adds one to the list only for an app they trust that far.
 - **The service can stay private.** The hostname reaches its revisions
   directly, scale-to-zero included, and the app sees the `Host` the
   client sent (`paja.lankkupelit.fi`, not a cluster-local name).
