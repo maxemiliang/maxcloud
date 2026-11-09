@@ -114,11 +114,26 @@ func doctorCmd(g *globals) *cobra.Command {
 
 			// The app here, if any.
 			if proj, err := loadProject(); err == nil {
+				direct := proj.Deploy == "direct"
 				if k, err := g.kube(); err == nil {
 					if st, err := k.AppStatus(ctx, proj.App); err == nil && st.Entry != nil {
 						line(true, "app", proj.App+" (registered)")
+						direct = direct || (proj.Deploy == "" && st.Entry.Direct())
 					} else if err == nil {
 						note("app", proj.App+" (not registered yet: mcloud deploy registers it)")
+					}
+				}
+				// GitOps apps deploy through their workflow that calls
+				// run-deploy; mcloud deploy follows it, --rebuild starts it.
+				if !direct {
+					switch wf, err := findDeployWorkflow(repoRoot()); {
+					case err != nil:
+						line(false, "workflow", err.Error())
+					case !wf.Dispatch:
+						line(true, "workflow", wf.Path)
+						note("rebuild", "no workflow_dispatch in "+wf.Path+"'s on:, so mcloud deploy --rebuild can't start it")
+					default:
+						line(true, "workflow", wf.Path)
 					}
 				}
 			}

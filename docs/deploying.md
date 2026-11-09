@@ -39,6 +39,14 @@ An app deploys one of two ways:
    homelab's Flux GitHub App doesn't have it yet), it says so and opens the
    page where you add the repo to the app, then carries on once Flux can.
 
+   The app's deploy workflow is whichever file in `.github/workflows`
+   calls `maxemiliang/maxcloud/.github/workflows/run-deploy.yaml`:
+   `mcloud init` writes `deploy.yaml`, but a job in the app's CI workflow
+   works the same. Keep exactly one. `mcloud deploy --rebuild` runs it
+   again without a new commit (after a new mcloud release, say), which
+   needs `workflow_dispatch` in its `on:`; `mcloud doctor` shows which
+   workflow it found and whether `--rebuild` can start it.
+
 ## Direct
 
 ```fish

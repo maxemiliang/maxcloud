@@ -27,7 +27,11 @@ commit, and the app's services becoming ready.
 A deploy is a push: committing and pushing yourself deploys just the same,
 and mcloud deploy only follows along. Uncommitted changes aren't deployed.
 With nothing new to push, --rebuild runs the workflow again (e.g. after a
-change in the homelab platform).
+change in the homelab platform or a new mcloud release).
+
+The deploy workflow is the one in .github/workflows that calls maxcloud's
+run-deploy, whatever its name: deploy.yaml from mcloud init, or the app's
+CI workflow. --rebuild needs workflow_dispatch in its on:.
 
 The app's settings (quota, buckets, database, domains, deploy) come from
 maxcloud.yaml: the first deploy registers the app, later ones bring its
@@ -94,6 +98,14 @@ namespace, with the source streamed to it.`,
 			if err != nil {
 				return err
 			}
+			// The workflow whose run to follow (and start, with --rebuild).
+			wf, wfErr := findDeployWorkflow(repoRoot())
+			if wfErr != nil && rebuild {
+				return fmt.Errorf("--rebuild: %w", wfErr)
+			}
+			if rebuild && !wf.Dispatch {
+				return fmt.Errorf("--rebuild starts %s, but its on: has no workflow_dispatch: add `workflow_dispatch: {}` under on:, commit and push", wf.Path)
+			}
 
 			if !noPush {
 				step := u.StepTail(fmt.Sprintf("Pushing %s to %s", branch, repo), 3)
@@ -110,17 +122,21 @@ namespace, with the source streamed to it.`,
 				return err
 			}
 			if rebuild {
-				if err := gh.Dispatch(ctx, github.Repo(repo), "deploy.yaml", branch); err != nil {
-					return fmt.Errorf("starting the deploy workflow: %w", err)
+				if err := gh.Dispatch(ctx, github.Repo(repo), wf.File(), branch); err != nil {
+					return fmt.Errorf("starting %s: %w", wf.Path, err)
 				}
 			}
 
-			run, err := g.followRun(ctx, gh, github.Repo(repo), sha, rebuild)
-			if err != nil {
-				return err
-			}
-			if run == nil {
-				u.Note("no deploy workflow ran for this commit (only deploy/ changed?); following Flux")
+			if wfErr != nil {
+				u.Warn("not following the build: %v", wfErr)
+			} else {
+				run, err := g.followRun(ctx, gh, github.Repo(repo), sha, wf, rebuild)
+				if err != nil {
+					return err
+				}
+				if run == nil {
+					u.Note("%s didn't run for this commit (only deploy/ changed?); following Flux", wf.Path)
+				}
 			}
 
 			target, err := gh.Head(ctx, github.Repo(repo), branch)
@@ -155,9 +171,9 @@ func git(args ...string) (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
-// followRun waits for the deploy workflow run of sha to finish. Returns nil
-// if none starts within a minute (a push that only changed deploy/).
-func (g *globals) followRun(ctx context.Context, gh *github.Client, repo github.Repo, sha string, dispatched bool) (*github.Run, error) {
+// followRun waits for wf's run of sha to finish. Returns nil if none starts
+// within a minute (a push that only changed deploy/).
+func (g *globals) followRun(ctx context.Context, gh *github.Client, repo github.Repo, sha string, wf *deployWorkflow, dispatched bool) (*github.Run, error) {
 	u := g.UI()
 	step := u.Step("Waiting for the deploy workflow")
 	var run *github.Run
@@ -168,14 +184,7 @@ func (g *globals) followRun(ctx context.Context, gh *github.Client, repo github.
 			step.Fail("")
 			return nil, err
 		}
-		for i := range runs {
-			r := runs[i]
-			if r.Name == "deploy" && (!dispatched || r.Event == "workflow_dispatch") {
-				run = &r
-				break
-			}
-		}
-		if run != nil {
+		if run = deployRun(runs, wf, dispatched); run != nil {
 			break
 		}
 		if time.Since(appeared) > time.Minute {

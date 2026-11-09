@@ -15,7 +15,11 @@ commit, and the app's services becoming ready.
 A deploy is a push: committing and pushing yourself deploys just the same,
 and mcloud deploy only follows along. Uncommitted changes aren't deployed.
 With nothing new to push, --rebuild runs the workflow again (e.g. after a
-change in the homelab platform).
+change in the homelab platform or a new mcloud release).
+
+The deploy workflow is the one in .github/workflows that calls maxcloud's
+run-deploy, whatever its name: deploy.yaml from mcloud init, or the app's
+CI workflow. --rebuild needs workflow\_dispatch in its on:.
 
 The app's settings (quota, buckets, database, domains, deploy) come from
 maxcloud.yaml: the first deploy registers the app, later ones bring its
