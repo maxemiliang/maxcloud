@@ -10,7 +10,7 @@ provisioned with OpenTofu and managed with Flux.
 ```
 infra/
   bootstrap/    # one-off: object storage for state + restricted API sub-account (local state)
-  cluster/      # network, NAT gateway, router, UKS cluster, node group (s3 backend, encrypted state)
+  cluster/      # network, NAT gateway, router, UKS cluster, node groups (s3 backend, encrypted state)
   cluster-auth/ # the API server's OIDC login through Authelia (scripts/cluster-auth.sh applies it)
   flux/         # Flux Operator + FluxInstance + SOPS age key
   storage/      # backup and log buckets + their S3 users, and the maxcloud-apps instance; outlives the cluster (s3 backend, encrypted state)
@@ -420,6 +420,7 @@ applies its manifests itself.
 
 - [Restore a Postgres cluster from backup](docs/runbooks/postgres-restore.md).
 - [Move an app's database.yaml database to the registry's `db`](docs/runbooks/move-database-to-registry.md).
+- [Sandbox runtime spike: a node for agent sessions, and gVisor on it](docs/runbooks/sandbox-spike.md).
 - **Add an app from its own repo:** put it on the run platform (`mcloud
   deploy` in the app's repo, see Run platform). The registry makes its
   namespace, and Flux applies the repo as a ServiceAccount that is admin in

@@ -1,0 +1,116 @@
+# Two pods on the sandbox node, the same except for the runtime: `gvisor`
+# under runsc, `runc` under the node's normal runtime, to compare against.
+# Not part of any Flux Kustomization: applied by hand, see ../sandbox-spike.md.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: sandbox-spike
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: gvisor
+  namespace: sandbox-spike
+spec:
+  # Brings the sandbox nodes' selector and toleration with it.
+  runtimeClassName: gvisor
+  restartPolicy: Never
+  automountServiceAccountToken: false
+  # Public resolvers, not the cluster's: ClusterIPs time out under gVisor
+  # (docs/kb/networking/gvisor-no-clusterip.md), CoreDNS's included. Both
+  # pods, so the comparison stays like for like.
+  dnsPolicy: None
+  dnsConfig:
+    nameservers: [1.1.1.1, 9.9.9.9]
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    runAsGroup: 1000
+    fsGroup: 1000
+    seccompProfile:
+      type: RuntimeDefault
+  containers:
+    - name: shell
+      image: node:24-bookworm-slim
+      # Under gVisor /proc/version is gVisor's own kernel ("Linux version
+      # 4.19.0-gvisor"), not the node's.
+      command: ["sh", "-c", "cat /proc/version; exec sleep 86400"]
+      env:
+        - name: HOME
+          value: /work
+        - name: NPM_CONFIG_PREFIX
+          value: /work/.npm-global
+      workingDir: /work
+      securityContext:
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop: [ALL]
+      resources:
+        requests:
+          cpu: 250m
+          memory: 512Mi
+        limits:
+          memory: 1536Mi
+      volumeMounts:
+        - name: work
+          mountPath: /work
+  volumes:
+    - name: work
+      emptyDir: {}
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: runc
+  namespace: sandbox-spike
+spec:
+  nodeSelector:
+    pool: sandbox
+  tolerations:
+    - key: homelab/pool
+      operator: Equal
+      value: sandbox
+      effect: NoSchedule
+  restartPolicy: Never
+  automountServiceAccountToken: false
+  # Public resolvers, not the cluster's: ClusterIPs time out under gVisor
+  # (docs/kb/networking/gvisor-no-clusterip.md), CoreDNS's included. Both
+  # pods, so the comparison stays like for like.
+  dnsPolicy: None
+  dnsConfig:
+    nameservers: [1.1.1.1, 9.9.9.9]
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    runAsGroup: 1000
+    fsGroup: 1000
+    seccompProfile:
+      type: RuntimeDefault
+  containers:
+    - name: shell
+      image: node:24-bookworm-slim
+      command: ["sh", "-c", "cat /proc/version; exec sleep 86400"]
+      env:
+        - name: HOME
+          value: /work
+        - name: NPM_CONFIG_PREFIX
+          value: /work/.npm-global
+      workingDir: /work
+      securityContext:
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop: [ALL]
+      resources:
+        requests:
+          cpu: 250m
+          memory: 512Mi
+        limits:
+          memory: 1536Mi
+      volumeMounts:
+        - name: work
+          mountPath: /work
+  volumes:
+    - name: work
+      emptyDir: {}
