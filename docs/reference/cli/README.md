@@ -38,6 +38,7 @@ $GH\_TOKEN (or $GITHUB\_TOKEN), else the GitHub CLI's login.
 | [`mcloud logs`](mcloud-logs.md) | Show an app's logs |
 | [`mcloud queue`](mcloud-queue.md) | Look at and retry an app's queued jobs |
 | [`mcloud run`](mcloud-run.md) | Run a scheduled function now, and show its output |
+| [`mcloud sandbox`](mcloud-sandbox.md) | Agent sessions: Claude Code in a sandbox in the cluster |
 | [`mcloud secrets`](mcloud-secrets.md) | An app's secrets: environment variables for all its functions |
 | [`mcloud status`](mcloud-status.md) | Show an app's deploy, services, workloads, databases and problems |
 
