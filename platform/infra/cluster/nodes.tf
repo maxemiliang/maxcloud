@@ -34,3 +34,40 @@ resource "upcloud_kubernetes_node_group" "default" {
     create_before_destroy = true
   }
 }
+
+# Spike: a node of its own for sandboxed agent sessions (untrusted code, so
+# never on the nodes that run Flux and the platform). Nothing schedules here
+# unless it tolerates the taint, which the `gvisor` RuntimeClass adds for the
+# pods that use it. What the spike has to answer, and how to run it:
+# docs/runbooks/sandbox-spike.md.
+resource "upcloud_kubernetes_node_group" "sandbox" {
+  cluster = upcloud_kubernetes_cluster.this.id
+
+  name_prefix = "sandbox"
+
+  # 2 vCPU / 4 GB / 30 GB standard disk. An agent session starts at about
+  # 1 CPU and 1 GiB, so two or three fit.
+  plan       = "STARTER-2xCPU-4GB"
+  node_count = 1
+
+  # No anti_affinity: one node, and sessions are disposable.
+
+  # Node labels too: `pool=sandbox` is what the gVisor installer and the
+  # RuntimeClass select on.
+  labels = merge(local.labels, { pool = "sandbox" })
+
+  # Same key as the burst pool planned in
+  # docs/kb/ops/node-autoscaling-burst-pool.md. Cilium, CSI and node-exporter
+  # tolerate every taint; Traefik, Alloy and kured don't, so they stay off.
+  taint {
+    key    = "homelab/pool"
+    value  = "sandbox"
+    effect = "NoSchedule"
+  }
+
+  lifecycle {
+    create_before_destroy = true
+    # Once a cluster autoscaler resizes this group, add
+    # `ignore_changes = [node_count]` here.
+  }
+}
