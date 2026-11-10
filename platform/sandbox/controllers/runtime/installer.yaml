@@ -1,15 +1,12 @@
-# gVisor on the sandbox node group: the installer and the RuntimeClass.
-# Not part of any Flux Kustomization: applied by hand, see ../sandbox-spike.md.
-# (Under infra-controllers, an installer that fails on a node would hold up
-# every Kustomization that depends on it.)
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: sandbox-system
-  labels:
-    # The installer writes to the node's filesystem and restarts containerd.
-    pod-security.kubernetes.io/enforce: privileged
----
+# gVisor on the sandbox node group: a privileged DaemonSet that installs
+# runsc on each sandbox node and registers it with containerd (install.sh).
+# UKS has no hook for node setup, so this is the only way to get a runtime
+# onto a node, and UpCloud doesn't support it. What it found and how it
+# behaves: docs/kb/ops/sandbox-gvisor-on-uks.md.
+#
+# A new or replaced sandbox node has no runsc until this pod has run on it
+# (about 15 seconds). A session pod scheduled before that waits and starts by
+# itself.
 apiVersion: apps/v1
 kind: DaemonSet
 metadata:
@@ -41,6 +38,7 @@ spec:
             # A dated release from https://github.com/google/gvisor/tags
             # (release-20261102.0), and the content of
             # https://storage.googleapis.com/gvisor/releases/release/<date>/x86_64/gvisor.tar.bz2.sha512
+            # Renovate doesn't know these: bump both by hand.
             - name: GVISOR_RELEASE
               value: "20261102"
             - name: GVISOR_SHA512
@@ -70,19 +68,3 @@ spec:
         - name: scripts
           configMap:
             name: gvisor-installer
----
-# Pods with `runtimeClassName: gvisor` run under runsc, and get the sandbox
-# nodes' selector and toleration from here, so they can't land anywhere else.
-apiVersion: node.k8s.io/v1
-kind: RuntimeClass
-metadata:
-  name: gvisor
-handler: runsc
-scheduling:
-  nodeSelector:
-    pool: sandbox
-  tolerations:
-    - key: homelab/pool
-      operator: Equal
-      value: sandbox
-      effect: NoSchedule

@@ -1,7 +1,7 @@
 #!/bin/sh
 # Installs gVisor (runsc) on the node this pod runs on and registers it with
 # containerd as the runtime handler `runsc`. Runs in the privileged
-# gvisor-installer DaemonSet (runtime.yaml): the node's / is at /host, and
+# gvisor-installer DaemonSet (installer.yaml): the node's / is at /host, and
 # hostPID lets nsenter reach the node's systemd.
 #
 # UKS has no hook for node setup (no user data, no custom image), so this is

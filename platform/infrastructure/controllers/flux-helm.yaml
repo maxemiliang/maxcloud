@@ -9,7 +9,9 @@
 # cluster-admin, and every platform HelmRelease names it.
 #
 # A new platform HelmRelease needs `serviceAccountName: flux-helm`, and one in
-# a new namespace needs that namespace added here. Without them it fails with
+# a new namespace needs that namespace added here. (agent-sandbox-system has
+# its own, in sandbox/controllers/agent-sandbox, so the sandbox doesn't
+# depend on this layer.) Without them it fails with
 # `system:serviceaccount:<ns>:default cannot ...` before Helm touches the
 # release; what's already running keeps running.
 #

@@ -1,9 +1,9 @@
-# The sandbox runtime spike: `kubectl apply -k docs/runbooks/sandbox-spike`.
-# Applied by hand, see ../sandbox-spike.md. test.yaml is applied separately.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
-  - runtime.yaml
+  - namespace.yaml
+  - installer.yaml
+  - runtimeclass.yaml
 # The name gets a hash of the script, so a changed script restarts the
 # installer.
 configMapGenerator:

@@ -15,7 +15,7 @@ cd "$(dirname "$0")/.."
 # anyway.
 # apps/run-demo is applied by its own Kustomization (registered in
 # apps/maxcloud), not as part of `apps`.
-for dir in clusters/personal infrastructure/controllers infrastructure/configs apps apps/run-demo; do
+for dir in clusters/personal infrastructure/controllers infrastructure/configs sandbox/controllers sandbox/sessions apps apps/run-demo; do
   echo "--- kustomize build $dir"
   kustomize build "$dir" | kubeconform -summary -strict -ignore-missing-schemas -skip Secret \
     -schema-location default \

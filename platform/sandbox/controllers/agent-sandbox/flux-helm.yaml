@@ -1,0 +1,22 @@
+# The identity helm-controller installs the agent-sandbox chart as (CRDs and
+# ClusterRoles, so cluster-admin). The same as the platform's `flux-helm`
+# ServiceAccounts in infrastructure/controllers/flux-helm.yaml, which has the
+# why. Kept here, with a binding of its own, so the sandbox needs nothing
+# from infra-controllers.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: flux-helm
+  namespace: agent-sandbox-system
+automountServiceAccountToken: false
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: flux-helm-agent-sandbox
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cluster-admin
+subjects:
+  - {kind: ServiceAccount, name: flux-helm, namespace: agent-sandbox-system}
