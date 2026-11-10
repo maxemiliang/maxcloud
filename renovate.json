@@ -8,17 +8,17 @@
   "labels": ["dependencies"],
   "flux": {
     "description": "HelmRelease chart versions, OCIRepository and GitRepository tags.",
-    "managerFilePatterns": ["/^platform/(clusters|infrastructure|apps)/.+\\.ya?ml$/"]
+    "managerFilePatterns": ["/^platform/(clusters|infrastructure|sandbox|apps)/.+\\.ya?ml$/"]
   },
   "kubernetes": {
     "description": "Container images in plain manifests (Authelia, hello).",
-    "managerFilePatterns": ["/^platform/(clusters|infrastructure|apps)/.+\\.ya?ml$/"]
+    "managerFilePatterns": ["/^platform/(clusters|infrastructure|sandbox|apps)/.+\\.ya?ml$/"]
   },
   "customManagers": [
     {
-      "description": "Versions with a `# renovate: datasource=... depName=...` comment on the line above, in workflows.",
+      "description": "Versions with a `# renovate: datasource=... depName=...` comment on the line above, in workflows and in the sandbox's manifests (a chart value Renovate's flux manager doesn't read).",
       "customType": "regex",
-      "managerFilePatterns": ["/^\\.github/workflows/.+\\.ya?ml$/"],
+      "managerFilePatterns": ["/^\\.github/workflows/.+\\.ya?ml$/", "/^platform/sandbox/.+\\.ya?ml$/"],
       "matchStrings": ["# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)\\s+\\w+: (?<currentValue>\\S+)"]
     },
     {
@@ -65,6 +65,11 @@
       "matchDepNames": ["kubectl"],
       "matchUpdateTypes": ["major", "minor"],
       "dependencyDashboardApproval": true
+    },
+    {
+      "description": "The agent-sandbox chart (its repo at a tag) and the controller image it installs are one version: one PR for both.",
+      "matchPackageNames": ["kubernetes-sigs/agent-sandbox"],
+      "groupName": "agent-sandbox"
     },
     {
       "description": "Knative supports upgrading one minor version at a time: one PR per minor, merged in order.",
