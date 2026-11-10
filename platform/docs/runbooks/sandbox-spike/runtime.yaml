@@ -1,0 +1,88 @@
+# gVisor on the sandbox node group: the installer and the RuntimeClass.
+# Not part of any Flux Kustomization: applied by hand, see ../sandbox-spike.md.
+# (Under infra-controllers, an installer that fails on a node would hold up
+# every Kustomization that depends on it.)
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: sandbox-system
+  labels:
+    # The installer writes to the node's filesystem and restarts containerd.
+    pod-security.kubernetes.io/enforce: privileged
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: gvisor-installer
+  namespace: sandbox-system
+spec:
+  selector:
+    matchLabels:
+      app: gvisor-installer
+  template:
+    metadata:
+      labels:
+        app: gvisor-installer
+    spec:
+      # Sandbox nodes only (the node group's label, infra/cluster/nodes.tf).
+      nodeSelector:
+        pool: sandbox
+      tolerations:
+        - operator: Exists
+      # nsenter into the node's namespaces, for systemctl and containerd.
+      hostPID: true
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 5
+      containers:
+        - name: installer
+          image: alpine:3.24.4@sha256:f59abe656b692d901e184be3445e084786602108599d2a51d229c0f5a48c71bf
+          command: ["/bin/sh", "/scripts/install.sh"]
+          env:
+            # A dated release from https://github.com/google/gvisor/tags
+            # (release-20261102.0), and the content of
+            # https://storage.googleapis.com/gvisor/releases/release/<date>/x86_64/gvisor.tar.bz2.sha512
+            - name: GVISOR_RELEASE
+              value: "20261102"
+            - name: GVISOR_SHA512
+              value: 2e6671bb2d033b871c5811ab57e16ac570988b0e0054c525f911cfaf191bab3ca4efb08e0a98daa4b9e7d248f9e5776ef2ef2f8a6b82d829646a42924c98bb05
+          securityContext:
+            privileged: true
+          # Ready means: runsc is on this node and containerd knows it.
+          readinessProbe:
+            exec:
+              command: ["test", "-f", "/tmp/ready"]
+            periodSeconds: 5
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              memory: 256Mi
+          volumeMounts:
+            - name: host
+              mountPath: /host
+            - name: scripts
+              mountPath: /scripts
+      volumes:
+        - name: host
+          hostPath:
+            path: /
+        - name: scripts
+          configMap:
+            name: gvisor-installer
+---
+# Pods with `runtimeClassName: gvisor` run under runsc, and get the sandbox
+# nodes' selector and toleration from here, so they can't land anywhere else.
+apiVersion: node.k8s.io/v1
+kind: RuntimeClass
+metadata:
+  name: gvisor
+handler: runsc
+scheduling:
+  nodeSelector:
+    pool: sandbox
+  tolerations:
+    - key: homelab/pool
+      operator: Equal
+      value: sandbox
+      effect: NoSchedule
