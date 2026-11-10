@@ -1,9 +1,11 @@
 # Sandboxes for agent sessions (Claude Code under gVisor, on the sandbox
-# node group): sandbox/, and how to use one: docs/runbooks/sandbox-sessions.md.
+# node group): sandbox/. Users run them with `mcloud sandbox`; the platform
+# side is in docs/runbooks/sandbox-sessions.md.
 #   sandbox-controllers: the gVisor runtime on the sandbox nodes, and the
 #                        agent-sandbox controller with its CRDs
-#   sandbox-sessions:    the namespace sessions run in, what they may reach,
-#                        and the template they're made from
+#   sandbox-sessions:    the registry that makes each user a sandbox
+#                        namespace (what its sessions are and may reach),
+#                        and who may have one
 # Two Kustomizations for the same reason infrastructure has two: the second
 # uses kinds the first installs.
 #
@@ -47,6 +49,6 @@ spec:
     kind: GitRepository
     name: flux-system
   path: ./platform/sandbox/sessions
-  # Pruning the namespace deletes every session in it.
+  # Pruning the ResourceSet would delete every user's sandbox.
   prune: true
   wait: true

@@ -1,9 +1,0 @@
-# Where agent sessions run. Not an app namespace (no run.gronblom.dev/tenant
-# label): the app registry doesn't know it, and only admins can make things
-# here.
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: sandbox
-  labels:
-    pod-security.kubernetes.io/enforce: restricted

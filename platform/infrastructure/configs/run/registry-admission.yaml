@@ -10,7 +10,9 @@
 # with the entry, so the list must name every namespace not made by the
 # registry: the platform's (infrastructure/, sandbox/), and the ones UpCloud
 # and the bootstrap make (cilium-secrets, flux-operator-bootstrap). Nor auth
-# or grafana, Authelia's and Grafana's hostnames.
+# or grafana, Authelia's and Grafana's hostnames. Nor sandbox-* and sbx-*:
+# users' sandbox entries and namespaces (sandbox/sessions/users.yaml), and
+# sandbox-system.
 #
 # `repo`, `path` and `branch` go into the registry's templates as they are
 # (apps/maxcloud/resourceset.yaml), so they must be plain names: a newline
@@ -82,9 +84,9 @@ spec:
     - expression: >-
         !(variables.name in ['default', 'flux-system', 'traefik', 'knative-serving', 'knative-operator',
         'keda', 'monitoring', 'cnpg-system', 'cert-manager', 'external-dns', 'authelia', 'kured',
-        'maxcloud-system', 'registry', 'hello', 'sandbox', 'sandbox-system', 'agent-sandbox-system',
+        'maxcloud-system', 'registry', 'hello', 'sandbox', 'agent-sandbox-system',
         'auth', 'grafana']) &&
-        !['kube-', 'flux-', 'cilium', 'upcloud'].exists(p, variables.name.startsWith(p))
+        !['kube-', 'flux-', 'cilium', 'upcloud', 'sandbox-', 'sbx-'].exists(p, variables.name.startsWith(p))
       message: "app name: reserved for the platform"
       reason: Forbidden
     - expression: "variables.repo == '' || variables.repo.matches('^[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?/[A-Za-z0-9._-]+$')"
