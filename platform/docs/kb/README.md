@@ -21,6 +21,7 @@ Procedures live in [`../runbooks/`](../runbooks/) and the README, not here.
 - [Traefik 3 gives a request 60s, body included; the LB is not the limit](networking/traefik-read-timeout.md): large uploads cut off after a minute
 - [maxcloud custom domains cover the managed zones only; other people's domains are a later step](networking/custom-domains-outside-managed-zones.md): why a CNAME alone isn't enough (TLS, listeners, Cloudflare 1014, squatting), and the plan
 - [Apps can't connect to platform pods (a Cilium deny, not per-namespace allow-lists)](networking/tenant-egress-deny.md): what apps still reach, and why Middlewares are limited too
+- [ClusterIP services time out from gVisor pods; pod IPs and the internet work](networking/gvisor-no-clusterip.md): `npm install` hangs on DNS in a sandbox
 
 ## knative
 
@@ -69,6 +70,7 @@ Procedures live in [`../runbooks/`](../runbooks/) and the README, not here.
 - [The built-in admin role lets an app drive controllers that are cluster-admin](ops/admin-role-aggregates-controller-crds.md): Flux objects and ClusterIssuer certificates in app namespaces
 - [Everything must fit on one node while the other drains](ops/drain-cpu-budget.md): the CPU budget
 - [Node autoscaling, when we add it, is a tainted burst node group for app pods](ops/node-autoscaling-burst-pool.md): the plan, on hold, and UpCloud's autoscaler traps
+- [gVisor installs and runs on a UKS node; Kata can't (no nested virtualisation)](ops/sandbox-gvisor-on-uks.md): the sandbox spike's node facts and timings
 - [A killed tofu apply leaves a stale state lock](ops/tofu-killed-apply.md)
 - [Backups stay in one region for now; a copy to de-fra1 is the plan when needed](ops/off-region-backup-copy.md): deferred, with the plan and what it doesn't cover
 - [UpCloud sub-account usernames can't contain dashes; Object Storage users can](ops/upcloud-sub-account-names.md): `homelab_api`, `maxcloud_controller`

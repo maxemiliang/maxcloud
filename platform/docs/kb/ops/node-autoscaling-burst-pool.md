@@ -128,4 +128,6 @@ drain budget runs out, or PR #10234 is merged (then use the official image
 instead of building our own). Before building this, compare it with the
 4-core plan.
 
-See also: [drain-cpu-budget](drain-cpu-budget.md).
+See also: [drain-cpu-budget](drain-cpu-budget.md),
+[sandbox-gvisor-on-uks](sandbox-gvisor-on-uks.md) (a second, tainted node
+group exists since 2026-11-10: `sandbox`, fixed at one node).
