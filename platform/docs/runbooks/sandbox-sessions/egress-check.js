@@ -1,5 +1,5 @@
 // What a session's pod can reach. Run it in one (see ../sandbox-sessions.md):
-//   kubectl -n sandbox exec -i <session> -- node - < docs/runbooks/sandbox-sessions/egress-check.js
+//   mcloud sandbox shell <session> -- node - < docs/runbooks/sandbox-sessions/egress-check.js
 const dns = require("dns").promises, net = require("net"), https = require("https");
 const T = 6000;
 const t = (name, p) =>
@@ -17,7 +17,7 @@ const get = (url) =>
   });
 
 (async () => {
-  // Allowed by sandbox/sessions/network.yaml.
+  // Allowed by the policy in sandbox/sessions/users.yaml.
   await t("dns api.anthropic.com", dns.lookup("api.anthropic.com").then((r) => r.address));
   await t("https api.anthropic.com", get("https://api.anthropic.com/v1/models")); // 401: reached, no key
   // Not allowed: other names, the resolvers' own HTTPS (DNS over HTTPS
