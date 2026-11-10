@@ -15,10 +15,14 @@ infra/
   flux/         # Flux Operator + FluxInstance + SOPS age key
   storage/      # backup and log buckets + their S3 users, and the maxcloud-apps instance; outlives the cluster (s3 backend, encrypted state)
 clusters/
-  personal/     # Flux entry point: Kustomizations for infrastructure, apps and the maxcloud controller
+  personal/     # Flux entry point: Kustomizations for infrastructure, apps, the maxcloud controller and the sandbox
 infrastructure/
   controllers/  # Traefik, cert-manager, external-dns, kured, CNPG, monitoring, Authelia, Knative Operator, KEDA, metrics-server, the image registry (zot), what the maxcloud controller needs
   configs/      # ClusterIssuers, Gateway, Knative Serving, scrape configs, alert rules, RBAC for people, the run platform's admission policies: what needs the controllers first
+sandbox/
+  controllers/  # gVisor on the sandbox nodes (an installer DaemonSet), the agent-sandbox controller
+  sessions/     # the namespace agent sessions run in: quota, network policy, the session template
+  image/        # the image a session runs (Node, git, Claude Code); built by the repo's sandbox-image workflow
 apps/
   <app>/        # in-repo apps (hello) and the platform's own app's manifests (run-demo)
   maxcloud/     # app registry for the run platform: the ResourceSet, and entries kept in git (run-demo)
@@ -139,6 +143,9 @@ secret).
     what apps may make and route, an egress deny towards the platform, Flux
     in multitenant mode, app owners and registration IDs, and a Traefik L7
     policy on its in-cluster entrypoint.
+14. Sandboxes for agent sessions: a tainted node group with gVisor on it,
+    agent-sandbox, and Claude Code sessions that reach only the Claude API
+    ([docs/runbooks/sandbox-sessions.md](docs/runbooks/sandbox-sessions.md)).
 
 ## Run platform
 
@@ -420,7 +427,8 @@ applies its manifests itself.
 
 - [Restore a Postgres cluster from backup](docs/runbooks/postgres-restore.md).
 - [Move an app's database.yaml database to the registry's `db`](docs/runbooks/move-database-to-registry.md).
-- [Sandbox runtime spike: a node for agent sessions, and gVisor on it](docs/runbooks/sandbox-spike.md).
+- [Agent sessions in a sandbox](docs/runbooks/sandbox-sessions.md): start
+  and end a Claude Code session, renew its token, a new Claude Code version.
 - **Add an app from its own repo:** put it on the run platform (`mcloud
   deploy` in the app's repo, see Run platform). The registry makes its
   namespace, and Flux applies the repo as a ServiceAccount that is admin in
@@ -607,9 +615,21 @@ applies its manifests itself.
   routes point at `traefik/traefik-knative` with a host rewrite and a
   ReferenceGrant (generated per app by `apps/maxcloud/resourceset.yaml`).
 
+- **Agent sessions can't reach anything in the cluster.** By design for
+  now (their egress policy allows the Claude API only), and ClusterIP
+  services don't work from gVisor pods here anyway
+  ([gvisor-no-clusterip](docs/kb/networking/gvisor-no-clusterip.md)). Work
+  goes in and out with `kubectl cp`.
+- **The sandbox node's pod logs aren't in Loki.** Alloy doesn't tolerate
+  the node's taint, so the gVisor installer's and the sessions' logs are
+  only in `kubectl logs`.
+- **The gVisor release isn't updated by Renovate.** It's a date and a
+  checksum in `sandbox/controllers/runtime/installer.yaml`, bumped by hand.
+
 ## Costs and capacity
 
-About €63/month: 2× ~€24 nodes (STARTER-2xCPU-16GB), 2× €5 object storage
+About €75/month: 2× ~€24 nodes (STARTER-2xCPU-16GB), ~€12 for the sandbox
+node (STARTER-2xCPU-4GB; an estimate, check it in the Hub), 2× €5 object storage
 (`homelab`, and `maxcloud-apps` for apps' buckets and backups), and ~€5
 for 21 GiB of MaxIOPS block storage (Prometheus 10, Loki 5, Postgres 2×2,
 Alertmanager 1, Authelia 1). The control plane (`dev-md`), NAT gateway and load

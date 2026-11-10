@@ -1,6 +1,5 @@
-// What a pod in sandbox-spike can reach. Run it in a test pod, before and
-// after egress.yaml (see ../sandbox-spike.md):
-//   kubectl -n sandbox-spike exec -i gvisor -- node - < docs/runbooks/sandbox-spike/egress-check.js
+// What a session's pod can reach. Run it in one (see ../sandbox-sessions.md):
+//   kubectl -n sandbox exec -i <session> -- node - < docs/runbooks/sandbox-sessions/egress-check.js
 const dns = require("dns").promises, net = require("net"), https = require("https");
 const T = 6000;
 const t = (name, p) =>
@@ -18,13 +17,12 @@ const get = (url) =>
   });
 
 (async () => {
-  // Allowed by egress.yaml.
+  // Allowed by sandbox/sessions/network.yaml.
   await t("dns api.anthropic.com", dns.lookup("api.anthropic.com").then((r) => r.address));
-  await t("dns registry.npmjs.org", dns.lookup("registry.npmjs.org").then((r) => r.address));
   await t("https api.anthropic.com", get("https://api.anthropic.com/v1/models")); // 401: reached, no key
-  await t("https registry.npmjs.org", get("https://registry.npmjs.org/-/ping"));
-  // Not allowed: another name, the resolvers' own HTTPS (DNS over HTTPS
+  // Not allowed: other names, the resolvers' own HTTPS (DNS over HTTPS
   // would get round the name list), and the cluster.
+  await t("dns registry.npmjs.org", dns.lookup("registry.npmjs.org").then((r) => r.address));
   await t("dns example.com", dns.lookup("example.com").then((r) => r.address));
   await t("tcp 1.1.1.1:443", tcp("1.1.1.1", 443));
   await t("tcp 9.9.9.9:443", tcp("9.9.9.9", 443));
