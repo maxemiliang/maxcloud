@@ -1,0 +1,153 @@
+# Rules for sandbox entries (ResourceSetInputProviders labelled
+# run.gronblom.dev/sandbox in flux-system; users.yaml turns each into a
+# namespace). Developers may create any provider in flux-system (the
+# registry Role), so what such an entry may say is decided here.
+#
+# For everyone: the entry is sandbox-<user>, with a plain DNS-label `user`
+# (it goes into the template as a namespace name and an RBAC subject) and
+# nothing else but `sessions`, and it isn't an app's entry as well.
+#
+# For everyone but admins, Flux and Flux Operator (its finalizer): the
+# entry is your own (`user` is your Authelia username), before and after
+# the change, and `sessions` (how many may run) isn't yours to set.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: maxcloud-sandbox-entries
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [fluxcd.controlplane.io]
+        apiVersions: ["*"]
+        operations: [CREATE, UPDATE, DELETE]
+        resources: [resourcesetinputproviders]
+  matchConditions:
+    # An entry counts if it's a sandbox's before or after the change:
+    # taking the label off removes the sandbox as surely as deleting it.
+    - name: sandbox-entries-only
+      expression: >-
+        (request.operation != 'DELETE' && has(object.metadata.labels) &&
+          object.metadata.labels[?'run.gronblom.dev/sandbox'].orValue('') == 'true') ||
+        (request.operation != 'CREATE' && has(oldObject.metadata.labels) &&
+          oldObject.metadata.labels[?'run.gronblom.dev/sandbox'].orValue('') == 'true')
+  variables:
+    - name: isSandbox
+      expression: >-
+        request.operation != 'DELETE' && has(object.metadata.labels) &&
+        object.metadata.labels[?'run.gronblom.dev/sandbox'].orValue('') == 'true'
+    - name: wasSandbox
+      expression: >-
+        request.operation != 'CREATE' && has(oldObject.metadata.labels) &&
+        oldObject.metadata.labels[?'run.gronblom.dev/sandbox'].orValue('') == 'true'
+    - name: values
+      expression: >-
+        request.operation != 'DELETE' && has(object.spec.defaultValues) ? object.spec.defaultValues : {}
+    - name: old
+      expression: >-
+        request.operation != 'CREATE' && has(oldObject.spec.defaultValues) ? oldObject.spec.defaultValues : {}
+    - name: user
+      expression: "'user' in variables.values ? string(variables.values['user']) : ''"
+    - name: oldUser
+      expression: "'user' in variables.old ? string(variables.old['user']) : ''"
+    - name: sessions
+      expression: "'sessions' in variables.values ? string(variables.values['sessions']) : ''"
+    - name: oldSessions
+      expression: "'sessions' in variables.old ? string(variables.old['sessions']) : ''"
+    # The requester's Authelia username ("" for anyone else).
+    - name: me
+      expression: >-
+        request.userInfo.username.startsWith('authelia:') ? request.userInfo.username.substring(9) : ''
+    # Admins: Authelia's group, and the cluster's own admin certificate
+    # (docs/kb/ops/admin-certificate-not-system-masters.md).
+    - name: exempt
+      expression: >-
+        request.userInfo.groups.exists(g, g in ['authelia:admins', 'kubeadm:cluster-admins', 'system:masters']) ||
+        request.userInfo.username in ['system:serviceaccount:flux-system:kustomize-controller',
+        'system:serviceaccount:flux-system:flux-operator']
+  validations:
+    - expression: >-
+        !variables.isSandbox ||
+        (variables.user.matches('^[a-z]([a-z0-9]|-[a-z0-9])*$') && size(variables.user) <= 40)
+      message: "sandbox user: lowercase letters, digits and single dashes, starting with a letter, at most 40 characters (an Authelia username that isn't can't have a sandbox)"
+      reason: Invalid
+    - expression: "!variables.isSandbox || object.metadata.name == 'sandbox-' + variables.user"
+      messageExpression: "'a sandbox entry is named sandbox-<user>: this one is ' + object.metadata.name + ' for user ' + variables.user"
+      reason: Invalid
+    - expression: >-
+        !variables.isSandbox ||
+        (object.spec.type == 'Static' && variables.values.all(k, k in ['user', 'sessions']) &&
+          (variables.sessions == '' || variables.sessions.matches('^[1-9]$')))
+      message: "a sandbox entry is a Static provider with user, and optionally sessions (1 to 9), and nothing else"
+      reason: Invalid
+    - expression: >-
+        !variables.isSandbox || object.metadata.labels[?'run.gronblom.dev/app'].orValue('') != 'true'
+      message: "an entry is an app's or a sandbox's, not both"
+      reason: Invalid
+    - expression: >-
+        variables.exempt || !variables.isSandbox || (variables.me != '' && variables.user == variables.me)
+      messageExpression: >-
+        variables.me == '' ? 'a sandbox takes an Authelia login (mcloud login)' :
+        'a sandbox entry is for yourself (' + variables.me + '), not ' + variables.user
+      reason: Forbidden
+    - expression: >-
+        variables.exempt || !variables.wasSandbox ||
+        (variables.me != '' && variables.oldUser == variables.me)
+      messageExpression: >-
+        'only ' + variables.oldUser + ' or an admin may change or remove the sandbox of ' + variables.oldUser
+      reason: Forbidden
+    - expression: "variables.exempt || !variables.isSandbox || variables.sessions == variables.oldSessions"
+      message: "sessions: how many sessions a sandbox may run is an admin's to set"
+      reason: Forbidden
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: maxcloud-sandbox-entries
+spec:
+  policyName: maxcloud-sandbox-entries
+  validationActions: [Deny]
+  matchResources:
+    namespaceSelector:
+      matchLabels:
+        kubernetes.io/metadata.name: flux-system
+---
+# In a sandbox namespace, the only Secret a user makes is their token:
+# claude-code, with the one key the session template reads. RBAC can't
+# limit `create` by name (rbac.yaml), and any other Secret there has no
+# use. Admins and Flux Operator are exempt.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: maxcloud-sandbox-secrets
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: [v1]
+        operations: [CREATE, UPDATE]
+        resources: [secrets]
+  matchConditions:
+    - name: not-exempt
+      expression: >-
+        !request.userInfo.groups.exists(g, g in ['authelia:admins', 'kubeadm:cluster-admins', 'system:masters']) &&
+        request.userInfo.username != 'system:serviceaccount:flux-system:flux-operator'
+  validations:
+    - expression: >-
+        object.metadata.name == 'claude-code' && object.type == 'Opaque' &&
+        has(object.data) && size(object.data) == 1 && 'CLAUDE_CODE_OAUTH_TOKEN' in object.data
+      message: "the only Secret in a sandbox namespace is claude-code, with the key CLAUDE_CODE_OAUTH_TOKEN (mcloud sandbox token set)"
+      reason: Forbidden
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: maxcloud-sandbox-secrets
+spec:
+  policyName: maxcloud-sandbox-secrets
+  validationActions: [Deny]
+  matchResources:
+    namespaceSelector:
+      matchLabels:
+        run.gronblom.dev/sandbox: "true"
