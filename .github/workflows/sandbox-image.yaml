@@ -1,6 +1,6 @@
 # The image agent sessions run in: builds platform/sandbox/image and pushes it
 # to ghcr.io/maxemiliang/maxcloud-sandbox:<Claude Code version>-<revision>.
-# The cluster runs the tag named in platform/sandbox/sessions/claude-code.yaml,
+# The cluster runs the tag named in platform/sandbox/sessions/users.yaml,
 # so a new image is two steps: change a version here and merge (this
 # builds it), then name the new tag there (Renovate offers that as a PR once
 # the tag exists).
