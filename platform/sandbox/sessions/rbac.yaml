@@ -1,0 +1,38 @@
+# What a user may do in their own sandbox namespace (sbx-<user>; bound there
+# by users.yaml): make and end sessions, open a shell in them, and keep
+# their token. Not pods, templates or policies: a session is always the
+# template's pod, under the namespace's network policy.
+#
+# Making their entry in the first place is the registry Role in flux-system
+# (infrastructure/configs/auth/developers.yaml), which Authelia's
+# maxcloud-developers have; admission.yaml narrows it to their own.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: maxcloud-sandbox-user
+rules:
+  # A session is a claim on the pool. patch: giving one an end time.
+  - apiGroups: [extensions.agents.x-k8s.io]
+    resources: [sandboxclaims]
+    verbs: [get, list, watch, create, patch, delete]
+  - apiGroups: [extensions.agents.x-k8s.io]
+    resources: [sandboxwarmpools, sandboxtemplates]
+    verbs: [get, list, watch]
+  - apiGroups: [agents.x-k8s.io]
+    resources: [sandboxes]
+    verbs: [get, list, watch]
+  - apiGroups: [""]
+    resources: [pods, pods/log, events, resourcequotas]
+    verbs: [get, list, watch]
+  # mcloud sandbox claude, shell and cp.
+  - apiGroups: [""]
+    resources: [pods/exec]
+    verbs: [get, create]
+  # The token. create can't be limited by name, so admission.yaml does it.
+  - apiGroups: [""]
+    resources: [secrets]
+    verbs: [create]
+  - apiGroups: [""]
+    resources: [secrets]
+    resourceNames: [claude-code]
+    verbs: [get, update, patch, delete]
