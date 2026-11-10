@@ -6,8 +6,8 @@ tags: [gvisor, cilium, clusterip, dns, sandbox, kube-proxy-replacement]
 learned: 2026-11-10
 updated: 2026-11-10
 where:
-  - docs/runbooks/sandbox-spike/test.yaml
-  - docs/runbooks/sandbox-spike.md
+  - sandbox/sessions/claude-code.yaml
+  - sandbox/sessions/network.yaml
 ---
 
 # ClusterIP services time out from gVisor pods; pod IPs and the internet work
@@ -35,9 +35,10 @@ gVisor's own network stack never makes that call on the node's kernel. The
 same happens on a local kind cluster with Cilium 1.20.4 and
 `kubeProxyReplacement=true`, so it's Cilium and gVisor, not UKS.
 
-**Fix:** for the spike, the test pods use public resolvers
-(`dnsPolicy: None`, `docs/runbooks/sandbox-spike/test.yaml`). They can't
-resolve cluster names, which a sandbox for untrusted code shouldn't need.
+**Fix:** session pods use public resolvers (`dnsPolicy: None`,
+`sandbox/sessions/claude-code.yaml`), the two that their egress policy
+allows. They can't resolve cluster names, which a sandbox for untrusted
+code shouldn't need.
 
 What a sandbox must reach inside the cluster (an egress proxy, say) can't
 sit behind a ClusterIP as things are. Either it's reached by pod IP, or
@@ -53,4 +54,4 @@ tried.
 hangs, while the same with a resolver set to 1.1.1.1 answers.
 
 See also: [sandbox-gvisor-on-uks](../ops/sandbox-gvisor-on-uks.md),
-[the spike's runbook](../../runbooks/sandbox-spike.md).
+[agent-sessions-sandbox](../ops/agent-sessions-sandbox.md).

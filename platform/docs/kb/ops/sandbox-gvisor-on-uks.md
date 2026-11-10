@@ -7,16 +7,18 @@ learned: 2026-11-10
 updated: 2026-11-10
 where:
   - infra/cluster/nodes.tf
-  - docs/runbooks/sandbox-spike.md
-  - docs/runbooks/sandbox-spike/install.sh
-  - docs/runbooks/sandbox-spike/egress.yaml
+  - sandbox/controllers/runtime/install.sh
+  - sandbox/controllers/runtime/installer.yaml
+  - sandbox/sessions/network.yaml
 ---
 
 # gVisor installs and runs on a UKS node; Kata can't (no nested virtualisation)
 
 Measured 2026-11-10 on the `sandbox` node group (one STARTER-2xCPU-4GB
-node, UKS 1.36.4), with the spike in
-[docs/runbooks/sandbox-spike.md](../../runbooks/sandbox-spike.md).
+node, UKS 1.36.4), in a spike applied by hand: the installer that is now
+`sandbox/controllers/runtime`, and two test pods on the node, the same
+except for the runtime. What was built on these answers:
+[agent-sessions-sandbox](agent-sessions-sandbox.md).
 
 - **The node:** Debian 13, kernel 6.12.113, containerd 2.2.4 with
   `/etc/containerd/config.toml` at `version = 3` and no imports, cgroups v2.
@@ -43,17 +45,19 @@ node, UKS 1.36.4), with the spike in
   from `claude setup-token`, ran through. No API key involved.
 - **ClusterIP services don't work from a gVisor pod**, cluster DNS
   included: [gvisor-no-clusterip](../networking/gvisor-no-clusterip.md).
-- **Cilium's rules by DNS name work for a gVisor pod.** With
-  `docs/runbooks/sandbox-spike/egress.yaml` (a CiliumNetworkPolicy: DNS
-  for, and port 443 of, `api.anthropic.com` and `registry.npmjs.org` only)
-  on the namespace, both the runc and the gVisor pod resolved and reached
+- **Cilium's rules by DNS name work for a gVisor pod.** With a
+  CiliumNetworkPolicy on the namespace that allowed only DNS for, and port
+  443 of, `api.anthropic.com` and `registry.npmjs.org` (what
+  `sandbox/sessions/network.yaml` grew from), both the runc and the gVisor pod resolved and reached
   those two hosts, got no answer for `example.com` (`EAI_AGAIN`), and timed
   out on the resolvers' port 443 and on the API Service's ClusterIP. So
   Cilium 1.18.6's DNS proxy sees gVisor's queries, as long as they go to a
   resolver by its own address and not a ClusterIP. A whole `claude -p`
   session (write a file, run it) then ran in the gVisor pod with the policy
-  on: Claude Code needs no host beyond `api.anthropic.com` for that, and
-  doesn't mind the ones it can't reach (telemetry, update checks).
+  on: Claude Code doesn't mind the hosts it can't reach (telemetry, update
+  checks). The npm registry was still allowed in that run. With only
+  `api.anthropic.com` resolvable (the session image in Docker, 2026-11-10)
+  `claude -p` reaches the API within seconds.
 - **A tainted node without Traefik costs no traffic.** With the sandbox
   node in the cluster, 30 of 30 requests to hello.gronblom.dev and 15 of 15
   to grafana.lab.gronblom.dev (DNS-only, straight to the load balancer)
@@ -74,5 +78,6 @@ UKS node upgrade. The installer puts the entry back within five minutes and
 logs a second `registered runsc` line when it does.
 A replaced node comes up without `runsc` until the installer has run on it.
 
-See also: [node-autoscaling-burst-pool](node-autoscaling-burst-pool.md),
+See also: [agent-sessions-sandbox](agent-sessions-sandbox.md),
+[node-autoscaling-burst-pool](node-autoscaling-burst-pool.md),
 [gvisor-no-clusterip](../networking/gvisor-no-clusterip.md).
