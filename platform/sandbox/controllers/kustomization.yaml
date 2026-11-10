@@ -1,0 +1,7 @@
+# What agent sessions need before a sandbox can exist: the gVisor runtime on
+# the sandbox nodes, and the agent-sandbox controller.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - runtime
+  - agent-sandbox

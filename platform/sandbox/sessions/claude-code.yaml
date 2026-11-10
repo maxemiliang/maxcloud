@@ -1,0 +1,95 @@
+# What a session is: one pod under gVisor on the sandbox node group, with
+# Claude Code and the subscription token in it. A SandboxClaim on the pool
+# below makes one (docs/runbooks/sandbox-sessions.md).
+apiVersion: extensions.agents.x-k8s.io/v1beta1
+kind: SandboxTemplate
+metadata:
+  name: claude-code
+  namespace: sandbox
+spec:
+  # Not agent-sandbox's own NetworkPolicy: its default lets a sandbox reach
+  # the whole public internet, and policies add up, so it would undo
+  # network.yaml.
+  networkPolicyManagement: Unmanaged
+  podTemplate:
+    spec:
+      # Brings the sandbox nodes' selector and toleration with it.
+      runtimeClassName: gvisor
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      # A killed container (out of memory, say) starts again with the work
+      # volume as it was.
+      restartPolicy: OnFailure
+      terminationGracePeriodSeconds: 10
+      # Public resolvers, not the cluster's: ClusterIPs time out under gVisor
+      # (docs/kb/networking/gvisor-no-clusterip.md), CoreDNS's included.
+      # network.yaml allows exactly these two.
+      dnsPolicy: None
+      dnsConfig:
+        nameservers: [1.1.1.1, 9.9.9.9]
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: claude
+          # Built by .github/workflows/sandbox-image.yaml from sandbox/image.
+          # The tag is <Claude Code version>-<image revision>.
+          image: ghcr.io/maxemiliang/maxcloud-sandbox:2.1.322-1
+          # Does nothing by itself: a session is `kubectl exec ... claude`.
+          # The trap makes the pod stop at once when it's deleted (as PID 1,
+          # sleep alone ignores the signal).
+          command: ["sh", "-c", "trap 'exit 0' TERM INT; sleep infinity & wait"]
+          env:
+            # A one-year token from `claude setup-token`, model requests
+            # only. The Secret comes from the private repo
+            # (private/secrets/sandbox); without it the pod stays in
+            # CreateContainerConfigError.
+            - name: CLAUDE_CODE_OAUTH_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: claude-code
+                  key: CLAUDE_CODE_OAUTH_TOKEN
+            # Claude Code keeps its sessions under ~/.claude: on the work
+            # volume, so `claude --resume` works for as long as the pod does.
+            - name: HOME
+              value: /work
+            - name: NPM_CONFIG_PREFIX
+              value: /work/.npm-global
+          workingDir: /work
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              memory: 1536Mi
+          volumeMounts:
+            - name: work
+              mountPath: /work
+      volumes:
+        # Gone with the pod: deleting or suspending a session loses its
+        # work. Copy out what matters first (kubectl cp).
+        - name: work
+          emptyDir:
+            sizeLimit: 5Gi
+---
+# Claims name a pool, not a template. This one holds no idle pods
+# (replicas: 0): every claim starts a new pod, which takes a few seconds once
+# the node has the image. An idle warm pod would hold the token and a
+# quarter of a core for nothing.
+apiVersion: extensions.agents.x-k8s.io/v1beta1
+kind: SandboxWarmPool
+metadata:
+  name: claude-code
+  namespace: sandbox
+spec:
+  replicas: 0
+  sandboxTemplateRef:
+    name: claude-code

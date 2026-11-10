@@ -1,0 +1,68 @@
+# What the pods in `sandbox` may connect to: the two public resolvers, for
+# the Claude API's name only, and that name on 443. Everything else is
+# dropped, the rest of the cluster included. Nothing may connect to them.
+#
+# Why it matters: a session carries the subscription token in its
+# environment (CLAUDE_CODE_OAUTH_TOKEN), and runs whatever a prompt or a
+# file talks it into. With this, there is nowhere to send the token but the
+# host it's for.
+#
+# What it doesn't do:
+# - It allows addresses, not names: once the name resolves, any TLS
+#   connection to that address on 443 passes, whatever host it asks for.
+# - Anything sent to the Claude API is allowed, with any credentials: a
+#   session could use the API as someone else, or hand the token to a
+#   prompt.
+#
+# A session that needs another host (a package registry, a git server) gets
+# it added in both rules below. Each one is somewhere the token can go: the
+# npm registry accepts uploads, and sits on addresses shared with every
+# other site behind Cloudflare.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: sandbox-egress
+  namespace: sandbox
+spec:
+  description: "Sandbox pods: DNS for, and HTTPS to, the Claude API only"
+  # Every pod in the namespace. Having an egress section puts them in
+  # egress default-deny.
+  endpointSelector: {}
+  egress:
+    # DNS, to the resolvers the session template gives its pods (ClusterIPs,
+    # CoreDNS's included, don't work under gVisor:
+    # docs/kb/networking/gvisor-no-clusterip.md). The dns rules send these
+    # packets through Cilium's DNS proxy, which refuses every other name (so
+    # DNS can't carry data out either) and learns the addresses the toFQDNs
+    # rule below then allows.
+    - toCIDR:
+        - 1.1.1.1/32
+        - 9.9.9.9/32
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+          rules:
+            dns:
+              - matchName: api.anthropic.com
+    # Model requests. A `claude setup-token` token needs no other Anthropic
+    # host (no sign-in, no refresh).
+    - toFQDNs:
+        - matchName: api.anthropic.com
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+---
+# Nothing connects to a session: it's driven through `kubectl exec`, which
+# goes through the kubelet, not the pod network.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-ingress
+  namespace: sandbox
+spec:
+  podSelector: {}
+  policyTypes: [Ingress]

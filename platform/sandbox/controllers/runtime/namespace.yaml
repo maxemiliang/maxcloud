@@ -1,0 +1,9 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: sandbox-system
+  labels:
+    # The installer writes to the node's filesystem and restarts containerd,
+    # which the baseline and restricted Pod Security levels forbid. Explicit,
+    # so it's a visible exception.
+    pod-security.kubernetes.io/enforce: privileged
