@@ -89,7 +89,7 @@ $GH_TOKEN (or $GITHUB_TOKEN), else the GitHub CLI's login.`,
 	f.StringVar(&g.kubeContext, "context", "", "kubeconfig context")
 	f.BoolVar(&g.plain, "plain", false, "plain output: no colors, spinners or interactive prompts (also $MCLOUD_PLAIN=1; always in CI, pipes, with NO_COLOR or TERM=dumb)")
 
-	root.AddCommand(initCmd(g), deployCmd(g), appsCmd(g), statusCmd(g), logsCmd(g), generateCmd(g), buildCmd(g), devCmd(g), queueCmd(g), secretsCmd(g), envCmd(g), dbCmd(g), loginCmd(g), logoutCmd(g), credentialCmd(g), kubeconfigCmd(g), doctorCmd(g), runCmd(g), callCmd(g))
+	root.AddCommand(initCmd(g), deployCmd(g), appsCmd(g), statusCmd(g), logsCmd(g), generateCmd(g), buildCmd(g), devCmd(g), queueCmd(g), secretsCmd(g), envCmd(g), dbCmd(g), loginCmd(g), logoutCmd(g), credentialCmd(g), kubeconfigCmd(g), doctorCmd(g), runCmd(g), callCmd(g), sandboxCmd(g))
 	return root
 }
 
