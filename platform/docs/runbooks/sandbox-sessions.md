@@ -1,66 +1,45 @@
-# Agent sessions in a sandbox
+# Agent sessions in a sandbox: running the platform side
 
-A session is one pod with Claude Code in it, under gVisor on the `sandbox`
-node group. It logs in with the Claude subscription token and can reach the
-Claude API and nothing else: no other site, no package registry, nothing in
-the cluster. The pieces are in `sandbox/` (`clusters/personal/sandbox.yaml`
-applies them), and why it's built this way is in
+Users run Claude Code sessions with `mcloud sandbox`
+([the guide](../../../docs/sandbox.md)). This page is for whoever runs the
+cluster: what's behind it, and what to do when it doesn't work. Why it's
+built this way is in
 [agent-sessions-sandbox](../kb/ops/agent-sessions-sandbox.md).
 
-Only cluster admins can make one. At most four run at a time
-(`sandbox/sessions/quota.yaml`).
+Commands are fish, run from `platform/`, as an admin.
 
-Commands are fish, run from `platform/`.
+## What's there
 
-## Start one
-
-```fish
-set s (kubectl create -f docs/runbooks/sandbox-sessions/claim.yaml -o name | string replace -r '.*/' '')
-kubectl -n sandbox wait sandboxclaim/$s --for=condition=Ready --timeout=3m
-kubectl -n sandbox exec -it $s -- claude
-```
-
-The claim, its Sandbox and its pod all have the same name (`session-xxxxx`).
-The first session on a node waits for the image (about a gigabyte); after
-that a pod is up in seconds.
-
-A single prompt, without the interface:
-
-```fish
-kubectl -n sandbox exec $s -- claude -p 'Write fizzbuzz.js, run it with node, and show the first 15 lines.' \
-    --permission-mode acceptEdits --allowedTools 'Bash,Read,Write,Edit'
-```
-
-Files go in and out with `kubectl cp` (the session can't clone or push
-anything itself). The work directory is `/work`:
+- **`sandbox-controllers`** (Flux Kustomization, `sandbox/controllers`):
+  the gVisor installer DaemonSet on the `sandbox` node group, the `gvisor`
+  RuntimeClass, and the agent-sandbox controller.
+- **`sandbox-sessions`** (`sandbox/sessions`): the ResourceSet
+  `maxcloud-sandboxes`, which makes a namespace `sbx-<user>` for every
+  sandbox entry; the role a user gets there; the admission rules for
+  entries and for Secrets in those namespaces.
+- **An entry per user:** a ResourceSetInputProvider `sandbox-<user>` in
+  `flux-system`, labelled `run.gronblom.dev/sandbox`. mcloud makes it the
+  first time a user runs `mcloud sandbox`; it isn't in git.
+- **A session:** a SandboxClaim in the user's namespace, and the pod of the
+  same name agent-sandbox makes for it. The user's token is the Secret
+  `claude-code` there.
 
 ```fish
-kubectl -n sandbox cp ./some-repo $s:/work/some-repo
-kubectl -n sandbox cp $s:/work/some-repo ./some-repo-after
+kubectl -n flux-system get resourcesetinputproviders -l run.gronblom.dev/sandbox=true
+kubectl get sandboxclaims -A
+kubectl get pods -A -l agents.x-k8s.io/sandbox-name-hash -o wide
 ```
 
-`/work` is the session's home too, so Claude Code's own history is there
-and `claude --resume` works for as long as the pod exists.
-
-## End one
-
-```fish
-kubectl -n sandbox get sandboxclaims
-kubectl -n sandbox delete sandboxclaim $s
-```
-
-Deleting the claim deletes the pod and everything in `/work`. Copy out what
-matters first. Nothing ends a session by itself: to give one an end time,
-
-```fish
-kubectl -n sandbox patch sandboxclaim $s --type merge -p \
-    '{"spec":{"lifecycle":{"shutdownPolicy":"Delete","shutdownTime":"'(date -u -d '+8 hours' +%Y-%m-%dT%H:%M:%SZ)'"}}}'
-```
+`mcloud sandbox ... --user <name>` does for another user what it does for
+you: list and stop their sessions, remove their sandbox.
 
 ## Check what a session can reach
 
+After a change to the policy in `sandbox/sessions/users.yaml`, to Cilium,
+or to gVisor. In a session of your own:
+
 ```fish
-kubectl -n sandbox exec -i $s -- node - < docs/runbooks/sandbox-sessions/egress-check.js
+mcloud sandbox shell <session> -- node - < docs/runbooks/sandbox-sessions/egress-check.js
 ```
 
 ```
@@ -73,8 +52,8 @@ tcp 9.9.9.9:443                       TIMEOUT
 tcp 10.96.0.1:443 (API Service)       TIMEOUT
 ```
 
-Anything else in the last five lines means the policy isn't holding the
-namespace (`kubectl -n sandbox get cnp sandbox-egress`, VALID should be
+Anything else in the last five lines means the policy isn't holding that
+namespace (`kubectl -n sbx-<user> get cnp sandbox-egress`, VALID should be
 True). To watch what's dropped while a session runs:
 
 ```fish
@@ -83,49 +62,47 @@ set cilium (kubectl -n kube-system get pods -l k8s-app=cilium --field-selector s
 kubectl -n kube-system exec $cilium -c cilium-agent -- cilium-dbg monitor --type drop --type l7
 ```
 
-A session that needs another host gets it in `sandbox/sessions/network.yaml`,
-whose header says what each added host costs.
+A host that sessions should reach is added to both rules of that policy,
+for every user at once. Its comment says what each added host costs.
 
-## Set or renew the subscription token
+## Let a user run more sessions
 
-`claude setup-token` (on your machine, logged in to the subscription)
-prints a token that is good for a year and for model requests only. It
-lives in the Secret `claude-code` in `sandbox`, from the private repo. With
-the `private/` submodule checked out:
+Two by default, and the node holds four in all. Only an admin may set it:
 
 ```fish
-set out ../private/secrets/sandbox/claude-code.sops.yaml
-mkdir -p (dirname $out)
-read -s -P 'token from claude setup-token: ' TOKEN
-printf '%s\n' "CLAUDE_CODE_OAUTH_TOKEN=$TOKEN" \
-  | kubectl -n sandbox create secret generic claude-code \
-      --from-env-file=/dev/stdin --dry-run=client -o yaml \
-  | sops encrypt --filename-override $out > $out
-set -e TOKEN
+kubectl -n flux-system patch resourcesetinputprovider sandbox-<user> --type merge \
+    -p '{"spec":{"defaultValues":{"sessions":"3"}}}'
 ```
 
-The first time, add `sandbox/claude-code.sops.yaml` to
-`private/secrets/kustomization.yaml`. Commit and push in `private/`. New
-sessions get the new token; a running one keeps the token it started with.
+The quota in `sbx-<user>` follows within ten minutes.
 
 ## A new Claude Code version
 
 Two merges, because the cluster runs the image tag named in
-`sandbox/sessions/claude-code.yaml`:
+`sandbox/sessions/users.yaml`:
 
 1. Change `CLAUDE_CODE_VERSION` in `.github/workflows/sandbox-image.yaml`
    (Renovate offers it). Merging builds and pushes
    `ghcr.io/maxemiliang/maxcloud-sandbox:<version>-<revision>`. A change to
    the Dockerfile alone needs `IMAGE_REVISION` raised instead.
-2. Name the new tag in `claude-code.yaml` (Renovate offers that too, once
-   the tag exists).
+2. Name the new tag in `users.yaml` (Renovate offers that too, once the tag
+   exists).
 
 Running sessions keep the image they started with.
 
 ## When it doesn't work
 
-- **The pod is in `CreateContainerConfigError`:** the Secret `claude-code`
-  isn't there. Set the token (above).
+mcloud says most of these itself; this is what's underneath.
+
+- **`mcloud sandbox start` waits for the sandbox and gives up:** the
+  ResourceSet didn't make the namespace.
+  `kubectl -n flux-system describe resourceset maxcloud-sandboxes` says
+  why; one entry it can't render stops every user's.
+- **A user with dots, capitals or an `@` in their Authelia username can't
+  have a sandbox:** the name becomes a namespace. They need another
+  username.
+- **The pod is in `CreateContainerConfigError`:** the user has no token
+  (`mcloud sandbox token set`).
 - **`ImagePullBackOff`:** the tag hasn't been built (Actions,
   `sandbox-image`), or the package isn't public: the cluster pulls from
   GHCR without credentials. Its visibility is under
@@ -134,11 +111,13 @@ Running sessions keep the image they started with.
   configured` in its events:** the node has no gVisor yet. The installer
   puts it there within seconds of a node joining, and the pod then starts
   by itself; if it doesn't, `kubectl -n sandbox-system logs ds/gvisor-installer`.
-- **The claim says `ReconcilerError`:** four sessions are running already.
-  The Sandbox's events say `exceeded quota: sessions`.
-- **The pod is `Pending`:** no sandbox node is Ready, or it's full
-  (`kubectl describe pod`).
-- **Claude Code says `Failed to authenticate. API Error: 401`:** the token
-  is wrong or more than a year old. Renew it (above).
-- **`npm install`, `git clone` or a web fetch hangs or fails in a session:**
-  that's the policy, not a fault.
+- **The claim says `ReconcilerError`:** the user is at their limit. The
+  Sandbox's events say `exceeded quota: sessions`.
+- **The pod is `Pending`:** no sandbox node is Ready, or four sessions are
+  running already (`kubectl describe pod`).
+- **Claude Code says `Failed to authenticate. API Error: 401`:** the user's
+  token is wrong or more than a year old.
+- **`npm install`, `git clone` or a web fetch fails in a session:** that's
+  the policy, not a fault.
+- **After a cluster rebuild nobody has a sandbox:** entries and tokens
+  aren't backed up. Users run `mcloud sandbox token set` again.

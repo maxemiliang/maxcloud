@@ -21,7 +21,7 @@ infrastructure/
   configs/      # ClusterIssuers, Gateway, Knative Serving, scrape configs, alert rules, RBAC for people, the run platform's admission policies: what needs the controllers first
 sandbox/
   controllers/  # gVisor on the sandbox nodes (an installer DaemonSet), the agent-sandbox controller
-  sessions/     # the namespace agent sessions run in: quota, network policy, the session template
+  sessions/     # a sandbox namespace per user (ResourceSet): session limit, network policy, the session template; who may have one
   image/        # the image a session runs (Node, git, Claude Code); built by the repo's sandbox-image workflow
 apps/
   <app>/        # in-repo apps (hello) and the platform's own app's manifests (run-demo)
@@ -143,9 +143,11 @@ secret).
     what apps may make and route, an egress deny towards the platform, Flux
     in multitenant mode, app owners and registration IDs, and a Traefik L7
     policy on its in-cluster entrypoint.
-14. Sandboxes for agent sessions: a tainted node group with gVisor on it,
-    agent-sandbox, and Claude Code sessions that reach only the Claude API
-    ([docs/runbooks/sandbox-sessions.md](docs/runbooks/sandbox-sessions.md)).
+14. Sandboxes for agent sessions (`mcloud sandbox`): a tainted node group
+    with gVisor on it, agent-sandbox, a sandbox namespace per user with
+    their own Claude token, and Claude Code sessions that reach only the
+    Claude API ([the guide](../docs/sandbox.md),
+    [the platform side](docs/runbooks/sandbox-sessions.md)).
 
 ## Run platform
 
@@ -427,8 +429,9 @@ applies its manifests itself.
 
 - [Restore a Postgres cluster from backup](docs/runbooks/postgres-restore.md).
 - [Move an app's database.yaml database to the registry's `db`](docs/runbooks/move-database-to-registry.md).
-- [Agent sessions in a sandbox](docs/runbooks/sandbox-sessions.md): start
-  and end a Claude Code session, renew its token, a new Claude Code version.
+- [Agent sessions in a sandbox](docs/runbooks/sandbox-sessions.md): what's
+  behind `mcloud sandbox`, checking what a session can reach, a user's
+  session limit, a new Claude Code version.
 - **Add an app from its own repo:** put it on the run platform (`mcloud
   deploy` in the app's repo, see Run platform). The registry makes its
   namespace, and Flux applies the repo as a ServiceAccount that is admin in
@@ -619,7 +622,10 @@ applies its manifests itself.
   now (their egress policy allows the Claude API only), and ClusterIP
   services don't work from gVisor pods here anyway
   ([gvisor-no-clusterip](docs/kb/networking/gvisor-no-clusterip.md)). Work
-  goes in and out with `kubectl cp`.
+  goes in and out with `mcloud sandbox cp`.
+- **Sandboxes and their Claude tokens aren't backed up.** A user's sandbox
+  entry and token exist only in the cluster; after a rebuild each user sets
+  their token again.
 - **The sandbox node's pod logs aren't in Loki.** Alloy doesn't tolerate
   the node's taint, so the gVisor installer's and the sessions' logs are
   only in `kubectl logs`.
