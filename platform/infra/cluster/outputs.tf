@@ -15,6 +15,11 @@ output "node_group_name" {
   value = upcloud_kubernetes_node_group.default.name
 }
 
+output "sandbox_node_group_name" {
+  description = "The sandbox group's generated name (sandbox-xxxxx); a cluster autoscaler's --nodes flag needs it."
+  value       = upcloud_kubernetes_node_group.sandbox.name
+}
+
 output "control_plane_ip_filter" {
   value = upcloud_kubernetes_cluster.this.control_plane_ip_filter
 }
