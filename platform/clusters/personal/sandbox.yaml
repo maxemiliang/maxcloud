@@ -1,0 +1,52 @@
+# Sandboxes for agent sessions (Claude Code under gVisor, on the sandbox
+# node group): sandbox/, and how to use one: docs/runbooks/sandbox-sessions.md.
+#   sandbox-controllers: the gVisor runtime on the sandbox nodes, and the
+#                        agent-sandbox controller with its CRDs
+#   sandbox-sessions:    the namespace sessions run in, what they may reach,
+#                        and the template they're made from
+# Two Kustomizations for the same reason infrastructure has two: the second
+# uses kinds the first installs.
+#
+# Kustomizations of their own that nothing else depends on, like
+# maxcloud-controller: a sandbox node that can't install gVisor shows up
+# here as not ready, without holding back infra-configs and apps.
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: sandbox-controllers
+  namespace: flux-system
+spec:
+  # Applied as kustomize-controller (cluster-admin); see flux-instance.yaml.
+  serviceAccountName: kustomize-controller
+  interval: 1h
+  retryInterval: 2m
+  timeout: 10m
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  path: ./platform/sandbox/controllers
+  prune: true
+  # Ready when the installer has run on every sandbox node and the
+  # HelmRelease is installed.
+  wait: true
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: sandbox-sessions
+  namespace: flux-system
+spec:
+  # Applied as kustomize-controller (cluster-admin); see flux-instance.yaml.
+  serviceAccountName: kustomize-controller
+  dependsOn:
+    - name: sandbox-controllers
+  interval: 1h
+  retryInterval: 2m
+  timeout: 5m
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  path: ./platform/sandbox/sessions
+  # Pruning the namespace deletes every session in it.
+  prune: true
+  wait: true

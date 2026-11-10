@@ -2,6 +2,7 @@
 # runs is reachable from here:
 #   flux-system -> infra-controllers -> infra-configs -> apps
 #                                    -> maxcloud-controller
+#               -> sandbox-controllers -> sandbox-sessions
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
@@ -10,3 +11,4 @@ resources:
   - apps.yaml
   - maxcloud.yaml
   - secrets.yaml
+  - sandbox.yaml
