@@ -1,0 +1,65 @@
+# The image agent sessions run in: builds platform/sandbox/image and pushes it
+# to ghcr.io/maxemiliang/maxcloud-sandbox:<Claude Code version>-<revision>.
+# The cluster runs the tag named in platform/sandbox/sessions/claude-code.yaml,
+# so a new image is two steps: change a version here and merge (this
+# builds it), then name the new tag there (Renovate offers that as a PR once
+# the tag exists).
+#
+# A tag is never built twice: change the Dockerfile without a new Claude
+# Code version, and IMAGE_REVISION goes up by one.
+#
+# Pull requests build the image and run it, without pushing.
+name: sandbox-image
+
+on:
+  push:
+    branches: [main]
+    paths: ["platform/sandbox/image/**", ".github/workflows/sandbox-image.yaml"]
+  pull_request:
+    paths: ["platform/sandbox/image/**", ".github/workflows/sandbox-image.yaml"]
+  workflow_dispatch:
+
+permissions: {}
+
+env:
+  # renovate: datasource=npm depName=@anthropic-ai/claude-code
+  CLAUDE_CODE_VERSION: 2.1.322
+  IMAGE_REVISION: 1
+  IMAGE: ghcr.io/maxemiliang/maxcloud-sandbox
+
+jobs:
+  image:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write # push to GHCR
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Build
+        run: |
+          tag="${CLAUDE_CODE_VERSION}-${IMAGE_REVISION}"
+          echo "TAG=${tag}" >>"$GITHUB_ENV"
+          docker build --build-arg CLAUDE_CODE_VERSION="${CLAUDE_CODE_VERSION}" \
+            --label org.opencontainers.image.source=https://github.com/maxemiliang/maxcloud \
+            --label org.opencontainers.image.version="${tag}" \
+            -t "${IMAGE}:${tag}" platform/sandbox/image
+      - name: Run it
+        run: |
+          got=$(docker run --rm "${IMAGE}:${TAG}" claude --version)
+          echo "$got"
+          case "$got" in
+            "${CLAUDE_CODE_VERSION} "*) ;;
+            *) echo "::error::the image has Claude Code '${got}', not ${CLAUDE_CODE_VERSION}"; exit 1 ;;
+          esac
+          docker run --rm "${IMAGE}:${TAG}" sh -c 'test "$(id -u)" = 1000 && git --version'
+      - name: Push, unless the tag exists
+        if: github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          if docker manifest inspect "${IMAGE}:${TAG}" >/dev/null 2>&1; then
+            echo "::notice::${IMAGE}:${TAG} is already there: nothing pushed. Raise IMAGE_REVISION to publish this build."
+            exit 0
+          fi
+          docker push "${IMAGE}:${TAG}"
