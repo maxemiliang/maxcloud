@@ -63,10 +63,13 @@ session that you wouldn't hand to the agent.
   keeps its conversations in the session.
 - `mcloud sandbox shell [SESSION]` is a shell there, or one command after
   `--`.
+- `mcloud sandbox ssh [SESSION]` is a shell over SSH, which also opens the
+  session's ports here and makes `scp`, `rsync` and editors work
+  ([SSH](#ssh)).
 - `mcloud sandbox stop SESSION...` (or `--all`) ends sessions.
 
-SESSION can be left out when you have one session. `prompt`, `claude` and
-`shell` run in the directory the session was started `--from` (or `--dir`),
+SESSION can be left out when you have one session. `prompt`, `claude`,
+`shell` and `ssh` run in the directory the session was started `--from` (or `--dir`),
 and in `/work` otherwise.
 
 You can have two sessions running at a time; an admin can raise that. The
@@ -145,6 +148,57 @@ special files are left out, and nothing is written outside the destination,
 whatever the session's files are named. Git's own files (`.git`) are left
 out as well: hooks and configuration in them would run on your machine the
 next time you use git there. A session's commits come with `pull`.
+
+## SSH
+
+`mcloud sandbox ssh [SESSION]` opens a shell in a session over SSH, in
+the directory it was started `--from`. What follows `--` goes to `ssh`,
+so a port of the session's opens here with `-L`: a dev server running in
+it, say.
+
+```fish
+mcloud sandbox ssh refactor
+mcloud sandbox ssh refactor -- -N -L 5173:localhost:5173   # only the port
+```
+
+For plain `ssh`, and what works over it (`scp`, `rsync`, `sftp`, an
+editor's remote development over SSH), give ssh a host name for every
+session once:
+
+```fish
+mcloud sandbox ssh-config --install
+ssh refactor.sbx
+rsync -a refactor.sbx:my-repo/dist/ ./dist/
+ssh -N -L 3000:localhost:3000 refactor.sbx
+```
+
+`--install` writes the settings to a file of mcloud's and includes it at
+the top of `~/.ssh/config`. Without it, `ssh-config` prints them; put
+them before any `Host *` section of yours, since ssh takes the first
+value it finds. A session is `SESSION.sbx`, or `SESSION.USER.sbx` in
+someone else's sandbox (which takes an admin). A login lands in `/work`.
+
+The connection goes the way every other command here does: through the
+cluster's API, as an exec in the session, so it needs your mcloud login
+and nothing else, and only you (and the cluster's admins) can make it.
+Nothing in the session listens for it. mcloud logs in with a key of its
+own, and only its public half goes into the session. mcloud reads the
+session's host key before each connection and makes it the one key ssh
+accepts, so ssh asks nothing the first time and refuses anything else.
+
+Nothing of yours goes the other way: your SSH agent, X11 and remote
+forwards (`-R`) aren't forwarded, and the session's SSH server refuses
+them too. `-L` reaches what listens on the session's own loopback, and
+nothing else.
+
+What you copy out with `scp` or `rsync` is what the agent left there:
+unlike `mcloud sandbox cp`, they bring links and git's own files
+(`.git`) along, whose hooks and configuration would run on your machine.
+An editor's remote server runs in the session too, where the agent can
+change it.
+
+Sessions started before SSH came to the platform's image have no SSH
+server, and `mcloud sandbox ssh` says so: start a new session.
 
 ## Removing your sandbox
 
