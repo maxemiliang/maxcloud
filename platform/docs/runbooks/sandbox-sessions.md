@@ -166,8 +166,9 @@ mcloud says most of these itself; this is what's underneath.
 - **A session can't reach an app or a database in the cluster:** that's the
   policy, and meant.
 - **`mcloud sandbox ssh` says the session's image has no SSH server:** the
-  session runs an image from before SSH (older than `2.1.322-2`). Check the
-  tag in `users.yaml`; running sessions keep the image they started with.
+  session runs an image from before SSH came to the Dockerfile. Check that
+  the tag in `users.yaml` is one built since; running sessions keep the
+  image they started with.
 - **`the session sent something other than one ed25519 host key`:** the
   session's `/work/.ssh/ssh_host_ed25519_key` isn't the key mcloud made
   (something in the session replaced or broke it). Removing it makes a new
