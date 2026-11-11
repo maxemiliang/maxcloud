@@ -22,6 +22,12 @@
       "matchStrings": ["# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)\\s+\\w+: (?<currentValue>\\S+)"]
     },
     {
+      "description": "Tool versions in the sandbox image's Dockerfile: a `# renovate: datasource=... depName=...` comment on the line above an `ARG NAME=version`.",
+      "customType": "regex",
+      "managerFilePatterns": ["/^platform/sandbox/image/Dockerfile$/"],
+      "matchStrings": ["# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)\\s+ARG \\w+=(?<currentValue>\\S+)"]
+    },
+    {
       "description": "Container images pinned in the controller's Go code (the Postgres its databases run).",
       "customType": "regex",
       "managerFilePatterns": ["/^controller/internal/.+\\.go$/"],
