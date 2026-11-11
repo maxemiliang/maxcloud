@@ -50,9 +50,9 @@ session that you wouldn't hand to the agent.
 ## Sessions
 
 - `mcloud sandbox start [NAME]` starts one and waits until it's up
-  (seconds; the first on a node pulls the image first, a couple of
-  gigabytes, and says so). `--from DIR` copies a directory of yours into it, and makes that
-  where the session's commands start. `--for 8h` ends it by itself after
+  (seconds; the first on a node downloads the image first, about 600 MB,
+  and says so). `--from DIR` copies a directory of yours into it, and
+  makes that where the session's commands start. `--for 8h` ends it by itself after
   that long.
 - `mcloud sandbox list` shows yours, and how many you may have.
 - `mcloud sandbox prompt [SESSION] 'TASK'` gives Claude Code one task and
