@@ -49,7 +49,7 @@ Guides:
 - [Environment variables](docs/environment.md): `env:` and `mcloud env`
 - [Secrets and key-value storage](docs/secrets.md)
 - [Agent sessions in a sandbox](docs/sandbox.md): `mcloud sandbox`, Claude
-  Code in a pod that reaches only the Claude API
+  Code in a pod that reaches the internet but not the cluster
 - [mcloud](docs/mcloud.md): installing, logging in, which app a command
   acts on, an app's owners
 

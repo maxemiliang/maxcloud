@@ -2,9 +2,10 @@
 
 `mcloud sandbox` runs Claude Code in the cluster instead of on your
 machine: each session is a pod of its own, under gVisor, logged in with
-your Claude subscription. A session can reach the Claude API and nothing
-else: no other site, no package registry, nothing in the cluster. That
-makes it a place to let an agent work unattended on code you copy in.
+your Claude subscription. A session can reach the internet (to clone,
+install packages, look things up) and nothing in the cluster. That makes
+it a place to let an agent work unattended, away from your machine and
+your credentials.
 
 ```fish
 mcloud sandbox token set            # once: your Claude token
@@ -36,9 +37,12 @@ the cluster's admins can read it. A session reads it when it starts, so
 after renewing it, start new sessions. `mcloud sandbox token unset`
 removes it.
 
-The token is in the session's environment, where the agent could read it.
-That is why a session can reach only the Claude API: there is nowhere
-else to send it.
+The token is in the session's environment, where the agent can read it,
+and a session can reach the internet. An agent that is talked into it, by
+a web page or by a file in a repository, could send the token or the code
+in the session somewhere else. Keep that in mind when you choose what a
+session works on and what it reads, and put no other credentials in a
+session that you wouldn't hand to the agent.
 
 ## Sessions
 
@@ -58,9 +62,11 @@ else to send it.
 SESSION can be left out when you have one session. You can have two
 running at a time; an admin can raise that.
 
-The image has Node 24 and git. A session can't install packages or clone
-anything itself: bring what the work needs with `cp`, `node_modules`
-included.
+The image has Node 24 and git, and a session can clone public
+repositories and install packages itself. It has no git credentials: a
+private repository, or anything you want back, goes in and out with `cp`.
+Nothing in the cluster is reachable from a session, your apps included,
+and nothing can connect to one.
 
 ## Files
 

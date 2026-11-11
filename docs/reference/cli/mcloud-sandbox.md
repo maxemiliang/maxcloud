@@ -9,9 +9,9 @@ _Generated from the command's help in `internal/cli`._
 Agent sessions: Claude Code in a sandbox in the cluster.
 
 A session is Claude Code in a pod of its own in the cluster, under gVisor,
-logged in with your Claude subscription. It can reach the Claude API and
-nothing else: no other site, no package registry, nothing in the cluster.
-Files go in and out with mcloud sandbox cp.
+logged in with your Claude subscription. It can reach the internet, so it
+can clone and install what it needs, and nothing in the cluster. Your own
+files go in and out with mcloud sandbox cp.
 
 Your sessions run in a sandbox that is yours alone: the first command here
 makes it. It holds your Claude token (mcloud sandbox token set), which
