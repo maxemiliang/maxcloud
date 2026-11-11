@@ -25,7 +25,7 @@ const SandboxSSHUser = "node"
 const noSSHServer = 42
 
 // ErrNoSSHServer: the session's image has no SSH server (it predates SSH).
-var ErrNoSSHServer = errors.New("this session's image has no SSH server: it is older than SSH in sessions (image 2.1.322-2). A session started on a newer image has one")
+var ErrNoSSHServer = errors.New("this session's image has no SSH server: it is from before SSH came to sessions. Sessions started on an image with SSH have one")
 
 // sshScript serves one SSH connection on stdin and stdout, logging in with
 // the public key in $1. It keeps the host key and authorized_keys in
