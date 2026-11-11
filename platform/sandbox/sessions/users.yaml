@@ -168,7 +168,7 @@ spec:
                 # Built by .github/workflows/sandbox-image.yaml from
                 # sandbox/image. The tag is <Claude Code version>-<image
                 # revision>.
-                image: ghcr.io/maxemiliang/maxcloud-sandbox:2.1.322-1
+                image: ghcr.io/maxemiliang/maxcloud-sandbox:2.1.322-3
                 # Does nothing by itself: a session is an exec of `claude`.
                 # The trap makes the pod stop at once when it's deleted (as
                 # PID 1, sleep alone ignores the signal).
