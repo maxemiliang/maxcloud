@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.15.0](https://github.com/maxemiliang/maxcloud/compare/v0.14.2...v0.15.0) (2026-11-11)
+
+
+### Features
+
+* **mcloud:** mcloud sandbox, Claude Code sessions in the cluster ([700817d](https://github.com/maxemiliang/maxcloud/commit/700817dfa95161c702229810556adf448e8c9a77))
+* **mcloud:** sandbox start --from, prompt and pull ([505744b](https://github.com/maxemiliang/maxcloud/commit/505744b4361111fce1a38f98a48eefc1ad3f5ad8))
+
+
+### Bug Fixes
+
+* **mcloud:** sandbox cp leaves git's own files in the session ([3abd141](https://github.com/maxemiliang/maxcloud/commit/3abd1411ab72a5ab40897aaec66025df343443ac))
+* **mcloud:** sandbox cp: an NTFS stream of .git is .git too ([71f6e58](https://github.com/maxemiliang/maxcloud/commit/71f6e582e00a78c0ab17afc1ad6a7a762991cc8c))
+
 ## [0.14.2](https://github.com/maxemiliang/maxcloud/compare/v0.14.1...v0.14.2) (2026-11-09)
 
 
