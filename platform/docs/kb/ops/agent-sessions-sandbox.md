@@ -73,6 +73,8 @@ cluster. All of it is two Flux Kustomizations of their own (`sandbox-controllers
   sandbox prompt`): nobody is there to answer, and without commands a task
   can't run a test. `auto` has Claude Code check each action itself;
   `bypassPermissions` is the user's to choose.
+- **A toolset in the image, not installed at run time:** a session has no
+  root, so what needs it is in the image: [sandbox-image-toolset](sandbox-image-toolset.md).
 - **agent-sandbox:** a claim gives a pod with a stable name and an expiry,
   without writing a controller. Users get claims, not pods: a session is
   always the template's pod.

@@ -101,6 +101,14 @@ Two merges, because the cluster runs the image tag named in
 
 Running sessions keep the image they started with.
 
+The same two merges add or update a tool in the image: the Dockerfile has
+the tools (Go and uv are images of their own, `gh` and pnpm are `ARG`s;
+Renovate offers all four), and the workflow's "Run it" step checks them.
+Raise `IMAGE_REVISION`. What's in it, and why not more:
+[the knowledge-base entry](../kb/ops/sandbox-image-toolset.md). The image is
+about 2.2 GB (580 MB compressed), and the sandbox node pulls it the first
+time a session starts on it: keep it from growing past 2.5 GB.
+
 ## When it doesn't work
 
 mcloud says most of these itself; this is what's underneath.
