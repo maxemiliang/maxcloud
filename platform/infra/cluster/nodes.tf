@@ -35,11 +35,10 @@ resource "upcloud_kubernetes_node_group" "default" {
   }
 }
 
-# Spike: a node of its own for sandboxed agent sessions (untrusted code, so
-# never on the nodes that run Flux and the platform). Nothing schedules here
+# A node of its own for sandboxed agent sessions (untrusted code, so never
+# on the nodes that run Flux and the platform). Nothing schedules here
 # unless it tolerates the taint, which the `gvisor` RuntimeClass adds for the
-# pods that use it. What the spike has to answer, and how to run it:
-# docs/runbooks/sandbox-spike.md.
+# pods that use it. What runs on it: docs/runbooks/sandbox-sessions.md.
 resource "upcloud_kubernetes_node_group" "sandbox" {
   cluster = upcloud_kubernetes_cluster.this.id
 

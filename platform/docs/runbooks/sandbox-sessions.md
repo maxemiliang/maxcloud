@@ -10,6 +10,10 @@ Commands are fish, run from `platform/`, as an admin.
 
 ## What's there
 
+- **The `sandbox` node group** (`infra/cluster/nodes.tf`, applied with
+  tofu, not by Flux): one tainted node, labelled `pool=sandbox`. Without a
+  Ready node there, the installer has nothing to run on and sessions stay
+  Pending.
 - **`sandbox-controllers`** (Flux Kustomization, `sandbox/controllers`):
   the gVisor installer DaemonSet on the `sandbox` node group, the `gvisor`
   RuntimeClass, and the agent-sandbox controller.
