@@ -35,12 +35,13 @@ running.
   mcloud sandbox start fix --from .        # a session with this directory in it
   mcloud sandbox prompt 'Fix the tests'    # one task, or: mcloud sandbox claude
   mcloud sandbox pull                      # its commits, into this repository
+  mcloud sandbox ssh                       # SSH in (ssh-config: plain ssh, scp, rsync)
   mcloud sandbox stop fix                  # end it; its files go with it`,
 	}
 	c.PersistentFlags().StringVar(&f.user, "user", "", "whose sandbox (default: yours; someone else's takes an admin)")
 	c.AddCommand(sandboxStartCmd(g, &f), sandboxListCmd(g, &f), sandboxClaudeCmd(g, &f), sandboxPromptCmd(g, &f),
-		sandboxShellCmd(g, &f), sandboxCpCmd(g, &f), sandboxPullCmd(g, &f), sandboxStopCmd(g, &f), sandboxTokenCmd(g, &f),
-		sandboxRemoveCmd(g, &f))
+		sandboxShellCmd(g, &f), sandboxSSHCmd(g, &f), sandboxSSHConfigCmd(g), sandboxSSHProxyCmd(g), sandboxCpCmd(g, &f),
+		sandboxPullCmd(g, &f), sandboxStopCmd(g, &f), sandboxTokenCmd(g, &f), sandboxRemoveCmd(g, &f))
 	return c
 }
 
