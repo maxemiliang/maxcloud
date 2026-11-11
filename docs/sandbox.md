@@ -63,9 +63,11 @@ session that you wouldn't hand to the agent.
   keeps its conversations in the session.
 - `mcloud sandbox shell [SESSION]` is a shell there, or one command after
   `--`.
-- `mcloud sandbox ssh [SESSION]` is a shell over SSH, which also opens the
-  session's ports here and makes `scp`, `rsync` and editors work
-  ([SSH](#ssh)).
+- `mcloud sandbox ssh [SESSION]` is a shell over SSH, which also makes
+  `scp`, `rsync` and editors work ([SSH](#ssh)).
+- `mcloud sandbox forward [SESSION] PORT[:SESSION-PORT]` opens a port of
+  the session's on your machine: a dev server running there, in your
+  browser.
 - `mcloud sandbox stop SESSION...` (or `--all`) ends sessions.
 
 SESSION can be left out when you have one session. `prompt`, `claude`,
@@ -131,13 +133,20 @@ next time you use git there. A session's commits come with `pull`.
 ## SSH
 
 `mcloud sandbox ssh [SESSION]` opens a shell in a session over SSH, in
-the directory it was started `--from`. What follows `--` goes to `ssh`,
-so a port of the session's opens here with `-L`: a dev server running in
-it, say.
+the directory it was started `--from`. What follows `--` goes to `ssh` as
+options.
 
 ```fish
 mcloud sandbox ssh refactor
-mcloud sandbox ssh refactor -- -N -L 5173:localhost:5173   # only the port
+```
+
+To open a port of the session's on your machine, a dev server running
+there, say, `forward` is the short way. It runs until you stop it:
+
+```fish
+mcloud sandbox forward 5173              # http://localhost:5173 is the session's 5173
+mcloud sandbox forward 8080:3000         # http://localhost:8080 is the session's 3000
+mcloud sandbox forward refactor 3000 9229
 ```
 
 For plain `ssh`, and what works over it (`scp`, `rsync`, `sftp`, an
