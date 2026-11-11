@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/pem"
@@ -248,6 +249,61 @@ func (g *globals) sshConfig() (string, error) {
 	return b.String(), nil
 }
 
+// sshTarget is what it takes to run ssh against a session.
+type sshTarget struct {
+	// ssh is the ssh program; options are the settings it gets before
+	// anything else; host is the session's host name.
+	ssh     string
+	options []string
+	host    string
+	session kube.Session
+}
+
+// sshTo gets ssh ready for a session (named, or the only one): the
+// session has an SSH server, mcloud's key exists, and the options carry
+// the connection over the cluster's API.
+func (g *globals) sshTo(ctx context.Context, f *sandboxFlags, session string) (*sshTarget, error) {
+	sshPath, err := exec.LookPath("ssh")
+	if err != nil {
+		return nil, errors.New("no ssh here: install OpenSSH's client")
+	}
+	s, err := g.existingSandbox(ctx, f)
+	if err != nil {
+		return nil, err
+	}
+	in, err := s.session(ctx, session)
+	if err != nil {
+		return nil, err
+	}
+	has, err := s.k.HasSSHServer(ctx, s.user, in.Name)
+	if err != nil {
+		return nil, err
+	}
+	if !has {
+		return nil, kube.ErrNoSSHServer
+	}
+	keyDir, err := sshDir()
+	if err != nil {
+		return nil, err
+	}
+	if _, _, err := sshKey(keyDir); err != nil {
+		return nil, err
+	}
+	proxy, err := g.proxyCommand()
+	if err != nil {
+		return nil, err
+	}
+	opts, err := sshOptions(keyDir, proxy)
+	if err != nil {
+		return nil, err
+	}
+	t := &sshTarget{ssh: sshPath, host: sshHost(in.Name, s.user), session: in}
+	for _, o := range opts {
+		t.options = append(t.options, "-o", o[0]+" "+o[1])
+	}
+	return t, nil
+}
+
 func sandboxSSHCmd(g *globals, f *sandboxFlags) *cobra.Command {
 	var dir string
 	c := &cobra.Command{
@@ -268,64 +324,30 @@ to your machine. -L reaches what listens on the session's own loopback,
 nothing else.
 
 For scp, rsync, sftp and editors that work over SSH, mcloud sandbox
-ssh-config gives ssh a host name for every session.`,
+ssh-config gives ssh a host name for every session. To only open a port,
+mcloud sandbox forward is shorter.`,
 		Example: `  mcloud sandbox ssh
-  mcloud sandbox ssh refactor -- -L 3000:localhost:3000
-  mcloud sandbox ssh -- -N -L 5173:localhost:5173     # only the port`,
+  mcloud sandbox ssh refactor -- -L 3000:localhost:3000`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
 			session, rest, err := sessionAndArgs(cmd, args)
 			if err != nil {
 				return err
 			}
-			sshPath, err := exec.LookPath("ssh")
-			if err != nil {
-				return errors.New("no ssh here: install OpenSSH's client")
-			}
-			s, err := g.existingSandbox(ctx, f)
+			to, err := g.sshTo(ctx, f, session)
 			if err != nil {
 				return err
 			}
-			in, err := s.session(ctx, session)
-			if err != nil {
-				return err
-			}
-			has, err := s.k.HasSSHServer(ctx, s.user, in.Name)
-			if err != nil {
-				return err
-			}
-			if !has {
-				return kube.ErrNoSSHServer
-			}
-			keyDir, err := sshDir()
-			if err != nil {
-				return err
-			}
-			if _, _, err := sshKey(keyDir); err != nil {
-				return err
-			}
-			proxy, err := g.proxyCommand()
-			if err != nil {
-				return err
-			}
-			opts, err := sshOptions(keyDir, proxy)
-			if err != nil {
-				return err
-			}
-			argv := make([]string, 0, 2*len(opts)+len(rest)+4)
-			for _, o := range opts {
-				argv = append(argv, "-o", o[0]+" "+o[1])
-			}
-			argv = append(argv, rest...)
+			argv := append(to.options, rest...)
 			if !onlyForwards(rest) {
 				if isTerminal(g.in) {
 					argv = append(argv, "-t")
 				}
-				argv = append(argv, "--", sshHost(in.Name, s.user), "cd "+shellQuote(sessionPath(sessionDir(in, dir)))+" && exec bash")
+				argv = append(argv, "--", to.host, "cd "+shellQuote(sessionPath(sessionDir(to.session, dir)))+" && exec bash")
 			} else {
-				argv = append(argv, "--", sshHost(in.Name, s.user))
+				argv = append(argv, "--", to.host)
 			}
-			run := exec.CommandContext(ctx, sshPath, argv...)
+			run := exec.CommandContext(ctx, to.ssh, argv...)
 			run.Stdin, run.Stdout, run.Stderr = g.in, g.out, g.errOut
 			if err := run.Run(); err != nil {
 				return fmt.Errorf("ssh: %w", err)

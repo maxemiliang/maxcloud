@@ -29,6 +29,7 @@ running.
 | --- | --- |
 | [`mcloud sandbox claude`](#mcloud-sandbox-claude) | Claude Code in a session |
 | [`mcloud sandbox cp`](#mcloud-sandbox-cp) | Copy files into or out of a session |
+| [`mcloud sandbox forward`](#mcloud-sandbox-forward) | Open a session's ports on this machine |
 | [`mcloud sandbox list`](#mcloud-sandbox-list) | Your sessions |
 | [`mcloud sandbox prompt`](#mcloud-sandbox-prompt) | Give Claude Code in a session one task, and watch it work |
 | [`mcloud sandbox pull`](#mcloud-sandbox-pull) | Bring a session's commits into this git repository |
@@ -100,6 +101,31 @@ Examples:
 mcloud sandbox cp ./my-repo refactor:my-repo
 mcloud sandbox cp refactor:my-repo ./my-repo-after
 mcloud sandbox cp notes.md refactor:
+```
+
+## mcloud sandbox forward
+
+Open a session's ports on this machine.
+
+Open ports of a session on this machine, until you stop it with Ctrl-C:
+a dev server running in the session, in your own browser. PORT is the port
+here; it reaches the same port in the session, or SESSION-PORT. SESSION
+can be left out when you have one session.
+
+Only this machine can use the ports (they listen on localhost), and they
+reach only what listens on the session's own localhost. It is SSH's local
+forwarding, set up for you: mcloud sandbox ssh has the details.
+
+```
+mcloud sandbox forward [SESSION] PORT[:SESSION-PORT]...
+```
+
+Examples:
+
+```fish
+mcloud sandbox forward 5173              # http://localhost:5173 is the session's 5173
+mcloud sandbox forward 8080:3000         # http://localhost:8080 is the session's 3000
+mcloud sandbox forward refactor 3000 9229
 ```
 
 ## mcloud sandbox list
@@ -242,7 +268,8 @@ to your machine. -L reaches what listens on the session's own loopback,
 nothing else.
 
 For scp, rsync, sftp and editors that work over SSH, mcloud sandbox
-ssh-config gives ssh a host name for every session.
+ssh-config gives ssh a host name for every session. To only open a port,
+mcloud sandbox forward is shorter.
 
 ```
 mcloud sandbox ssh [SESSION] [-- SSH-OPTIONS...] [flags]
@@ -253,7 +280,6 @@ Examples:
 ```fish
 mcloud sandbox ssh
 mcloud sandbox ssh refactor -- -L 3000:localhost:3000
-mcloud sandbox ssh -- -N -L 5173:localhost:5173     # only the port
 ```
 
 Flags:
