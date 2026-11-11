@@ -24,7 +24,7 @@ rules:
   - apiGroups: [""]
     resources: [pods, pods/log, events, resourcequotas]
     verbs: [get, list, watch]
-  # mcloud sandbox claude, shell and cp.
+  # mcloud sandbox claude, shell, cp and ssh (sshd on the exec's stdio).
   - apiGroups: [""]
     resources: [pods/exec]
     verbs: [get, create]
