@@ -12,6 +12,7 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
+	"unicode"
 )
 
 // Copying between this machine and a session goes as a tar stream through
@@ -100,44 +101,83 @@ func tarEntryName(name string) (string, error) {
 	return filepath.FromSlash(clean), nil
 }
 
-// unpackTar writes the tree in r into root and returns how many entries it
-// left out. What comes out of a session isn't trusted: only directories
-// and regular files are written, links and special files are left out, and
-// root keeps every path inside the destination whatever the names say.
-func unpackTar(tr *tar.Reader, first *tar.Header, root *os.Root) (skipped int, err error) {
+// LeftOut counts what a copy out of a session didn't write.
+type LeftOut struct {
+	// Special: links and special files.
+	Special int
+	// Git: git's own files (.git). Hooks and configuration in them would
+	// run on this machine the next time git is used there.
+	Git int
+}
+
+// isDotGit: name is what some file system takes for ".git". The same
+// cases git itself guards against: other capitals, trailing dots and
+// spaces and the short name on Windows, characters macOS ignores.
+func isDotGit(name string) bool {
+	name = strings.Map(func(r rune) rune {
+		if unicode.Is(unicode.Cf, r) {
+			return -1
+		}
+		return unicode.ToLower(r)
+	}, name)
+	name = strings.TrimRight(name, ". ")
+	return name == ".git" || name == "git~1"
+}
+
+// inDotGit: p (slash or backslash separated) is git's own directory, or
+// in one.
+func inDotGit(p string) bool {
+	for _, part := range strings.FieldsFunc(p, func(r rune) bool { return r == '/' || r == '\\' }) {
+		if isDotGit(part) {
+			return true
+		}
+	}
+	return false
+}
+
+// unpackTar writes the tree in r into root and returns what it left out.
+// What comes out of a session isn't trusted: only directories and regular
+// files are written, links and special files are left out, git's own
+// files are left out (commits come with SessionBundle), and root keeps
+// every path inside the destination whatever the names say.
+func unpackTar(tr *tar.Reader, first *tar.Header, root *os.Root) (left LeftOut, err error) {
 	for h := first; ; {
 		name, err := tarEntryName(h.Name)
 		if err != nil {
-			return skipped, err
+			return left, err
 		}
 		switch {
 		case name == "":
+		case inDotGit(name):
+			if h.Typeflag != tar.TypeDir {
+				left.Git++
+			}
 		case h.Typeflag == tar.TypeDir:
 			if err := root.MkdirAll(name, 0o755); err != nil {
-				return skipped, err
+				return left, err
 			}
 		case h.Typeflag == tar.TypeReg:
 			if err := root.MkdirAll(filepath.Dir(name), 0o755); err != nil {
-				return skipped, err
+				return left, err
 			}
 			f, err := root.OpenFile(name, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, fs.FileMode(h.Mode)&0o777)
 			if err != nil {
-				return skipped, err
+				return left, err
 			}
 			_, err = io.Copy(f, tr)
 			if cerr := f.Close(); err == nil {
 				err = cerr
 			}
 			if err != nil {
-				return skipped, err
+				return left, err
 			}
 		default:
-			skipped++
+			left.Special++
 		}
 		if h, err = tr.Next(); errors.Is(err, io.EOF) {
-			return skipped, nil
+			return left, nil
 		} else if err != nil {
-			return skipped, err
+			return left, err
 		}
 	}
 }
@@ -197,12 +237,17 @@ func (c *Client) CopyToSession(ctx context.Context, user, name, src, dst string)
 	return nil
 }
 
+// ErrGitFiles: a copy out of a session was asked for git's own files.
+var ErrGitFiles = errors.New("git's own files (.git) don't come out of a session with cp: hooks and configuration in them would run here. mcloud sandbox pull brings its commits")
+
 // CopyFromSession copies src (relative to the work directory) out of
 // user's session to the local dst: into dst if that's a directory, else as
-// dst. It returns where the copy is, and how many links and special files
-// it left out.
-func (c *Client) CopyFromSession(ctx context.Context, user, name, src, dst string) (target string, skipped int, err error) {
+// dst. It returns where the copy is, and what it left out.
+func (c *Client) CopyFromSession(ctx context.Context, user, name, src, dst string) (target string, left LeftOut, err error) {
 	src = remotePath(src)
+	if inDotGit(src) {
+		return "", left, ErrGitFiles
+	}
 	target = dst
 	if info, err := os.Stat(dst); err == nil && info.IsDir() {
 		target = filepath.Join(dst, path.Base(src))
@@ -219,38 +264,38 @@ func (c *Client) CopyFromSession(ctx context.Context, user, name, src, dst strin
 		if errors.Is(err, io.EOF) {
 			err = errors.New("the session sent nothing")
 		}
-		return "", 0, execError(err, &stderr)
+		return "", left, execError(err, &stderr)
 	}
 	// A directory comes as "./" and what's in it; a file as one entry.
 	if first.Typeflag != tar.TypeDir {
 		if first.Typeflag != tar.TypeReg {
-			return "", 0, fmt.Errorf("%s is neither a file nor a directory", src)
+			return "", left, fmt.Errorf("%s is neither a file nor a directory", src)
 		}
 		f, err := os.OpenFile(target, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, fs.FileMode(first.Mode)&0o777)
 		if err != nil {
-			return "", 0, err
+			return "", left, err
 		}
 		_, err = io.Copy(f, tr)
 		if cerr := f.Close(); err == nil {
 			err = cerr
 		}
 		if err != nil {
-			return "", 0, execError(err, &stderr)
+			return "", left, execError(err, &stderr)
 		}
 		_, err = io.Copy(io.Discard, pr)
-		return target, 0, err
+		return target, left, err
 	}
 	if err := os.MkdirAll(target, 0o755); err != nil {
-		return "", 0, err
+		return "", left, err
 	}
 	root, err := os.OpenRoot(target)
 	if err != nil {
-		return "", 0, err
+		return "", left, err
 	}
 	defer root.Close()
-	skipped, err = unpackTar(tr, first, root)
+	left, err = unpackTar(tr, first, root)
 	if err != nil {
-		return "", skipped, execError(err, &stderr)
+		return "", left, execError(err, &stderr)
 	}
-	return target, skipped, nil
+	return target, left, nil
 }

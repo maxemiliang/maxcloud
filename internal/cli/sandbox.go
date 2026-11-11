@@ -492,7 +492,9 @@ directory (/work). Like cp: the copy goes into DEST if that is a directory,
 and is named DEST otherwise.
 
 Coming out of a session, only files and directories are copied: links and
-special files are left out, and nothing is written outside DEST.`,
+special files are left out, and nothing is written outside DEST. Git's own
+files (.git) are left out too, since hooks and configuration in them would
+run on your machine: mcloud sandbox pull brings a session's commits.`,
 		Example: `  mcloud sandbox cp ./my-repo refactor:my-repo
   mcloud sandbox cp refactor:my-repo ./my-repo-after
   mcloud sandbox cp notes.md refactor:`,
@@ -529,14 +531,17 @@ special files are left out, and nothing is written outside DEST.`,
 			}
 			name := in.Name
 			step := u.Step(fmt.Sprintf("Copying %s:%s", name, src))
-			target, skipped, err := s.k.CopyFromSession(ctx, s.user, name, src, dst)
+			target, left, err := s.k.CopyFromSession(ctx, s.user, name, src, dst)
 			if err != nil {
 				step.Fail("")
 				return err
 			}
 			step.Done("Copied %s:%s to %s", name, src, target)
-			if skipped > 0 {
-				u.Note("Left out %d links or special files.", skipped)
+			if left.Special > 0 {
+				u.Note("Left out %d links or special files.", left.Special)
+			}
+			if left.Git > 0 {
+				u.Note("Left out git's own files (.git, %d files): hooks and configuration in them would run here. mcloud sandbox pull brings the session's commits.", left.Git)
 			}
 			return nil
 		},

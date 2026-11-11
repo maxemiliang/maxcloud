@@ -83,7 +83,9 @@ directory (/work). Like cp: the copy goes into DEST if that is a directory,
 and is named DEST otherwise.
 
 Coming out of a session, only files and directories are copied: links and
-special files are left out, and nothing is written outside DEST.
+special files are left out, and nothing is written outside DEST. Git's own
+files (.git) are left out too, since hooks and configuration in them would
+run on your machine: mcloud sandbox pull brings a session's commits.
 
 ```
 mcloud sandbox cp SOURCE DEST
