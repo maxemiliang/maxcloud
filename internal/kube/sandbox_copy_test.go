@@ -3,6 +3,8 @@ package kube
 import (
 	"archive/tar"
 	"bytes"
+	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -30,6 +32,11 @@ func writeTar(t *testing.T, entries ...tar.Header) *tar.Reader {
 }
 
 func unpack(t *testing.T, tr *tar.Reader, dir string) (int, error) {
+	left, err := unpackLeft(t, tr, dir)
+	return left.Special, err
+}
+
+func unpackLeft(t *testing.T, tr *tar.Reader, dir string) (LeftOut, error) {
 	t.Helper()
 	root, err := os.OpenRoot(dir)
 	if err != nil {
@@ -151,5 +158,46 @@ func TestRemotePath(t *testing.T) {
 		if got := remotePath(in); got != want {
 			t.Errorf("%q: %q", in, got)
 		}
+	}
+}
+
+// Git's own files stay in the session: a hook or a config that came out
+// would run on the user's machine. Whatever the file system would take
+// for .git counts.
+func TestUnpackLeavesOutGit(t *testing.T) {
+	dst := t.TempDir()
+	left, err := unpackLeft(t, writeTar(t,
+		tar.Header{Name: "./", Typeflag: tar.TypeDir},
+		tar.Header{Name: "./.git/", Typeflag: tar.TypeDir},
+		tar.Header{Name: "./.git/hooks/pre-commit", Typeflag: tar.TypeReg, Mode: 0o755},
+		tar.Header{Name: "./.git/config", Typeflag: tar.TypeReg},
+		tar.Header{Name: "./sub/.GIT/config", Typeflag: tar.TypeReg},
+		tar.Header{Name: "./sub/.git", Typeflag: tar.TypeReg},
+		tar.Header{Name: "./.gitignore", Typeflag: tar.TypeReg},
+		tar.Header{Name: "./src/git.go", Typeflag: tar.TypeReg},
+	), dst)
+	if err != nil || left.Git != 4 || left.Special != 0 {
+		t.Fatalf("%+v, %v", left, err)
+	}
+	for name, want := range map[string]bool{".git": false, "sub/.GIT": false, "sub/.git": false, ".gitignore": true, "src/git.go": true} {
+		if _, err := os.Lstat(filepath.Join(dst, name)); (err == nil) != want {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+	for name, want := range map[string]bool{
+		".git": true, ".GIT": true, ".git.": true, ".git ": true, "GIT~1": true, ".g\u200cit": true,
+		".gitignore": false, "git": false, ".github": false, "a.git": false,
+	} {
+		if isDotGit(name) != want {
+			t.Errorf("isDotGit(%q) = %v", name, !want)
+		}
+	}
+	if !inDotGit("/work/repo/.git/hooks") || !inDotGit(`repo\.git`) || inDotGit("/work/repo/src") {
+		t.Error("inDotGit")
+	}
+	// Asking for them by name is refused before anything is run.
+	c := sandboxClient()
+	if _, _, err := c.CopyFromSession(context.Background(), "alice", "work", "repo/.git/config", dst); !errors.Is(err, ErrGitFiles) {
+		t.Errorf("cp of .git/config: %v", err)
 	}
 }
