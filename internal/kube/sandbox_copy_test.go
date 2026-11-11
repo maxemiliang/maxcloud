@@ -184,12 +184,36 @@ func TestUnpackLeavesOutGit(t *testing.T) {
 			t.Errorf("%s: %v", name, err)
 		}
 	}
-	for name, want := range map[string]bool{
+	// Each name on its own, through an unpack: as a file, and as a
+	// directory with a file in it.
+	for name, git := range map[string]bool{
 		".git": true, ".GIT": true, ".git.": true, ".git ": true, "GIT~1": true, ".g\u200cit": true,
-		".gitignore": false, "git": false, ".github": false, "a.git": false,
+		".git::$DATA": true, ".git::$INDEX_ALLOCATION": true, ".git:x": true, ".Git. .::$DATA": true,
+		".gitignore": false, "git": false, ".github": false, "a.git": false, ".gitmodules": false,
 	} {
-		if isDotGit(name) != want {
-			t.Errorf("isDotGit(%q) = %v", name, !want)
+		if isDotGit(name) != git {
+			t.Errorf("isDotGit(%q) = %v", name, !git)
+		}
+		dst := t.TempDir()
+		left, err := unpackLeft(t, writeTar(t,
+			tar.Header{Name: "./", Typeflag: tar.TypeDir},
+			tar.Header{Name: "./a/" + name, Typeflag: tar.TypeReg},
+			tar.Header{Name: "./b/" + name + "/", Typeflag: tar.TypeDir},
+			tar.Header{Name: "./b/" + name + "/config", Typeflag: tar.TypeReg},
+		), dst)
+		if err != nil {
+			t.Errorf("%q: %v", name, err)
+			continue
+		}
+		wrote := 0
+		filepath.WalkDir(dst, func(p string, d os.DirEntry, _ error) error {
+			if d != nil && !d.IsDir() {
+				wrote++
+			}
+			return nil
+		})
+		if want := map[bool]int{true: 0, false: 2}[git]; wrote != want || left.Git != 2-want {
+			t.Errorf("%q: wrote %d files, left out %d", name, wrote, left.Git)
 		}
 	}
 	if !inDotGit("/work/repo/.git/hooks") || !inDotGit(`repo\.git`) || inDotGit("/work/repo/src") {
@@ -197,7 +221,9 @@ func TestUnpackLeavesOutGit(t *testing.T) {
 	}
 	// Asking for them by name is refused before anything is run.
 	c := sandboxClient()
-	if _, _, err := c.CopyFromSession(context.Background(), "alice", "work", "repo/.git/config", dst); !errors.Is(err, ErrGitFiles) {
-		t.Errorf("cp of .git/config: %v", err)
+	for _, src := range []string{"repo/.git/config", "repo/.git", "repo/.git::$DATA", ".GIT"} {
+		if _, _, err := c.CopyFromSession(context.Background(), "alice", "work", src, dst); !errors.Is(err, ErrGitFiles) {
+			t.Errorf("cp of %s: %v", src, err)
+		}
 	}
 }
