@@ -24,7 +24,7 @@ permissions: {}
 env:
   # renovate: datasource=npm depName=@anthropic-ai/claude-code
   CLAUDE_CODE_VERSION: 2.1.322
-  IMAGE_REVISION: 2
+  IMAGE_REVISION: 3
   IMAGE: ghcr.io/maxemiliang/maxcloud-sandbox
 
 jobs:
@@ -87,6 +87,8 @@ jobs:
             command -v "$name" >/dev/null || { echo "::error::$HOME/$d is not on PATH"; exit 1; }
           done
           EOF
+          # mcloud sandbox ssh: sshd, rsync, and logins landing on the work volume.
+          docker run --rm "${IMAGE}:${TAG}" sh -c 'test -x /usr/sbin/sshd && rsync --version >/dev/null && test "$(getent passwd node | cut -d: -f6)" = /work && test -f /etc/profile.d/sandbox-ssh-path.sh && ! ls /etc/ssh/ssh_host_*_key 2>/dev/null'
       - name: Push, unless the tag exists
         if: github.event_name != 'pull_request'
         env:
