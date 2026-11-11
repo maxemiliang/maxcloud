@@ -4,7 +4,7 @@ kind: gotcha
 area: networking
 tags: [gvisor, cilium, clusterip, dns, sandbox, kube-proxy-replacement]
 learned: 2026-11-10
-updated: 2026-11-10
+updated: 2026-11-11
 where:
   - sandbox/sessions/users.yaml
 ---
@@ -35,8 +35,8 @@ same happens on a local kind cluster with Cilium 1.20.4 and
 `kubeProxyReplacement=true`, so it's Cilium and gVisor, not UKS.
 
 **Fix:** session pods use public resolvers (`dnsPolicy: None`, the
-template in `sandbox/sessions/users.yaml`), the two that their egress
-policy allows. They can't resolve cluster names, which a sandbox for untrusted
+template in `sandbox/sessions/users.yaml`), which their egress policy
+allows like the rest of the internet. They can't resolve cluster names, which a sandbox for untrusted
 code shouldn't need.
 
 What a sandbox must reach inside the cluster (an egress proxy, say) can't
