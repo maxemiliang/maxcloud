@@ -1,10 +1,10 @@
 ---
-title: Agent sessions run under gVisor through agent-sandbox, one sandbox per user, and reach only the Claude API
+title: Agent sessions run under gVisor through agent-sandbox, one sandbox per user, and reach the internet but not the cluster
 kind: decision
 area: ops
 tags: [sandbox, gvisor, agent-sandbox, claude-code, cilium, egress, flux, mcloud, admission]
 learned: 2026-11-10
-updated: 2026-11-10
+updated: 2026-11-11
 where:
   - clusters/personal/sandbox.yaml
   - sandbox/controllers/agent-sandbox/release.yaml
@@ -15,7 +15,7 @@ where:
   - docs/runbooks/sandbox-sessions.md
 ---
 
-# Agent sessions run under gVisor through agent-sandbox, one sandbox per user, and reach only the Claude API
+# Agent sessions run under gVisor through agent-sandbox, one sandbox per user, and reach the internet but not the cluster
 
 **Decision:** a Claude Code session is one pod on the tainted `sandbox`
 node group, under gVisor, made by agent-sandbox (kubernetes-sigs) from a
@@ -24,8 +24,8 @@ node group, under gVisor, made by agent-sandbox (kubernetes-sigs) from a
 sandbox` creates the first time they use it. The namespace holds their
 Claude subscription token, which they set themselves, and their sessions.
 The pod has Claude Code in its image and the token in its environment, and
-a Cilium policy lets it reach `api.anthropic.com` and nothing else. All of
-it is two Flux Kustomizations of their own (`sandbox-controllers`,
+a Cilium policy lets it reach the public internet and nothing in the
+cluster. All of it is two Flux Kustomizations of their own (`sandbox-controllers`,
 `sandbox-sessions`).
 
 **Why:**
@@ -47,10 +47,18 @@ it is two Flux Kustomizations of their own (`sandbox-controllers`,
 - **The token set through mcloud, not kept in git:** it's the user's, not
   the platform's. It goes straight into their namespace, where a second
   admission policy allows that one Secret and no other.
-- **Only the Claude API:** the token is in the pod, where the session can
-  read it. With one allowed host there is nowhere else to send it. So the
-  image has Claude Code in it (no package registry at run time), and work
-  goes in and out with `mcloud sandbox cp`.
+- **The internet, not the cluster** (decided 2026-11-11): a session that
+  can't clone, install a package or look anything up is of little use for
+  real work. The policy allows every public address on any port, and
+  excepts the private ranges, 100.64.0.0/10 (UKS's API server and load
+  balancers) and link-local (the metadata service); a deny on the
+  `cluster` and `kube-apiserver` entities says the same by identity.
+  **What that costs:** the token is in the pod, where the session can read
+  it, and a session runs whatever a prompt, a web page or a repository
+  talks it into. It can now send the token, and the code in the session,
+  anywhere. What still holds is everything else: the session's own kernel
+  boundary, no credentials but that token, nothing reachable in the
+  cluster.
 - **agent-sandbox:** a claim gives a pod with a stable name and an expiry,
   without writing a controller. Users get claims, not pods: a session is
   always the template's pod.
@@ -70,12 +78,16 @@ it is two Flux Kustomizations of their own (`sandbox-controllers`,
   for an API key. Not documented for subscription tokens.
 - **A warm pool with idle pods:** the pool has `replicas: 0`. An idle pod
   would hold the token and a quarter of a core, to save a few seconds.
+- **Only the Claude API** (the first policy, until 2026-11-11): DNS for,
+  and port 443 of, `api.anthropic.com` alone, so there was nowhere to send
+  the token but the host it's for. Everything had to come in with `mcloud
+  sandbox cp`, dependencies included. An allowlist of a few more hosts
+  gives up the same thing: a package registry accepts uploads, and Cilium
+  allows addresses, not names, which a registry behind Cloudflare shares
+  with every other site there.
 - **agent-sandbox's own NetworkPolicy** (`networkPolicyManagement`
-  `Managed`, the default): it allows the whole public internet, and
-  policies add up, so it would undo the Cilium one.
-- **The npm registry on the allowlist:** it accepts uploads, and shares its
-  addresses with every other site behind Cloudflare (the policy allows
-  addresses, not names).
+  `Managed`, the default): it allows the public internet too, but
+  100.64.0.0/10 isn't among its exceptions, and policies add up.
 - **The maxcloud registry for the image:** its access rules are per app,
   made by the maxcloud controller from the app registry. The image is on
   GHCR, like the controller's.
@@ -88,6 +100,10 @@ it is two Flux Kustomizations of their own (`sandbox-controllers`,
   provider can't scale from zero
   ([node-autoscaling-burst-pool](node-autoscaling-burst-pool.md)).
 
+**Shared with everything else:** the NAT gateway. What a session does on
+the internet comes from the cluster's address, the same one every app
+leaves from.
+
 **Not a boundary:** the taint. An app that adds the toleration, or
 `runtimeClassName: gvisor`, can run pods on the sandbox node within its own
 quota. Sessions rank above app pods, so they push those off when the node
@@ -95,7 +111,9 @@ is full. Nor is a sandbox entry's name: any developer can create a
 provider called `sandbox-<someone>` without the label, which keeps that
 user from enrolling until an admin deletes it.
 
-**Revisit when:** sessions must reach something in the cluster (ClusterIPs
+**Revisit when:** a token or code leaves a session that shouldn't have
+(back to an allowlist, or a proxy), sessions must reach something in the
+cluster (ClusterIPs
 don't work under gVisor here:
 [gvisor-no-clusterip](../networking/gvisor-no-clusterip.md)), four at a
 time isn't enough, usernames that can't be namespace names need sandboxes,
