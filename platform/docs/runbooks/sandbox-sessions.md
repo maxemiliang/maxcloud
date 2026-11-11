@@ -27,6 +27,13 @@ Commands are fish, run from `platform/`, as an admin.
 - **A session:** a SandboxClaim in the user's namespace, and the pod of the
   same name agent-sandbox makes for it. The user's token is the Secret
   `claude-code` there.
+- **SSH into a session** (`mcloud sandbox ssh`, or plain ssh with `mcloud
+  sandbox ssh-config`): nothing on the platform side but the image's
+  `sshd`. Each connection is an exec of `sshd -i` in the session, as its
+  user, with the settings on the command line, so it needs `pods/exec` and
+  nothing more, and nothing listens. The session keeps its host key and
+  `authorized_keys` in `/work/.ssh`; mcloud makes both on the first
+  connection.
 
 ```fish
 kubectl -n flux-system get resourcesetinputproviders -l run.gronblom.dev/sandbox=true
@@ -75,6 +82,24 @@ kubectl -n kube-system exec $cilium -c cilium-agent -- cilium-dbg monitor --type
 
 Sessions leave through the NAT gateway, so what one does on the internet
 comes from the cluster's address.
+
+## Check SSH
+
+After a change to the image, to gVisor, or to how exec reaches a pod. In a
+session of your own, started on the image under test:
+
+```fish
+echo 'echo login works in $PWD' | mcloud sandbox ssh <session>
+mcloud sandbox ssh-config --install
+echo hello | ssh <session>.sbx 'cat > /tmp/x'; and scp <session>.sbx:/tmp/x /tmp/x; and cat /tmp/x
+mcloud sandbox shell <session> -- sh -c 'nohup node -e "require(\"http\").createServer((q,r)=>r.end(\"ok\n\")).listen(3000)" >/dev/null 2>&1 &'
+ssh -f -N -o ExitOnForwardFailure=yes -L 13000:localhost:3000 <session>.sbx; and curl -s localhost:13000
+ssh -o ExitOnForwardFailure=yes -R 4000:localhost:22 <session>.sbx true   # must fail
+```
+
+The last line must say `remote port forwarding failed`; `-R` working
+would mean the session's sshd didn't get mcloud's settings. Stop the
+`ssh -f` afterwards.
 
 ## Let a user run more sessions
 
@@ -148,5 +173,21 @@ mcloud says most of these itself; this is what's underneath.
   because a session has no git credentials, not because of the network.
 - **A session can't reach an app or a database in the cluster:** that's the
   policy, and meant.
+- **`mcloud sandbox ssh` says the session's image has no SSH server:** the
+  session runs an image from before SSH (older than `2.1.322-2`). Check the
+  tag in `users.yaml`; running sessions keep the image they started with.
+- **`the session sent something other than one ed25519 host key`:** the
+  session's `/work/.ssh/ssh_host_ed25519_key` isn't the key mcloud made
+  (something in the session replaced or broke it). Removing it makes a new
+  one on the next connection:
+  `mcloud sandbox shell <session> -- rm /work/.ssh/ssh_host_ed25519_key`.
+- **`Permission denied (publickey)`:** ssh was told another user
+  (`ssh someone@<session>.sbx`, or a `User` of the user's own config
+  ahead of mcloud's): a session logs in only as `node`. Or the key in
+  mcloud's directory changed while ssh was starting: try again.
+- **ssh hangs or drops after a while:** the exec through the API server
+  and kubelet is the connection. mcloud's settings send a keepalive every
+  30 seconds; an exec that goes quiet past the kubelet's
+  `streamingConnectionIdleTimeout` (four hours by default) ends.
 - **After a cluster rebuild nobody has a sandbox:** entries and tokens
   aren't backed up. Users run `mcloud sandbox token set` again.
