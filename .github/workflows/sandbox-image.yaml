@@ -24,7 +24,7 @@ permissions: {}
 env:
   # renovate: datasource=npm depName=@anthropic-ai/claude-code
   CLAUDE_CODE_VERSION: 2.1.322
-  IMAGE_REVISION: 1
+  IMAGE_REVISION: 2
   IMAGE: ghcr.io/maxemiliang/maxcloud-sandbox
 
 jobs:
@@ -51,7 +51,42 @@ jobs:
             "${CLAUDE_CODE_VERSION} "*) ;;
             *) echo "::error::the image has Claude Code '${got}', not ${CLAUDE_CODE_VERSION}"; exit 1 ;;
           esac
-          docker run --rm "${IMAGE}:${TAG}" sh -c 'test "$(id -u)" = 1000 && git --version'
+          # Then as a session runs it: uid 1000, no capabilities, HOME on an
+          # empty directory, as /work is. Offline: no installs, only what the
+          # image has and what a session can build with it.
+          work=$(mktemp -d)
+          chmod 0777 "$work"
+          docker run --rm -i -u 1000:1000 --cap-drop ALL --security-opt no-new-privileges \
+            -e HOME=/work -e NPM_CONFIG_PREFIX=/work/.npm-global -v "$work:/work" -w /work \
+            "${IMAGE}:${TAG}" bash -eu -o pipefail -s <<'EOF'
+          test "$(id -u)" = 1000
+          test -z "$(ls -A "$HOME")"
+
+          for tool in claude node npm pnpm yarn python python3 pip uv uvx go gofmt \
+            gcc g++ make cmake ninja pkg-config git gh rg fd jq curl wget sqlite3 \
+            zip unzip xz tree less nano; do
+            command -v "$tool" >/dev/null || { echo "::error::$tool is not in the image"; exit 1; }
+          done
+          node --version; pnpm --version; python --version; uv --version; go version
+          gcc --version | head -1; cmake --version | head -1; git --version; gh --version | head -1
+          rg --version | head -1; jq --version
+
+          # What each toolchain builds and runs, with HOME as the only place to write.
+          printf '#include <stdio.h>\nint main(void){puts("c");return 0;}\n' >a.c
+          gcc a.c -o a && ./a
+          mkdir g && (cd g && go mod init example.com/g && printf 'package main\nfunc main(){println("go")}\n' >main.go && go run .)
+          python3 -m venv v && ./v/bin/python -c 'print("python")'
+          node -e 'console.log("node")'
+
+          # The directories a session installs into are on PATH.
+          for d in .local/bin .npm-global/bin .cargo/bin go/bin; do
+            name="probe-$(echo "$d" | tr -c 'a-z\n' _)"
+            mkdir -p "$HOME/$d"
+            printf '#!/bin/sh\n' >"$HOME/$d/$name"
+            chmod +x "$HOME/$d/$name"
+            command -v "$name" >/dev/null || { echo "::error::$HOME/$d is not on PATH"; exit 1; }
+          done
+          EOF
       - name: Push, unless the tag exists
         if: github.event_name != 'pull_request'
         env:
