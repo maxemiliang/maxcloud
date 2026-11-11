@@ -2,8 +2,8 @@
 # git and Claude Code. Built and pushed to ghcr.io/maxemiliang/maxcloud-sandbox
 # by .github/workflows/sandbox-image.yaml, which also sets the version.
 #
-# Claude Code is in the image so a session needs no package registry: its
-# pods may reach the Claude API and nothing else (the policy in users.yaml).
+# Claude Code is in the image, at one version, so a session starts with it
+# and every session of a tag runs the same one.
 FROM node:24-bookworm-slim@sha256:01d566e8d94d8c619591d78652babfccd3c6992a3dffa9ed5ab39e11cf6c70e9
 
 RUN apt-get update \
@@ -16,8 +16,8 @@ RUN test -n "$CLAUDE_CODE_VERSION" \
   && npm install -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" \
   && npm cache clean --force
 
-# Updates, telemetry and error reporting all go to hosts a session can't
-# reach. Without this Claude Code tries them anyway.
+# No updates (the version is the image's), telemetry or error reporting
+# from sessions.
 ENV CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
 
 # The image's own `node` user. Sessions set HOME to their work volume.

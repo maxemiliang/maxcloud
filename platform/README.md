@@ -145,8 +145,8 @@ secret).
     policy on its in-cluster entrypoint.
 14. Sandboxes for agent sessions (`mcloud sandbox`): a tainted node group
     with gVisor on it, agent-sandbox, a sandbox namespace per user with
-    their own Claude token, and Claude Code sessions that reach only the
-    Claude API ([the guide](../docs/sandbox.md),
+    their own Claude token, and Claude Code sessions that reach the
+    internet but nothing in the cluster ([the guide](../docs/sandbox.md),
     [the platform side](docs/runbooks/sandbox-sessions.md)).
 
 ## Run platform
@@ -619,10 +619,12 @@ applies its manifests itself.
   ReferenceGrant (generated per app by `apps/maxcloud/resourceset.yaml`).
 
 - **Agent sessions can't reach anything in the cluster.** By design for
-  now (their egress policy allows the Claude API only), and ClusterIP
+  now (their egress policy allows the internet only), and ClusterIP
   services don't work from gVisor pods here anyway
-  ([gvisor-no-clusterip](docs/kb/networking/gvisor-no-clusterip.md)). Work
-  goes in and out with `mcloud sandbox cp`.
+  ([gvisor-no-clusterip](docs/kb/networking/gvisor-no-clusterip.md)).
+- **An agent session can send its user's Claude token anywhere.** The
+  token is in the session, and the session reaches the internet
+  ([agent-sessions-sandbox](docs/kb/ops/agent-sessions-sandbox.md)).
 - **Sandboxes and their Claude tokens aren't backed up.** A user's sandbox
   entry and token exist only in the cluster; after a rebuild each user sets
   their token again.
