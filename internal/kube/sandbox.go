@@ -1,6 +1,7 @@
 package kube
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -35,10 +36,16 @@ const (
 	SandboxContainer = "claude"
 	// SandboxWorkDir is where a session works, and its home.
 	SandboxWorkDir = "/work"
+	// SandboxDirAnnotation on a session is the directory in it that its
+	// commands start in, relative to the work directory: what it was
+	// started from.
+	SandboxDirAnnotation = "run.gronblom.dev/sandbox-dir"
 
 	// sandboxPool is the pool sessions are claimed on (empty: every claim
 	// starts a new pod).
 	sandboxPool = "claude-code"
+	// sandboxQuota is the sandbox's ResourceQuota: its pods are sessions.
+	sandboxQuota = "sessions"
 )
 
 var (
@@ -231,10 +238,13 @@ type Session struct {
 	Message string
 	// Until is when the session ends by itself (zero: never).
 	Until time.Time
+	// Dir is the directory its commands start in, relative to the work
+	// directory ("": the work directory itself).
+	Dir string
 }
 
 func sessionOf(o *unstructured.Unstructured) Session {
-	s := Session{Name: o.GetName(), Created: o.GetCreationTimestamp().Time}
+	s := Session{Name: o.GetName(), Created: o.GetCreationTimestamp().Time, Dir: o.GetAnnotations()[SandboxDirAnnotation]}
 	ready := condition(o, "Ready")
 	s.Ready, s.Reason, s.Message = ready.Ready(), ready.Reason, ready.Message
 	if v := str(o, "spec", "lifecycle", "shutdownTime"); v != "" {
@@ -252,10 +262,14 @@ func sessionLifecycle(until time.Time) map[string]any {
 }
 
 // StartSession claims a new session for user and returns its name: name,
-// or a generated session-xxxxx if name is "". A non-zero until ends it
-// then. The pod isn't up yet (WaitSession).
-func (c *Client) StartSession(ctx context.Context, user, name string, until time.Time) (string, error) {
+// or a generated session-xxxxx if name is "". Its commands start in dir
+// ("": the work directory). A non-zero until ends it then. The pod isn't
+// up yet (WaitSession).
+func (c *Client) StartSession(ctx context.Context, user, name, dir string, until time.Time) (string, error) {
 	meta := map[string]any{"namespace": SandboxNamespace(user)}
+	if dir != "" {
+		meta["annotations"] = map[string]any{SandboxDirAnnotation: dir}
+	}
 	if name != "" {
 		if err := CheckSessionName(name); err != nil {
 			return "", err
@@ -300,6 +314,21 @@ func (c *Client) Sessions(ctx context.Context, user string) ([]Session, error) {
 		return out[i].Name < out[j].Name
 	})
 	return out, nil
+}
+
+// SessionLimit is how many sessions user has, and how many the sandbox
+// allows (its quota on pods). ok is false when that can't be told.
+func (c *Client) SessionLimit(ctx context.Context, user string) (used, limit int, ok bool) {
+	q, err := c.Core.CoreV1().ResourceQuotas(SandboxNamespace(user)).Get(ctx, sandboxQuota, metav1.GetOptions{})
+	if err != nil {
+		return 0, 0, false
+	}
+	hard, hasHard := q.Status.Hard[corev1.ResourcePods]
+	inUse, hasUsed := q.Status.Used[corev1.ResourcePods]
+	if !hasHard || !hasUsed {
+		return 0, 0, false
+	}
+	return int(inUse.Value()), int(hard.Value()), true
 }
 
 // ErrNoSession: the user has no session of that name.
@@ -379,27 +408,64 @@ func (c *Client) sessionProblem(ctx context.Context, user string, s *Session) st
 }
 
 // sessionWaiting describes what a session that isn't ready is waiting for.
-func (c *Client) sessionWaiting(ctx context.Context, user, name string) string {
+// full: for room on a sandbox node, which other sessions take up.
+func (c *Client) sessionWaiting(ctx context.Context, user, name string) (what string, full bool) {
 	p, err := c.Core.CoreV1().Pods(SandboxNamespace(user)).Get(ctx, name, metav1.GetOptions{})
 	if err != nil {
-		return "waiting for its pod"
+		return "waiting for its pod", false
 	}
 	if p.Spec.NodeName == "" {
 		for _, cond := range p.Status.Conditions {
-			if cond.Type == corev1.PodScheduled && cond.Status != corev1.ConditionTrue && cond.Message != "" {
-				return "waiting for room on a sandbox node: " + oneLine(cond.Message)
+			if cond.Type != corev1.PodScheduled || cond.Status == corev1.ConditionTrue || cond.Message == "" {
+				continue
 			}
+			if strings.Contains(cond.Message, "Insufficient") {
+				return "the sandbox node is full: waiting for room", true
+			}
+			return "waiting for a sandbox node: " + oneLine(cond.Message), false
 		}
-		return "waiting for a sandbox node"
+		return "waiting for a sandbox node", false
 	}
-	return "starting on " + p.Spec.NodeName + " (the first session on a node pulls the image)"
+	if c.pullingImage(ctx, user, name) {
+		return "pulling the session image to " + p.Spec.NodeName + ": about a gigabyte, the first time on a node", false
+	}
+	return "starting on " + p.Spec.NodeName, false
 }
+
+// pullingImage: the session's pod is pulling its image, going by its
+// events.
+func (c *Client) pullingImage(ctx context.Context, user, name string) bool {
+	events, err := c.Core.CoreV1().Events(SandboxNamespace(user)).List(ctx, metav1.ListOptions{
+		FieldSelector: "involvedObject.kind=Pod,involvedObject.name=" + name,
+	})
+	if err != nil {
+		return false
+	}
+	pulling := false
+	for _, e := range events.Items {
+		if e.InvolvedObject.Kind != "Pod" || e.InvolvedObject.Name != name {
+			continue
+		}
+		switch e.Reason {
+		case "Pulling":
+			pulling = true
+		case "Pulled":
+			return false
+		}
+	}
+	return pulling
+}
+
+// sandboxFullWait is how long a session waits for room on a full node:
+// long enough for the scheduler to make room if it can.
+var sandboxFullWait = 30 * time.Second
 
 // WaitSession waits until user's session is up (ctx bounds it), reporting
 // what it's waiting for to status. It stops early on something waiting
 // won't fix.
 func (c *Client) WaitSession(ctx context.Context, user, name string, status func(string)) error {
 	last := ""
+	var fullSince time.Time
 	for {
 		s, err := c.GetSession(ctx, user, name)
 		if err != nil {
@@ -411,7 +477,16 @@ func (c *Client) WaitSession(ctx context.Context, user, name string, status func
 		if why := c.sessionProblem(ctx, user, s); why != "" {
 			return fmt.Errorf("session %s %w: %s", name, ErrSessionCantStart, why)
 		}
-		if w := c.sessionWaiting(ctx, user, name); w != last && status != nil {
+		w, full := c.sessionWaiting(ctx, user, name)
+		switch {
+		case !full:
+			fullSince = time.Time{}
+		case fullSince.IsZero():
+			fullSince = time.Now()
+		case time.Since(fullSince) > sandboxFullWait:
+			return fmt.Errorf("session %s %w: the sandbox node has no room for another session, other people's included. Try again when one has ended", name, ErrSessionCantStart)
+		}
+		if w != last && status != nil {
 			status(w)
 			last = w
 		}
@@ -425,4 +500,58 @@ func (c *Client) WaitSession(ctx context.Context, user, name string, status func
 // terminal it's interactive.
 func (c *Client) SessionExec(ctx context.Context, user, name string, cmd []string, stdin io.Reader, stdout, stderr io.Writer) error {
 	return c.Exec(ctx, SandboxNamespace(user), name, SandboxContainer, cmd, stdin, stdout, stderr)
+}
+
+// inDir is cmd run in dir (relative to the work directory; "" leaves cmd
+// as it is).
+func inDir(dir string, cmd []string) []string {
+	if dir == "" {
+		return cmd
+	}
+	return append([]string{"sh", "-c", `cd "$1" && shift && exec "$@"`, "sh", remotePath(dir)}, cmd...)
+}
+
+// SessionExecIn is SessionExec in dir, relative to the work directory.
+func (c *Client) SessionExecIn(ctx context.Context, user, name, dir string, cmd []string, stdin io.Reader, stdout, stderr io.Writer) error {
+	return c.SessionExec(ctx, user, name, inDir(dir, cmd), stdin, stdout, stderr)
+}
+
+// bundleScript writes a git bundle of the branches of the repository in
+// $1 to stdout, leaving out what the commits in the other arguments
+// already hold (those of them it has). Nothing new: no output.
+const bundleScript = `cd "$1" || exit 1
+shift
+git rev-parse --git-dir >/dev/null 2>&1 || { echo "$PWD in the session isn't a git repository" >&2; exit 1; }
+ex=""
+for c in "$@"; do
+  if git cat-file -e "$c^{commit}" 2>/dev/null; then ex="$ex ^$c"; fi
+done
+if [ "$(git rev-list --count --branches $ex)" = 0 ]; then exit 0; fi
+exec git bundle create -q - --branches $ex`
+
+// BundleCommand is the command that writes a git bundle of the branches
+// of the repository in dir to stdout: the commits that have (commit ids)
+// doesn't cover. It writes nothing when there are none.
+func BundleCommand(dir string, have []string) []string {
+	return append([]string{"sh", "-c", bundleScript, "sh", dir}, have...)
+}
+
+// SessionBundle writes a git bundle of the repository in dir of user's
+// session to w (BundleCommand).
+func (c *Client) SessionBundle(ctx context.Context, user, name, dir string, have []string, w io.Writer) error {
+	var stderr bytes.Buffer
+	if err := c.SessionExec(ctx, user, name, BundleCommand(remotePath(dir), have), nil, w, &stderr); err != nil {
+		return execError(err, &stderr)
+	}
+	return nil
+}
+
+// SessionUncommitted: the repository in dir of user's session has changes
+// that aren't in a commit.
+func (c *Client) SessionUncommitted(ctx context.Context, user, name, dir string) (bool, error) {
+	var out, stderr bytes.Buffer
+	if err := c.SessionExecIn(ctx, user, name, dir, []string{"git", "status", "--porcelain"}, nil, &out, &stderr); err != nil {
+		return false, execError(err, &stderr)
+	}
+	return strings.TrimSpace(out.String()) != "", nil
 }
