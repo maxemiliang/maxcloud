@@ -24,7 +24,7 @@ permissions: {}
 env:
   # renovate: datasource=npm depName=@anthropic-ai/claude-code
   CLAUDE_CODE_VERSION: 2.1.322
-  IMAGE_REVISION: 1
+  IMAGE_REVISION: 2
   IMAGE: ghcr.io/maxemiliang/maxcloud-sandbox
 
 jobs:
@@ -52,6 +52,8 @@ jobs:
             *) echo "::error::the image has Claude Code '${got}', not ${CLAUDE_CODE_VERSION}"; exit 1 ;;
           esac
           docker run --rm "${IMAGE}:${TAG}" sh -c 'test "$(id -u)" = 1000 && git --version'
+          # mcloud sandbox ssh: sshd, rsync, and logins landing on the work volume.
+          docker run --rm "${IMAGE}:${TAG}" sh -c 'test -x /usr/sbin/sshd && rsync --version >/dev/null && test "$(getent passwd node | cut -d: -f6)" = /work && test -f /etc/profile.d/sandbox-ssh-path.sh && ! ls /etc/ssh/ssh_host_*_key 2>/dev/null'
       - name: Push, unless the tag exists
         if: github.event_name != 'pull_request'
         env:
