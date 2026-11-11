@@ -50,8 +50,8 @@ session that you wouldn't hand to the agent.
 ## Sessions
 
 - `mcloud sandbox start [NAME]` starts one and waits until it's up
-  (seconds; the first on a node pulls a gigabyte of image first, and says
-  so). `--from DIR` copies a directory of yours into it, and makes that
+  (seconds; the first on a node pulls the image first, a couple of
+  gigabytes, and says so). `--from DIR` copies a directory of yours into it, and makes that
   where the session's commands start. `--for 8h` ends it by itself after
   that long.
 - `mcloud sandbox list` shows yours, and how many you may have.
@@ -81,11 +81,32 @@ and runs commands, and Claude Code checks each action itself first.
 `acceptEdits` allows edits and no commands; `bypassPermissions` allows
 everything, unchecked.
 
-The image has Node 24 and git, and a session can clone public
-repositories and install packages itself. It has no git credentials: a
-private repository goes in with `start --from` or `cp`. Nothing in the
-cluster is reachable from a session, your apps included, and nothing can
-connect to one.
+## What's in a session
+
+A session is a Linux machine (Debian 12) with a coding machine's usual
+tools, but without root: no `sudo`, no `apt`, no Docker. What a session needs
+it installs for itself, under `/work`.
+
+- **Languages and package managers:** Node 24 with npm, pnpm and yarn;
+  Python 3.11 with pip, venv and uv; Go.
+- **Build tools:** gcc, g++, make, cmake, ninja and pkg-config, with the
+  headers for OpenSSL, libffi, SQLite and zlib, so packages that compile
+  native code build.
+- **Version control and search:** git, `gh` (without a login, so for public
+  repositories), ripgrep (`rg`), `fd`, `jq`, `sqlite3`, `tree`.
+- **Other:** curl, wget, zip, unzip, xz, rsync, `nano` and `vi`.
+- **Claude Code**, at the version the image names.
+
+Not there, and on demand: Rust, bun, deno, Java and the rest. A session has
+the internet and can install them for itself, and what it installs lands in
+`/work` and on `PATH`: `curl https://sh.rustup.rs | sh -s -- -y --profile
+minimal` for Rust, `npm install -g bun`, `pip install --user` or `uv tool
+install` for Python tools, `go install`, `cargo install`. Dependencies of the
+project (`npm install`, `pip install`, `go mod download`) work the same way.
+
+It has no git credentials: a private repository goes in with `start --from`
+or `cp`. Nothing in the cluster is reachable from a session, your apps
+included, and nothing can connect to one.
 
 ## Getting commits back
 
