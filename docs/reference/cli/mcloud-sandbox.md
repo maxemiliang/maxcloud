@@ -22,6 +22,7 @@ running.
   mcloud sandbox start fix --from .        # a session with this directory in it
   mcloud sandbox prompt 'Fix the tests'    # one task, or: mcloud sandbox claude
   mcloud sandbox pull                      # its commits, into this repository
+  mcloud sandbox ssh                       # SSH in (ssh-config: plain ssh, scp, rsync)
   mcloud sandbox stop fix                  # end it; its files go with it
 
 | Command | |
@@ -33,6 +34,8 @@ running.
 | [`mcloud sandbox pull`](#mcloud-sandbox-pull) | Bring a session's commits into this git repository |
 | [`mcloud sandbox remove`](#mcloud-sandbox-remove) | Delete your sandbox: its sessions, their files and your token |
 | [`mcloud sandbox shell`](#mcloud-sandbox-shell) | A shell in a session, or one command |
+| [`mcloud sandbox ssh`](#mcloud-sandbox-ssh) | SSH into a session |
+| [`mcloud sandbox ssh-config`](#mcloud-sandbox-ssh-config) | SSH settings that make ssh, scp, rsync and editors reach sessions |
 | [`mcloud sandbox start`](#mcloud-sandbox-start) | Start a session |
 | [`mcloud sandbox stop`](#mcloud-sandbox-stop) | End sessions; their files go with them |
 | [`mcloud sandbox token`](#mcloud-sandbox-token) | The Claude token your sessions log in with |
@@ -219,6 +222,90 @@ Flags:
 | Flag | Default | |
 | --- | --- | --- |
 | `--dir` string |  | the directory in the session to run in, relative to /work (default: what the session was started --from) |
+
+## mcloud sandbox ssh
+
+SSH into a session.
+
+Open a shell in a session over SSH: in the directory the session was
+started --from, or its work directory (/work). What follows -- goes to ssh
+as options, -L to open a port of the session's here, say. SESSION can be
+left out when you have one session.
+
+The connection goes through the cluster's API, like every other command
+here: an exec of sshd in the session, with SSH over its input and output.
+Nothing in the session listens, and you need nothing but your mcloud
+login. mcloud logs in with a key of its own, and checks the session's
+host key, which it reads from the session first. Your SSH agent, X11 and
+remote forwarding (-R) are never forwarded: the session can't reach back
+to your machine. -L reaches what listens on the session's own loopback,
+nothing else.
+
+For scp, rsync, sftp and editors that work over SSH, mcloud sandbox
+ssh-config gives ssh a host name for every session.
+
+```
+mcloud sandbox ssh [SESSION] [-- SSH-OPTIONS...] [flags]
+```
+
+Examples:
+
+```fish
+mcloud sandbox ssh
+mcloud sandbox ssh refactor -- -L 3000:localhost:3000
+mcloud sandbox ssh -- -N -L 5173:localhost:5173     # only the port
+```
+
+Flags:
+
+| Flag | Default | |
+| --- | --- | --- |
+| `--dir` string |  | the directory in the session to run in, relative to /work (default: what the session was started --from) |
+
+## mcloud sandbox ssh-config
+
+SSH settings that make ssh, scp, rsync and editors reach sessions.
+
+Print the ssh configuration that gives every session a host name:
+SESSION.sbx for one of yours, SESSION.USER.sbx for USER's (an admin's
+access). Then plain ssh works, and what runs over it: scp, rsync, sftp,
+an editor's remote development over SSH, ssh -L.
+
+  ssh refactor.sbx
+  rsync -a refactor.sbx:my-repo/dist/ ./dist/
+  ssh -N -L 3000:localhost:3000 refactor.sbx
+
+--install writes it to a file of mcloud's and includes that at the top of
+~/.ssh/config. Put it before any "Host \*" section yourself otherwise:
+ssh takes the first value it finds for a setting, and these say that
+nothing of yours (your SSH agent, X11) is forwarded to a session.
+
+Each connection is an exec of sshd in the session through the cluster's
+API, as mcloud (this binary, logged in as you) makes it. A login lands in
+the session's work directory (/work). The settings name mcloud's own key
+and a host key file mcloud writes from what the session says before every
+connection, so ssh asks nothing the first time and refuses any other key.
+
+What comes out of a session is the agent's to choose: scp and rsync copy
+links and git's own files (.git), which mcloud sandbox cp and pull leave
+behind.
+
+```
+mcloud sandbox ssh-config [flags]
+```
+
+Examples:
+
+```fish
+mcloud sandbox ssh-config --install
+mcloud sandbox ssh-config >> ~/.ssh/config.d/sandbox
+```
+
+Flags:
+
+| Flag | Default | |
+| --- | --- | --- |
+| `--install` |  | write it, and include it at the top of ~/.ssh/config |
 
 ## mcloud sandbox start
 
