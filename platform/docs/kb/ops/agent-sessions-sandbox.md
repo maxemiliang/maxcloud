@@ -66,6 +66,9 @@ cluster. All of it is two Flux Kustomizations of their own (`sandbox-controllers
   with the user's own git. So no git credential is ever in a session,
   which can reach the internet. What arrives is only ever objects and
   remote-tracking refs, through `git fetch` with `fetch.fsckObjects` on.
+  For the same reason `mcloud sandbox cp` leaves `.git` out of what it
+  copies from a session: a hook or a `core.fsmonitor` there would run on
+  the user's machine.
 - **One task at a time runs in Claude Code's `auto` mode** (`mcloud
   sandbox prompt`): nobody is there to answer, and without commands a task
   can't run a test. `auto` has Claude Code check each action itself;
