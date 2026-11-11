@@ -110,9 +110,10 @@ type LeftOut struct {
 	Git int
 }
 
-// isDotGit: name is what some file system takes for ".git". The same
-// cases git itself guards against: other capitals, trailing dots and
-// spaces and the short name on Windows, characters macOS ignores.
+// isDotGit: name is what some file system takes for ".git". The cases git
+// itself guards against: other capitals; on NTFS (a Windows disk, or a
+// share mounted here) trailing dots and spaces, the short name, and a
+// stream of the file (.git::$DATA); characters macOS ignores.
 func isDotGit(name string) bool {
 	name = strings.Map(func(r rune) rune {
 		if unicode.Is(unicode.Cf, r) {
@@ -120,6 +121,7 @@ func isDotGit(name string) bool {
 		}
 		return unicode.ToLower(r)
 	}, name)
+	name, _, _ = strings.Cut(name, ":")
 	name = strings.TrimRight(name, ". ")
 	return name == ".git" || name == "git~1"
 }
