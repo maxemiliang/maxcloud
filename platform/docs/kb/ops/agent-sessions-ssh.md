@@ -100,4 +100,5 @@ session (`SESSION.sbx`, `SESSION.USER.sbx`). The image has `sshd` and
 measured under gVisor), an editor needs a socket forward, or sessions get
 previews of their own.
 
-See also: [agent-sessions-sandbox](agent-sessions-sandbox.md).
+See also: [agent-sessions-sandbox](agent-sessions-sandbox.md),
+[sshd-terminal-tty-group-gvisor](sshd-terminal-tty-group-gvisor.md).
