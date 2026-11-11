@@ -121,7 +121,9 @@ mcloud sandbox cp refactor:my-repo/report.md .
 
 Coming out of a session, only files and directories are copied. Links and
 special files are left out, and nothing is written outside the destination,
-whatever the session's files are named.
+whatever the session's files are named. Git's own files (`.git`) are left
+out as well: hooks and configuration in them would run on your machine the
+next time you use git there. A session's commits come with `pull`.
 
 ## Removing your sandbox
 
