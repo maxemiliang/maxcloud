@@ -69,6 +69,10 @@ cluster. All of it is two Flux Kustomizations of their own (`sandbox-controllers
   For the same reason `mcloud sandbox cp` leaves `.git` out of what it
   copies from a session: a hook or a `core.fsmonitor` there would run on
   the user's machine.
+- **SSH rides on exec too** (`mcloud sandbox ssh`, decided 2026-11-11):
+  sshd on the exec's stdin and stdout, so nothing listens and no rule
+  changes. Why, and what was turned down:
+  [agent-sessions-ssh](agent-sessions-ssh.md).
 - **One task at a time runs in Claude Code's `auto` mode** (`mcloud
   sandbox prompt`): nobody is there to answer, and without commands a task
   can't run a test. `auto` has Claude Code check each action itself;
