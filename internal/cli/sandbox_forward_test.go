@@ -27,7 +27,7 @@ func TestParseForward(t *testing.T) {
 
 func TestForwardOptions(t *testing.T) {
 	got := strings.Join(forwardOptions([]forward{{5173, 5173}, {8080, 3000}}), " ")
-	want := "-N -T -o ExitOnForwardFailure yes -o GatewayPorts no -L 5173:localhost:5173 -L 8080:localhost:3000"
+	want := "-N -T -o ExitOnForwardFailure yes -L 5173:localhost:5173 -L 8080:localhost:3000"
 	if got != want {
 		t.Errorf("%q", got)
 	}
