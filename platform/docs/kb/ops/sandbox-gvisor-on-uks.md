@@ -4,7 +4,7 @@ kind: fact
 area: ops
 tags: [gvisor, kata, sandbox, containerd, upcloud, node-group, claude-code, cilium, egress]
 learned: 2026-11-10
-updated: 2026-11-10
+updated: 2026-11-11
 where:
   - infra/cluster/nodes.tf
   - sandbox/controllers/runtime/install.sh
@@ -47,8 +47,8 @@ except for the runtime. What was built on these answers:
   included: [gvisor-no-clusterip](../networking/gvisor-no-clusterip.md).
 - **Cilium's rules by DNS name work for a gVisor pod.** With a
   CiliumNetworkPolicy on the namespace that allowed only DNS for, and port
-  443 of, `api.anthropic.com` and `registry.npmjs.org` (what the policy in
-  `sandbox/sessions/users.yaml` grew from), both the runc and the gVisor
+  443 of, `api.anthropic.com` and `registry.npmjs.org` (the spike's policy; sessions
+  now have one by address, in `sandbox/sessions/users.yaml`), both the runc and the gVisor
   pod resolved and reached those two hosts, got no answer for `example.com` (`EAI_AGAIN`), and timed
   out on the resolvers' port 443 and on the API Service's ClusterIP. So
   Cilium 1.18.6's DNS proxy sees gVisor's queries, as long as they go to a
