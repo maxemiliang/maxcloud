@@ -184,6 +184,11 @@ mcloud says most of these itself; this is what's underneath.
   (something in the session replaced or broke it). Removing it makes a new
   one on the next connection:
   `mcloud sandbox shell <session> -- rm /work/.ssh/ssh_host_ed25519_key`.
+- **`chown(/dev/pts/0, 1000, 5) failed: Operation not permitted`, and the
+  connection closes:** the session's user isn't in group `tty`, which the
+  session template's `supplementalGroups` puts it in. A session started
+  before that was there needs replacing
+  ([why](../kb/ops/sshd-terminal-tty-group-gvisor.md)).
 - **`Permission denied (publickey)`:** ssh was told another user
   (`ssh someone@<session>.sbx`, or a `User` of the user's own config
   ahead of mcloud's): a session logs in only as `node`. Or the key in
