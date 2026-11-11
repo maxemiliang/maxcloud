@@ -72,6 +72,7 @@ Procedures live in [`../runbooks/`](../runbooks/) and the README, not here.
 - [Node autoscaling, when we add it, is a tainted burst node group for app pods](ops/node-autoscaling-burst-pool.md): the plan, on hold, and UpCloud's autoscaler traps
 - [gVisor installs and runs on a UKS node; Kata can't (no nested virtualisation)](ops/sandbox-gvisor-on-uks.md): the sandbox spike's node facts and timings
 - [Agent sessions run under gVisor through agent-sandbox, one sandbox per user, and reach the internet but not the cluster](ops/agent-sessions-sandbox.md): why each piece, and what was turned down
+- [SSH into agent sessions is sshd -i over the exec channel, started by mcloud per connection](ops/agent-sessions-ssh.md): no listener, no new RBAC, host keys without trust on first use
 - [A killed tofu apply leaves a stale state lock](ops/tofu-killed-apply.md)
 - [Backups stay in one region for now; a copy to de-fra1 is the plan when needed](ops/off-region-backup-copy.md): deferred, with the plan and what it doesn't cover
 - [UpCloud sub-account usernames can't contain dashes; Object Storage users can](ops/upcloud-sub-account-names.md): `homelab_api`, `maxcloud_controller`
