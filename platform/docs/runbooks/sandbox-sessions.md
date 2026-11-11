@@ -118,10 +118,17 @@ mcloud says most of these itself; this is what's underneath.
   configured` in its events:** the node has no gVisor yet. The installer
   puts it there within seconds of a node joining, and the pod then starts
   by itself; if it doesn't, `kubectl -n sandbox-system logs ds/gvisor-installer`.
-- **The claim says `ReconcilerError`:** the user is at their limit. The
-  Sandbox's events say `exceeded quota: sessions`.
-- **The pod is `Pending`:** no sandbox node is Ready, or four sessions are
-  running already (`kubectl describe pod`).
+- **`start` says `2 of 2 sessions are running`:** the user is at their
+  limit (the ResourceQuota `sessions` in their namespace). A claim made
+  past it some other way says `ReconcilerError`, and its Sandbox's events
+  say `exceeded quota: sessions`.
+- **`start` says the sandbox node has no room:** four sessions are running
+  already, everyone's counted. mcloud waits half a minute for room, then
+  removes the session it made.
+- **The pod is `Pending` otherwise:** no sandbox node is Ready (`kubectl
+  describe pod`).
+- **`mcloud sandbox pull` says the directory isn't a git repository:** the
+  session wasn't started `--from` one; `--dir` names the repository in it.
 - **Claude Code says `Failed to authenticate. API Error: 401`:** the user's
   token is wrong or more than a year old.
 - **`npm install`, `git clone` or a web fetch fails in a session:** the
