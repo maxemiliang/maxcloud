@@ -147,6 +147,7 @@ func TestSSHOptions(t *testing.T) {
 		"IdentitiesOnly":        "yes",
 		"StrictHostKeyChecking": "yes",
 		"PermitLocalCommand":    "no",
+		"GatewayPorts":          "no",
 		"UserKnownHostsFile":    `"/cfg/mcloud/sandbox-ssh/known_hosts/%n"`,
 		"IdentityFile":          `"/cfg/mcloud/sandbox-ssh/id_ed25519"`,
 	} {

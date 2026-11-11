@@ -117,11 +117,11 @@ func parseForwards(specs []string) ([]forward, error) {
 }
 
 // forwardOptions are ssh's options for forwards and nothing else: no
-// command, and no session at all if a port here is taken. The ports
-// listen on this machine's loopback only, whatever the user's own ssh
-// configuration says about GatewayPorts.
+// command, and no session at all if a port here is taken. That the ports
+// listen on this machine's loopback only is among the options every
+// connection gets (sshOptions).
 func forwardOptions(forwards []forward) []string {
-	argv := []string{"-N", "-T", "-o", "ExitOnForwardFailure yes", "-o", "GatewayPorts no"}
+	argv := []string{"-N", "-T", "-o", "ExitOnForwardFailure yes"}
 	for _, fw := range forwards {
 		argv = append(argv, "-L", fmt.Sprintf("%d:localhost:%d", fw.local, fw.session))
 	}

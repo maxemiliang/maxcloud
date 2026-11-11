@@ -171,6 +171,9 @@ func sshOptions(dir, proxy string) ([][2]string, error) {
 		{"ForwardX11", "no"},
 		{"ForwardX11Trusted", "no"},
 		{"PermitLocalCommand", "no"},
+		// A port opened with -L listens on this machine's loopback only,
+		// whatever a Host * of the user's says.
+		{"GatewayPorts", "no"},
 		{"ServerAliveInterval", "30"},
 	}, nil
 }
