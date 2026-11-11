@@ -13,6 +13,7 @@ where:
   - sandbox/sessions/admission.yaml
   - sandbox/image/Dockerfile
   - docs/runbooks/sandbox-sessions.md
+  - ../internal/cli/sandbox_pull.go
 ---
 
 # Agent sessions run under gVisor through agent-sandbox, one sandbox per user, and reach the internet but not the cluster
@@ -59,6 +60,16 @@ cluster. All of it is two Flux Kustomizations of their own (`sandbox-controllers
   anywhere. What still holds is everything else: the session's own kernel
   boundary, no credentials but that token, nothing reachable in the
   cluster.
+- **Commits come back as a git bundle** (`mcloud sandbox pull`): the
+  session's branches, fetched over exec into `sandbox/<session>/<branch>`
+  in the user's own repository, where pushing and pull requests happen
+  with the user's own git. So no git credential is ever in a session,
+  which can reach the internet. What arrives is only ever objects and
+  remote-tracking refs, through `git fetch` with `fetch.fsckObjects` on.
+- **One task at a time runs in Claude Code's `auto` mode** (`mcloud
+  sandbox prompt`): nobody is there to answer, and without commands a task
+  can't run a test. `auto` has Claude Code check each action itself;
+  `bypassPermissions` is the user's to choose.
 - **agent-sandbox:** a claim gives a pod with a stable name and an expiry,
   without writing a controller. Users get claims, not pods: a session is
   always the template's pod.
@@ -91,6 +102,8 @@ cluster. All of it is two Flux Kustomizations of their own (`sandbox-controllers
 - **The maxcloud registry for the image:** its access rules are per app,
   made by the maxcloud controller from the app registry. The image is on
   GHCR, like the controller's.
+- **A git token in the session, to clone and push** (what hosted
+  sandboxes do): a second credential where the first can already leak.
 - **A volume for `/work`:** an emptyDir until a session's work needs to
   outlive its pod.
 - **Backing up entries and tokens** (as the maxcloud controller does for
