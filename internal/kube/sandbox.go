@@ -427,7 +427,7 @@ func (c *Client) sessionWaiting(ctx context.Context, user, name string) (what st
 		return "waiting for a sandbox node", false
 	}
 	if c.pullingImage(ctx, user, name) {
-		return "pulling the session image to " + p.Spec.NodeName + ": about a gigabyte, the first time on a node", false
+		return "pulling the session image to " + p.Spec.NodeName + ": only the first session on a node waits for this", false
 	}
 	return "starting on " + p.Spec.NodeName, false
 }
