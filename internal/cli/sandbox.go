@@ -40,7 +40,7 @@ running.
 	}
 	c.PersistentFlags().StringVar(&f.user, "user", "", "whose sandbox (default: yours; someone else's takes an admin)")
 	c.AddCommand(sandboxStartCmd(g, &f), sandboxListCmd(g, &f), sandboxClaudeCmd(g, &f), sandboxPromptCmd(g, &f),
-		sandboxShellCmd(g, &f), sandboxSSHCmd(g, &f), sandboxSSHConfigCmd(g), sandboxSSHProxyCmd(g), sandboxCpCmd(g, &f),
+		sandboxShellCmd(g, &f), sandboxSSHCmd(g, &f), sandboxForwardCmd(g, &f), sandboxSSHConfigCmd(g), sandboxSSHProxyCmd(g), sandboxCpCmd(g, &f),
 		sandboxPullCmd(g, &f), sandboxStopCmd(g, &f), sandboxTokenCmd(g, &f), sandboxRemoveCmd(g, &f))
 	return c
 }
