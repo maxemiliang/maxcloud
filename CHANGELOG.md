@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.16.0](https://github.com/maxemiliang/maxcloud/compare/v0.15.0...v0.16.0) (2026-11-11)
+
+
+### Features
+
+* **mcloud:** sandbox forward, a session's ports on this machine ([bf1270c](https://github.com/maxemiliang/maxcloud/commit/bf1270cb158202ad8d4e32a03d5a2a4ac46bdbd3))
+* **mcloud:** sandbox ssh and ssh-config: SSH into sessions over exec ([86b4b55](https://github.com/maxemiliang/maxcloud/commit/86b4b55852a4302554d90d721086245b2d1982b0))
+
+
+### Bug Fixes
+
+* **mcloud:** sandbox ssh: forwarded ports listen on loopback, whatever Host * says ([a48479a](https://github.com/maxemiliang/maxcloud/commit/a48479a52551d480ada5d5aa33547c4a415bb058))
+* **mcloud:** sandbox ssh: the no-SSH-server message names no image tag ([1db22e8](https://github.com/maxemiliang/maxcloud/commit/1db22e845598c22bec8d4e73778beb2b4a50ed61))
+* **mcloud:** sandbox start doesn't name a size for the image it waits on ([9905770](https://github.com/maxemiliang/maxcloud/commit/9905770053611c0404859574e64b2f27b90ccc0f))
+
 ## [0.15.0](https://github.com/maxemiliang/maxcloud/compare/v0.14.2...v0.15.0) (2026-11-11)
 
 
