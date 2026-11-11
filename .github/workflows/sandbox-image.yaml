@@ -6,7 +6,9 @@
 # the tag exists).
 #
 # A tag is never built twice: change the Dockerfile without a new Claude
-# Code version, and IMAGE_REVISION goes up by one.
+# Code version, and IMAGE_REVISION goes up by one. That includes Renovate's
+# updates of the tools in the Dockerfile: merged without it, they build
+# and nothing is pushed.
 #
 # Pull requests build the image and run it, without pushing.
 name: sandbox-image
@@ -56,7 +58,7 @@ jobs:
           # image has and what a session can build with it.
           work=$(mktemp -d)
           chmod 0777 "$work"
-          docker run --rm -i -u 1000:1000 --cap-drop ALL --security-opt no-new-privileges \
+          docker run --rm -i --network none -u 1000:1000 --cap-drop ALL --security-opt no-new-privileges \
             -e HOME=/work -e NPM_CONFIG_PREFIX=/work/.npm-global -v "$work:/work" -w /work \
             "${IMAGE}:${TAG}" bash -eu -o pipefail -s <<'EOF'
           test "$(id -u)" = 1000
