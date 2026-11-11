@@ -8,13 +8,16 @@ it a place to let an agent work unattended, away from your machine and
 your credentials.
 
 ```fish
-mcloud sandbox token set            # once: your Claude token
-mcloud sandbox start refactor       # a session named refactor
-mcloud sandbox cp ./my-repo refactor:my-repo
-mcloud sandbox claude refactor      # Claude Code, in the session
-mcloud sandbox cp refactor:my-repo ./my-repo-after
-mcloud sandbox stop refactor        # ends it; its files go with it
+mcloud sandbox token set                     # once: your Claude token
+cd my-repo
+mcloud sandbox start refactor --from .       # a session with this repository in it
+mcloud sandbox prompt 'Fix the failing tests, and commit'
+mcloud sandbox pull                          # its commits, into your repository
+mcloud sandbox stop refactor                 # ends it; its files go with it
 ```
+
+`mcloud sandbox claude` is Claude Code itself in the session, for working
+with it instead of handing it one task.
 
 You need to be logged in (`mcloud login`) as a member of
 `maxcloud-developers` or an admin. The first `mcloud sandbox` command makes
@@ -47,26 +50,62 @@ session that you wouldn't hand to the agent.
 ## Sessions
 
 - `mcloud sandbox start [NAME]` starts one and waits until it's up
-  (seconds; the first on a node pulls a gigabyte of image first).
-  `--for 8h` ends it by itself after that long.
-- `mcloud sandbox list` shows yours.
-- `mcloud sandbox claude [SESSION]` is Claude Code in the session's work
-  directory, `/work`. What follows `--` goes to `claude`:
-  `mcloud sandbox claude -- --continue`, or a single prompt with
-  `mcloud sandbox claude -- -p 'Run the tests and fix what fails' --permission-mode acceptEdits`.
-  Claude Code keeps its conversations in the session.
+  (seconds; the first on a node pulls a gigabyte of image first, and says
+  so). `--from DIR` copies a directory of yours into it, and makes that
+  where the session's commands start. `--for 8h` ends it by itself after
+  that long.
+- `mcloud sandbox list` shows yours, and how many you may have.
+- `mcloud sandbox prompt [SESSION] 'TASK'` gives Claude Code one task and
+  ends when the task does. What it does shows as it goes; its answer comes
+  last, on stdout. `--continue` carries on from the last conversation.
+- `mcloud sandbox claude [SESSION]` is Claude Code itself. What follows
+  `--` goes to `claude`: `mcloud sandbox claude -- --continue`. Claude Code
+  keeps its conversations in the session.
 - `mcloud sandbox shell [SESSION]` is a shell there, or one command after
   `--`.
 - `mcloud sandbox stop SESSION...` (or `--all`) ends sessions.
 
-SESSION can be left out when you have one session. You can have two
-running at a time; an admin can raise that.
+SESSION can be left out when you have one session. `prompt`, `claude` and
+`shell` run in the directory the session was started `--from` (or `--dir`),
+and in `/work` otherwise.
+
+You can have two sessions running at a time; an admin can raise that. The
+sandbox node holds four in all, everyone's counted: when it's full, `start`
+says so and gives up.
+
+### What a task may do
+
+Nobody answers questions during `prompt`, so `--permission-mode` says what
+Claude Code may do without asking. The default is `auto`: it edits files
+and runs commands, and Claude Code checks each action itself first.
+`acceptEdits` allows edits and no commands; `bypassPermissions` allows
+everything, unchecked.
 
 The image has Node 24 and git, and a session can clone public
 repositories and install packages itself. It has no git credentials: a
-private repository, or anything you want back, goes in and out with `cp`.
-Nothing in the cluster is reachable from a session, your apps included,
-and nothing can connect to one.
+private repository goes in with `start --from` or `cp`. Nothing in the
+cluster is reachable from a session, your apps included, and nothing can
+connect to one.
+
+## Getting commits back
+
+`mcloud sandbox pull [SESSION]`, in your repository, fetches what the
+session has committed. Each of its branches arrives as
+`sandbox/SESSION/BRANCH`, and the branch you're on moves forward to the
+session's branch of the same name when that is a fast-forward
+(`--no-merge` only fetches). Then it's your git: push, open a pull
+request. The session never has your git credentials.
+
+```fish
+mcloud sandbox pull refactor
+git push                      # or: gh pr create
+```
+
+Only commits come over. `pull` says when the session has changes it
+hasn't committed; ask for a commit
+(`mcloud sandbox prompt 'Commit your work' --continue`) or copy the files
+out. For a session that wasn't started `--from` a directory, name the
+repository in it with `--dir`.
 
 ## Files
 

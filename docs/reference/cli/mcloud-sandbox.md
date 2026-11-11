@@ -11,23 +11,26 @@ Agent sessions: Claude Code in a sandbox in the cluster.
 A session is Claude Code in a pod of its own in the cluster, under gVisor,
 logged in with your Claude subscription. It can reach the internet, so it
 can clone and install what it needs, and nothing in the cluster. Your own
-files go in and out with mcloud sandbox cp.
+files go in with start --from or cp, and its commits come back with pull.
 
 Your sessions run in a sandbox that is yours alone: the first command here
 makes it. It holds your Claude token (mcloud sandbox token set), which
 only your own sessions read, and it limits how many sessions you can have
 running.
 
-  mcloud sandbox token set      # once: the token claude setup-token prints
-  mcloud sandbox start          # a new session
-  mcloud sandbox claude         # Claude Code in it
-  mcloud sandbox stop NAME      # end it; its files go with it
+  mcloud sandbox token set                 # once: the token claude setup-token prints
+  mcloud sandbox start fix --from .        # a session with this directory in it
+  mcloud sandbox prompt 'Fix the tests'    # one task, or: mcloud sandbox claude
+  mcloud sandbox pull                      # its commits, into this repository
+  mcloud sandbox stop fix                  # end it; its files go with it
 
 | Command | |
 | --- | --- |
 | [`mcloud sandbox claude`](#mcloud-sandbox-claude) | Claude Code in a session |
 | [`mcloud sandbox cp`](#mcloud-sandbox-cp) | Copy files into or out of a session |
 | [`mcloud sandbox list`](#mcloud-sandbox-list) | Your sessions |
+| [`mcloud sandbox prompt`](#mcloud-sandbox-prompt) | Give Claude Code in a session one task, and watch it work |
+| [`mcloud sandbox pull`](#mcloud-sandbox-pull) | Bring a session's commits into this git repository |
 | [`mcloud sandbox remove`](#mcloud-sandbox-remove) | Delete your sandbox: its sessions, their files and your token |
 | [`mcloud sandbox shell`](#mcloud-sandbox-shell) | A shell in a session, or one command |
 | [`mcloud sandbox start`](#mcloud-sandbox-start) | Start a session |
@@ -44,15 +47,16 @@ Flags:
 
 Claude Code in a session.
 
-Run Claude Code in a session, in its work directory (/work). On a terminal
-it's the interactive interface; what follows -- goes to claude as it is.
-SESSION can be left out when you have one session.
+Run Claude Code in a session: in the directory it was started --from, or
+its work directory (/work). On a terminal it's the interactive interface;
+what follows -- goes to claude as it is. SESSION can be left out when you
+have one session. For a single task, see mcloud sandbox prompt.
 
 Claude Code keeps its conversations in the session, so claude --resume and
 --continue work for as long as the session does.
 
 ```
-mcloud sandbox claude [SESSION] [-- ARGS...]
+mcloud sandbox claude [SESSION] [-- ARGS...] [flags]
 ```
 
 Examples:
@@ -62,6 +66,12 @@ mcloud sandbox claude
 mcloud sandbox claude refactor -- --continue
 mcloud sandbox claude -- -p 'Write fizzbuzz.js and run it' --permission-mode acceptEdits
 ```
+
+Flags:
+
+| Flag | Default | |
+| --- | --- | --- |
+| `--dir` string |  | the directory in the session to run in, relative to /work (default: what the session was started --from) |
 
 ## mcloud sandbox cp
 
@@ -95,6 +105,77 @@ Your sessions.
 mcloud sandbox list
 ```
 
+## mcloud sandbox prompt
+
+Give Claude Code in a session one task, and watch it work.
+
+Give Claude Code in a session one task. What it does shows as it goes, its
+answer comes last (on stdout, so it can be piped), and the command ends
+when the task does. SESSION can be left out when you have one session.
+
+Nobody is there to answer questions, so --permission-mode says what Claude
+Code may do unasked. The default, auto, lets it edit files and run
+commands, with its own check on each action; bypassPermissions takes that
+check away, and acceptEdits allows edits only. What follows -- goes to
+claude as it is.
+
+--continue carries on from the session's last conversation.
+
+```
+mcloud sandbox prompt [SESSION] PROMPT [-- ARGS...] [flags]
+```
+
+Examples:
+
+```fish
+mcloud sandbox prompt 'Run the tests and fix what fails'
+mcloud sandbox prompt refactor 'Now commit that' --continue
+mcloud sandbox prompt 'Summarise this repository' > summary.md
+```
+
+Flags:
+
+| Flag | Default | |
+| --- | --- | --- |
+| `-c`, `--continue` |  | carry on from the session's last conversation |
+| `--dir` string |  | the directory in the session to run in, relative to /work (default: what the session was started --from) |
+| `--permission-mode` string | `auto` | what Claude Code may do unasked: auto, acceptEdits, bypassPermissions, plan |
+
+## mcloud sandbox pull
+
+Bring a session's commits into this git repository.
+
+Fetch the commits a session has made into the git repository you're in.
+Each branch of the session's repository arrives as sandbox/SESSION/BRANCH,
+and the branch you're on moves forward to the session's branch of the same
+name when it can (a fast-forward; --no-merge leaves it alone). From there
+it's your own git: push, open a pull request.
+
+Only commits come over: what the session hasn't committed stays there. The
+session needs none of your git credentials for this, and gets none.
+
+The session's repository is the directory it was started --from, or --dir.
+SESSION can be left out when you have one session.
+
+```
+mcloud sandbox pull [SESSION] [flags]
+```
+
+Examples:
+
+```fish
+mcloud sandbox pull
+mcloud sandbox pull refactor --no-merge
+mcloud sandbox pull refactor --dir my-repo
+```
+
+Flags:
+
+| Flag | Default | |
+| --- | --- | --- |
+| `--dir` string |  | the directory in the session to run in, relative to /work (default: what the session was started --from) |
+| `--no-merge` |  | only fetch: leave the branch you're on where it is |
+
 ## mcloud sandbox remove
 
 Delete your sandbox: its sessions, their files and your token.
@@ -116,11 +197,12 @@ Flags:
 
 A shell in a session, or one command.
 
-Open a shell in a session, in its work directory (/work), or run what
-follows -- there. SESSION can be left out when you have one session.
+Open a shell in a session, or run what follows -- there: in the directory
+the session was started --from, or its work directory (/work). SESSION can
+be left out when you have one session.
 
 ```
-mcloud sandbox shell [SESSION] [-- COMMAND...]
+mcloud sandbox shell [SESSION] [-- COMMAND...] [flags]
 ```
 
 Examples:
@@ -130,6 +212,12 @@ mcloud sandbox shell
 mcloud sandbox shell refactor -- git status
 ```
 
+Flags:
+
+| Flag | Default | |
+| --- | --- | --- |
+| `--dir` string |  | the directory in the session to run in, relative to /work (default: what the session was started --from) |
+
 ## mcloud sandbox start
 
 Start a session.
@@ -137,6 +225,9 @@ Start a session.
 Start a session: a pod with Claude Code in it, named NAME (or
 session-xxxxx). The first time, this also makes your sandbox, and asks for
 your Claude token if you haven't set one.
+
+--from copies a directory of yours into the session, and makes it where
+the session's commands start: claude, prompt, shell and pull.
 
 A session runs until you stop it, or for as long as --for says. Its files
 (/work) exist as long as it does.
@@ -149,6 +240,7 @@ Examples:
 
 ```fish
 mcloud sandbox start
+mcloud sandbox start refactor --from ./my-repo
 mcloud sandbox start refactor --for 8h
 ```
 
@@ -157,13 +249,15 @@ Flags:
 | Flag | Default | |
 | --- | --- | --- |
 | `--for` duration | `0s` | end the session after this long, e.g. 8h (default: when you stop it) |
+| `--from` string |  | a directory to copy into the session, and work in there |
 
 ## mcloud sandbox stop
 
 End sessions; their files go with them.
 
 End sessions. A session's pod and everything in its work directory are
-deleted: copy out what you want to keep first (mcloud sandbox cp).
+deleted: bring out what you want to keep first (mcloud sandbox pull for
+commits, mcloud sandbox cp for files).
 
 ```
 mcloud sandbox stop SESSION... [flags]

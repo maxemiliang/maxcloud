@@ -15,8 +15,9 @@ import (
 )
 
 // Copying between this machine and a session goes as a tar stream through
-// an exec of tar in the session, like kubectl cp. A session can reach
-// nothing but the Claude API, so this is the way work gets in and out.
+// an exec of tar in the session, like kubectl cp. A session has no
+// credentials of the user's, so this is how their own files get in and
+// out.
 
 // packTar writes src to w as a tar: a directory's tree with names relative
 // to it, or a single file named after it. Symlinks go as symlinks; sockets,

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -111,7 +112,7 @@ func TestStartSession(t *testing.T) {
 	ctx := context.Background()
 	c := sandboxClient()
 	until := time.Date(2026, 11, 10, 20, 0, 0, 0, time.UTC)
-	name, err := c.StartSession(ctx, "alice", "work", until)
+	name, err := c.StartSession(ctx, "alice", "work", "my-repo", until)
 	if err != nil || name != "work" {
 		t.Fatalf("%q, %v", name, err)
 	}
@@ -124,15 +125,15 @@ func TestStartSession(t *testing.T) {
 		str(o, "spec", "lifecycle", "shutdownPolicy") != "Delete" {
 		t.Errorf("claim: %v", o.Object["spec"])
 	}
-	if _, err := c.StartSession(ctx, "alice", "work", time.Time{}); err == nil || !strings.Contains(err.Error(), "already") {
+	if _, err := c.StartSession(ctx, "alice", "work", "", time.Time{}); err == nil || !strings.Contains(err.Error(), "already") {
 		t.Errorf("same name twice: %v", err)
 	}
-	if _, err := c.StartSession(ctx, "alice", "Not_A_Name", time.Time{}); err == nil {
+	if _, err := c.StartSession(ctx, "alice", "Not_A_Name", "", time.Time{}); err == nil {
 		t.Error("want an error for a name that can't be a pod's")
 	}
 
 	s, err := c.GetSession(ctx, "alice", "work")
-	if err != nil || s.Ready || !s.Until.Equal(until) {
+	if err != nil || s.Ready || !s.Until.Equal(until) || s.Dir != "my-repo" {
 		t.Errorf("session: %+v, %v", s, err)
 	}
 	if err := c.SetSessionEnd(ctx, "alice", "work", time.Time{}); err != nil {
@@ -208,5 +209,96 @@ func TestSessionProblemNoToken(t *testing.T) {
 	s, _ := c.GetSession(ctx, "alice", "work")
 	if why := c.sessionProblem(ctx, "alice", s); !strings.Contains(why, "mcloud sandbox token set") {
 		t.Errorf("why = %q", why)
+	}
+}
+
+func sessionPod(name string, mutate func(*corev1.Pod)) *corev1.Pod {
+	p := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "sbx-alice"}}
+	mutate(p)
+	return p
+}
+
+// What a session waits for is said in words: a full node, the image.
+func TestSessionWaiting(t *testing.T) {
+	ctx := context.Background()
+	c := sandboxClient()
+	c.Core = fake.NewClientset(
+		sessionPod("full", func(p *corev1.Pod) {
+			p.Status.Conditions = []corev1.PodCondition{{Type: corev1.PodScheduled, Status: corev1.ConditionFalse, Reason: "Unschedulable",
+				Message: "0/3 nodes are available: 1 Insufficient memory, 2 node(s) didn't match Pod's node affinity/selector."}}
+		}),
+		sessionPod("nonode", func(p *corev1.Pod) {
+			p.Status.Conditions = []corev1.PodCondition{{Type: corev1.PodScheduled, Status: corev1.ConditionFalse, Reason: "Unschedulable",
+				Message: "0/2 nodes are available: 2 node(s) didn't match Pod's node affinity/selector."}}
+		}),
+		sessionPod("pulling", func(p *corev1.Pod) { p.Spec.NodeName = "sandbox-1" }),
+		sessionPod("pulled", func(p *corev1.Pod) { p.Spec.NodeName = "sandbox-1" }),
+		&corev1.Event{ObjectMeta: metav1.ObjectMeta{Name: "e1", Namespace: "sbx-alice"}, Reason: "Pulling",
+			InvolvedObject: corev1.ObjectReference{Kind: "Pod", Name: "pulling"}},
+		&corev1.Event{ObjectMeta: metav1.ObjectMeta{Name: "e2", Namespace: "sbx-alice"}, Reason: "Pulling",
+			InvolvedObject: corev1.ObjectReference{Kind: "Pod", Name: "pulled"}},
+		&corev1.Event{ObjectMeta: metav1.ObjectMeta{Name: "e3", Namespace: "sbx-alice"}, Reason: "Pulled",
+			InvolvedObject: corev1.ObjectReference{Kind: "Pod", Name: "pulled"}},
+	)
+	for name, want := range map[string]struct {
+		says string
+		full bool
+	}{
+		"full":    {"the sandbox node is full", true},
+		"nonode":  {"waiting for a sandbox node: 0/2 nodes", false},
+		"pulling": {"pulling the session image to sandbox-1", false},
+		"pulled":  {"starting on sandbox-1", false},
+		"nopod":   {"waiting for its pod", false},
+	} {
+		got, full := c.sessionWaiting(ctx, "alice", name)
+		if !strings.HasPrefix(got, want.says) || full != want.full {
+			t.Errorf("%s: %q, full %v", name, got, full)
+		}
+	}
+}
+
+// A session that only waits for room on a full node gives up, and says
+// why.
+func TestWaitSessionGivesUpOnAFullNode(t *testing.T) {
+	old := sandboxFullWait
+	sandboxFullWait = 0
+	defer func() { sandboxFullWait = old }()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	c := sandboxClient(claim("work", time.Now()))
+	c.Core = fake.NewClientset(sessionPod("work", func(p *corev1.Pod) {
+		p.Status.Conditions = []corev1.PodCondition{{Type: corev1.PodScheduled, Status: corev1.ConditionFalse, Message: "0/3 nodes are available: 1 Insufficient cpu."}}
+	}))
+	err := c.WaitSession(ctx, "alice", "work", nil)
+	if !errors.Is(err, ErrSessionCantStart) || !strings.Contains(err.Error(), "no room") {
+		t.Errorf("wait: %v", err)
+	}
+}
+
+func TestSessionLimit(t *testing.T) {
+	ctx := context.Background()
+	c := sandboxClient()
+	if _, _, ok := c.SessionLimit(ctx, "alice"); ok {
+		t.Error("no quota, no limit to tell")
+	}
+	c.Core = fake.NewClientset(&corev1.ResourceQuota{
+		ObjectMeta: metav1.ObjectMeta{Name: "sessions", Namespace: "sbx-alice"},
+		Status: corev1.ResourceQuotaStatus{
+			Hard: corev1.ResourceList{corev1.ResourcePods: resource.MustParse("2")},
+			Used: corev1.ResourceList{corev1.ResourcePods: resource.MustParse("1")},
+		},
+	})
+	if used, limit, ok := c.SessionLimit(ctx, "alice"); !ok || used != 1 || limit != 2 {
+		t.Errorf("%d of %d, %v", used, limit, ok)
+	}
+}
+
+func TestInDir(t *testing.T) {
+	if got := inDir("", []string{"claude"}); len(got) != 1 {
+		t.Errorf("no directory: %q", got)
+	}
+	got := inDir("my-repo", []string{"claude", "-p", "hi"})
+	if got[0] != "sh" || got[4] != "/work/my-repo" || strings.Join(got[5:], " ") != "claude -p hi" {
+		t.Errorf("%q", got)
 	}
 }

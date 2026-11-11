@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"time"
@@ -23,21 +24,23 @@ func sandboxCmd(g *globals) *cobra.Command {
 		Long: `A session is Claude Code in a pod of its own in the cluster, under gVisor,
 logged in with your Claude subscription. It can reach the internet, so it
 can clone and install what it needs, and nothing in the cluster. Your own
-files go in and out with mcloud sandbox cp.
+files go in with start --from or cp, and its commits come back with pull.
 
 Your sessions run in a sandbox that is yours alone: the first command here
 makes it. It holds your Claude token (mcloud sandbox token set), which
 only your own sessions read, and it limits how many sessions you can have
 running.
 
-  mcloud sandbox token set      # once: the token claude setup-token prints
-  mcloud sandbox start          # a new session
-  mcloud sandbox claude         # Claude Code in it
-  mcloud sandbox stop NAME      # end it; its files go with it`,
+  mcloud sandbox token set                 # once: the token claude setup-token prints
+  mcloud sandbox start fix --from .        # a session with this directory in it
+  mcloud sandbox prompt 'Fix the tests'    # one task, or: mcloud sandbox claude
+  mcloud sandbox pull                      # its commits, into this repository
+  mcloud sandbox stop fix                  # end it; its files go with it`,
 	}
 	c.PersistentFlags().StringVar(&f.user, "user", "", "whose sandbox (default: yours; someone else's takes an admin)")
-	c.AddCommand(sandboxStartCmd(g, &f), sandboxListCmd(g, &f), sandboxClaudeCmd(g, &f), sandboxShellCmd(g, &f),
-		sandboxCpCmd(g, &f), sandboxStopCmd(g, &f), sandboxTokenCmd(g, &f), sandboxRemoveCmd(g, &f))
+	c.AddCommand(sandboxStartCmd(g, &f), sandboxListCmd(g, &f), sandboxClaudeCmd(g, &f), sandboxPromptCmd(g, &f),
+		sandboxShellCmd(g, &f), sandboxCpCmd(g, &f), sandboxPullCmd(g, &f), sandboxStopCmd(g, &f), sandboxTokenCmd(g, &f),
+		sandboxRemoveCmd(g, &f))
 	return c
 }
 
@@ -122,31 +125,50 @@ func (g *globals) ensureSandbox(ctx context.Context, s *sandbox) error {
 
 // session picks the session a command is about: the one named, or the only
 // one there is.
-func (s *sandbox) session(ctx context.Context, name string) (string, error) {
+func (s *sandbox) session(ctx context.Context, name string) (kube.Session, error) {
 	if name != "" {
-		if _, err := s.k.GetSession(ctx, s.user, name); err != nil {
+		got, err := s.k.GetSession(ctx, s.user, name)
+		if err != nil {
 			if errors.Is(err, kube.ErrNoSession) {
-				return "", fmt.Errorf("no session %s: mcloud sandbox list shows what's running", name)
+				return kube.Session{}, fmt.Errorf("no session %s: mcloud sandbox list shows what's running", name)
 			}
-			return "", err
+			return kube.Session{}, err
 		}
-		return name, nil
+		return *got, nil
 	}
 	all, err := s.k.Sessions(ctx, s.user)
 	if err != nil {
-		return "", err
+		return kube.Session{}, err
 	}
 	switch len(all) {
 	case 0:
-		return "", errors.New("no session is running: mcloud sandbox start")
+		return kube.Session{}, errors.New("no session is running: mcloud sandbox start")
 	case 1:
-		return all[0].Name, nil
+		return all[0], nil
 	}
+	return kube.Session{}, fmt.Errorf("which session? %s", strings.Join(sessionNames(all), ", "))
+}
+
+func sessionNames(all []kube.Session) []string {
 	names := make([]string, len(all))
 	for i, a := range all {
 		names[i] = a.Name
 	}
-	return "", fmt.Errorf("which session? %s", strings.Join(names, ", "))
+	return names
+}
+
+// dirFlag adds --dir to a command that runs in a session.
+func dirFlag(c *cobra.Command, dir *string) {
+	c.Flags().StringVar(dir, "dir", "", "the directory in the session to run in, relative to /work (default: what the session was started --from)")
+}
+
+// sessionDir is where a command runs in a session: what --dir says, or
+// the directory the session was started from.
+func sessionDir(session kube.Session, flag string) string {
+	if flag != "" {
+		return flag
+	}
+	return session.Dir
 }
 
 // tokenHelp says where a token comes from.
@@ -166,6 +188,7 @@ func readSandboxToken(g *globals) (string, error) {
 
 func sandboxStartCmd(g *globals, f *sandboxFlags) *cobra.Command {
 	var ttl time.Duration
+	var from string
 	c := &cobra.Command{
 		Use:   "start [NAME]",
 		Short: "Start a session",
@@ -173,9 +196,13 @@ func sandboxStartCmd(g *globals, f *sandboxFlags) *cobra.Command {
 session-xxxxx). The first time, this also makes your sandbox, and asks for
 your Claude token if you haven't set one.
 
+--from copies a directory of yours into the session, and makes it where
+the session's commands start: claude, prompt, shell and pull.
+
 A session runs until you stop it, or for as long as --for says. Its files
 (/work) exist as long as it does.`,
 		Example: `  mcloud sandbox start
+  mcloud sandbox start refactor --from ./my-repo
   mcloud sandbox start refactor --for 8h`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -189,6 +216,20 @@ A session runs until you stop it, or for as long as --for says. Its files
 			}
 			if ttl < 0 {
 				return errors.New("--for: a session can't end in the past")
+			}
+			dir := ""
+			if from != "" {
+				info, err := os.Stat(from)
+				if err != nil {
+					return fmt.Errorf("--from: %w", err)
+				}
+				if !info.IsDir() {
+					return fmt.Errorf("--from takes a directory, and %s is a file: start the session and mcloud sandbox cp it", from)
+				}
+				if from, err = filepath.Abs(from); err != nil {
+					return err
+				}
+				dir = filepath.Base(from)
 			}
 			s, err := g.sandbox(ctx, f)
 			if err != nil {
@@ -220,7 +261,10 @@ A session runs until you stop it, or for as long as --for says. Its files
 			if ttl > 0 {
 				until = time.Now().Add(ttl)
 			}
-			name, err = s.k.StartSession(ctx, s.user, name, until)
+			if used, limit, ok := s.k.SessionLimit(ctx, s.user); ok && used >= limit {
+				return sessionLimitError(ctx, s, used, limit)
+			}
+			name, err = s.k.StartSession(ctx, s.user, name, dir, until)
 			if err != nil {
 				return err
 			}
@@ -242,12 +286,30 @@ A session runs until you stop it, or for as long as --for says. Its files
 			} else {
 				step.Done("Session %s is up, until %s", u.Bold(name), until.Local().Format("15:04 on 2 Jan"))
 			}
+			if from != "" {
+				copying := u.Step(fmt.Sprintf("Copying %s to %s", dir, name))
+				if err := s.k.CopyToSession(ctx, s.user, name, from, ""); err != nil {
+					copying.Fail("")
+					return fmt.Errorf("session %s is up, but without %s: %w. To try again: mcloud sandbox cp %s %s:", name, dir, err, from, name)
+				}
+				copying.Done("Copied %s to %s", dir, name)
+			}
 			u.Hint("mcloud sandbox claude %s", name)
 			return nil
 		},
 	}
 	c.Flags().DurationVar(&ttl, "for", 0, "end the session after this long, e.g. 8h (default: when you stop it)")
+	c.Flags().StringVar(&from, "from", "", "a directory to copy into the session, and work in there")
 	return c
+}
+
+// sessionLimitError says a sandbox is at its limit, and with what.
+func sessionLimitError(ctx context.Context, s *sandbox, used, limit int) error {
+	running := ""
+	if all, err := s.k.Sessions(ctx, s.user); err == nil && len(all) > 0 {
+		running = " (" + strings.Join(sessionNames(all), ", ") + ")"
+	}
+	return fmt.Errorf("%d of %d sessions are running%s: stop one (mcloud sandbox stop), or ask an admin for more", used, limit, running)
 }
 
 func sandboxListCmd(g *globals, f *sandboxFlags) *cobra.Command {
@@ -280,9 +342,12 @@ func sandboxListCmd(g *globals, f *sandboxFlags) *cobra.Command {
 					if !a.Until.IsZero() {
 						ends = a.Until.Local().Format("15:04 on 2 Jan")
 					}
-					rows[i] = []string{a.Name, state, sinceShort(a.Created), ends}
+					rows[i] = []string{a.Name, state, sinceShort(a.Created), ends, firstNonEmpty(a.Dir, "-")}
 				}
-				u.Table([]string{"Name", "State", "Age", "Ends"}, rows)
+				u.Table([]string{"Name", "State", "Age", "Ends", "Directory"}, rows)
+			}
+			if used, limit, ok := s.k.SessionLimit(ctx, s.user); ok && len(all) > 0 {
+				u.Printf("%s", u.Dim(fmt.Sprintf("%d of %d sessions in use", used, limit)))
 			}
 			has, err := s.k.HasSandboxToken(ctx, s.user)
 			if err != nil {
@@ -340,27 +405,30 @@ func sessionAndArgs(cmd *cobra.Command, args []string) (session string, rest []s
 	return session, rest, nil
 }
 
-// execIn runs argv in a session, wired to this terminal.
-func (g *globals) execIn(cmd *cobra.Command, f *sandboxFlags, session string, argv []string) error {
+// execIn runs argv in a session, wired to this terminal: in dir, or
+// where the session was started from.
+func (g *globals) execIn(cmd *cobra.Command, f *sandboxFlags, session, dir string, argv []string) error {
 	ctx := cmd.Context()
 	s, err := g.existingSandbox(ctx, f)
 	if err != nil {
 		return err
 	}
-	name, err := s.session(ctx, session)
+	in, err := s.session(ctx, session)
 	if err != nil {
 		return err
 	}
-	return s.k.SessionExec(ctx, s.user, name, argv, g.in, g.out, g.errOut)
+	return s.k.SessionExecIn(ctx, s.user, in.Name, sessionDir(in, dir), argv, g.in, g.out, g.errOut)
 }
 
 func sandboxClaudeCmd(g *globals, f *sandboxFlags) *cobra.Command {
-	return &cobra.Command{
+	var dir string
+	c := &cobra.Command{
 		Use:   "claude [SESSION] [-- ARGS...]",
 		Short: "Claude Code in a session",
-		Long: `Run Claude Code in a session, in its work directory (/work). On a terminal
-it's the interactive interface; what follows -- goes to claude as it is.
-SESSION can be left out when you have one session.
+		Long: `Run Claude Code in a session: in the directory it was started --from, or
+its work directory (/work). On a terminal it's the interactive interface;
+what follows -- goes to claude as it is. SESSION can be left out when you
+have one session. For a single task, see mcloud sandbox prompt.
 
 Claude Code keeps its conversations in the session, so claude --resume and
 --continue work for as long as the session does.`,
@@ -372,17 +440,21 @@ Claude Code keeps its conversations in the session, so claude --resume and
 			if err != nil {
 				return err
 			}
-			return g.execIn(cmd, f, session, append([]string{"claude"}, rest...))
+			return g.execIn(cmd, f, session, dir, append([]string{"claude"}, rest...))
 		},
 	}
+	dirFlag(c, &dir)
+	return c
 }
 
 func sandboxShellCmd(g *globals, f *sandboxFlags) *cobra.Command {
-	return &cobra.Command{
+	var dir string
+	c := &cobra.Command{
 		Use:   "shell [SESSION] [-- COMMAND...]",
 		Short: "A shell in a session, or one command",
-		Long: `Open a shell in a session, in its work directory (/work), or run what
-follows -- there. SESSION can be left out when you have one session.`,
+		Long: `Open a shell in a session, or run what follows -- there: in the directory
+the session was started --from, or its work directory (/work). SESSION can
+be left out when you have one session.`,
 		Example: `  mcloud sandbox shell
   mcloud sandbox shell refactor -- git status`,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -393,9 +465,11 @@ follows -- there. SESSION can be left out when you have one session.`,
 			if len(rest) == 0 {
 				rest = []string{"bash"}
 			}
-			return g.execIn(cmd, f, session, rest)
+			return g.execIn(cmd, f, session, dir, rest)
 		},
 	}
+	dirFlag(c, &dir)
+	return c
 }
 
 // splitSessionPath reads SESSION:PATH. A Windows drive (C:\x) or anything
@@ -436,10 +510,11 @@ special files are left out, and nothing is written outside DEST.`,
 			}
 			u := g.UI()
 			if dstRemote {
-				name, err := s.session(ctx, dstSession)
+				in, err := s.session(ctx, dstSession)
 				if err != nil {
 					return err
 				}
+				name := in.Name
 				step := u.Step(fmt.Sprintf("Copying %s to %s", src, name))
 				if err := s.k.CopyToSession(ctx, s.user, name, src, dst); err != nil {
 					step.Fail("")
@@ -448,10 +523,11 @@ special files are left out, and nothing is written outside DEST.`,
 				step.Done("Copied %s to %s:%s", src, name, dst)
 				return nil
 			}
-			name, err := s.session(ctx, srcSession)
+			in, err := s.session(ctx, srcSession)
 			if err != nil {
 				return err
 			}
+			name := in.Name
 			step := u.Step(fmt.Sprintf("Copying %s:%s", name, src))
 			target, skipped, err := s.k.CopyFromSession(ctx, s.user, name, src, dst)
 			if err != nil {
@@ -473,7 +549,8 @@ func sandboxStopCmd(g *globals, f *sandboxFlags) *cobra.Command {
 		Use:   "stop SESSION...",
 		Short: "End sessions; their files go with them",
 		Long: `End sessions. A session's pod and everything in its work directory are
-deleted: copy out what you want to keep first (mcloud sandbox cp).`,
+deleted: bring out what you want to keep first (mcloud sandbox pull for
+commits, mcloud sandbox cp for files).`,
 		Example: `  mcloud sandbox stop refactor
   mcloud sandbox stop --all`,
 		RunE: func(cmd *cobra.Command, args []string) error {
