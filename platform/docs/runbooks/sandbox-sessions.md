@@ -35,35 +35,42 @@ you: list and stop their sessions, remove their sandbox.
 
 ## Check what a session can reach
 
-After a change to the policy in `sandbox/sessions/users.yaml`, to Cilium,
-or to gVisor. In a session of your own:
+A session reaches the internet and nothing in the cluster. Check it after
+a change to the policy in `sandbox/sessions/users.yaml`, to Cilium, or to
+gVisor. In a session of your own, with a node's kubelet and a pod (CoreDNS
+here) as the things that must not answer:
 
 ```fish
-mcloud sandbox shell <session> -- node - < docs/runbooks/sandbox-sessions/egress-check.js
+set kubelet (kubectl get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}'):10250
+set pod (kubectl -n kube-system get pods -l k8s-app=kube-dns -o jsonpath='{.items[0].status.podIP}'):53
+mcloud sandbox shell <session> -- node - $kubelet $pod < docs/runbooks/sandbox-sessions/egress-check.js
 ```
 
 ```
 dns api.anthropic.com                 <an address>
 https api.anthropic.com               HTTP 401
-dns registry.npmjs.org                ERR EAI_AGAIN
-dns example.com                       ERR EAI_AGAIN
-tcp 1.1.1.1:443                       TIMEOUT
-tcp 9.9.9.9:443                       TIMEOUT
+https registry.npmjs.org              HTTP 200
+https github.com                      HTTP 200
+tcp github.com:22                     connected
+tcp 169.254.169.254:80 (metadata)     TIMEOUT
 tcp 10.96.0.1:443 (API Service)       TIMEOUT
+tcp <node address>:10250              TIMEOUT
+tcp <pod address>:53                  TIMEOUT
 ```
 
-Anything else in the last five lines means the policy isn't holding that
+`connected` in the last four lines means the policy isn't holding that
 namespace (`kubectl -n sbx-<user> get cnp sandbox-egress`, VALID should be
-True). To watch what's dropped while a session runs:
+True). A failure in the first five means it allows less than it should.
+To watch what's dropped while a session runs:
 
 ```fish
 set node (kubectl get nodes -l pool=sandbox -o jsonpath='{.items[0].metadata.name}')
 set cilium (kubectl -n kube-system get pods -l k8s-app=cilium --field-selector spec.nodeName=$node -o name)
-kubectl -n kube-system exec $cilium -c cilium-agent -- cilium-dbg monitor --type drop --type l7
+kubectl -n kube-system exec $cilium -c cilium-agent -- cilium-dbg monitor --type drop
 ```
 
-A host that sessions should reach is added to both rules of that policy,
-for every user at once. Its comment says what each added host costs.
+Sessions leave through the NAT gateway, so what one does on the internet
+comes from the cluster's address.
 
 ## Let a user run more sessions
 
@@ -117,7 +124,10 @@ mcloud says most of these itself; this is what's underneath.
   running already (`kubectl describe pod`).
 - **Claude Code says `Failed to authenticate. API Error: 401`:** the user's
   token is wrong or more than a year old.
-- **`npm install`, `git clone` or a web fetch fails in a session:** that's
-  the policy, not a fault.
+- **`npm install`, `git clone` or a web fetch fails in a session:** the
+  policy allows them, so check it as above. A private repository fails
+  because a session has no git credentials, not because of the network.
+- **A session can't reach an app or a database in the cluster:** that's the
+  policy, and meant.
 - **After a cluster rebuild nobody has a sandbox:** entries and tokens
   aren't backed up. Users run `mcloud sandbox token set` again.

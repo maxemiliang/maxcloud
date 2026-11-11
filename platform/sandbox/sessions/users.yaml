@@ -8,7 +8,8 @@
 #   - the namespace sbx-<user>, Pod Security `restricted`
 #   - a limit on running sessions (entry value `sessions`, default 2; only
 #     an admin sets it)
-#   - network policies: the Claude API and nothing else, nothing in
+#   - network policies: out to the internet but nothing in the cluster,
+#     nothing in
 #   - the session template, and the (empty) pool claims are made on
 #   - the user's rights there: claims, a shell in their sessions, their
 #     token (rbac.yaml). Nobody else's, so one user can't read another's
@@ -71,57 +72,50 @@ spec:
           services.loadbalancers: "0"
           services.nodeports: "0"
 
-    # What the pods here may connect to: the two public resolvers, for the
-    # Claude API's name only, and that name on 443. Everything else is
-    # dropped, the rest of the cluster included.
+    # What the pods here may connect to: the public internet, and nothing
+    # else. Not the cluster (pods, nodes, the API server), not the private
+    # networks around it, not UpCloud's metadata service.
     #
-    # Why it matters: a session carries the user's subscription token in
-    # its environment, and runs whatever a prompt or a file talks it into.
-    # With this, there is nowhere to send the token but the host it's for.
+    # The internet, so a session can clone, install and look things up. The
+    # price: a session carries the user's subscription token in its
+    # environment and runs whatever a prompt, a web page or a repository
+    # talks it into, and now there is somewhere to send the token and the
+    # code in it. docs/kb/ops/agent-sessions-sandbox.md.
     #
-    # What it doesn't do:
-    # - It allows addresses, not names: once the name resolves, any TLS
-    #   connection to that address on 443 passes, whatever host it asks for.
-    # - Anything sent to the Claude API is allowed, with any credentials.
-    #
-    # A host added here (a package registry, a git server) is somewhere the
-    # token can go: the npm registry accepts uploads, and sits on addresses
-    # shared with every other site behind Cloudflare.
+    # Sessions leave through the NAT gateway like everything else here, so
+    # what one does on the internet comes from the cluster's address.
     - apiVersion: cilium.io/v2
       kind: CiliumNetworkPolicy
       metadata:
         name: sandbox-egress
         namespace: sbx-<< inputs.user >>
       spec:
-        description: "Sandbox pods: DNS for, and HTTPS to, the Claude API only"
+        description: "Sandbox pods: the public internet, nothing in the cluster or on private networks"
         # Every pod in the namespace. Having an egress section puts them in
         # egress default-deny.
         endpointSelector: {}
         egress:
-          # DNS, to the resolvers the template below gives its pods. The dns
-          # rules send these packets through Cilium's DNS proxy, which
-          # refuses every other name (so DNS can't carry data out either)
-          # and learns the addresses the toFQDNs rule then allows.
-          - toCIDR:
-              - 1.1.1.1/32
-              - 9.9.9.9/32
-            toPorts:
-              - ports:
-                  - port: "53"
-                    protocol: UDP
-                  - port: "53"
-                    protocol: TCP
-                rules:
-                  dns:
-                    - matchName: api.anthropic.com
-          # Model requests. A `claude setup-token` token needs no other
-          # Anthropic host (no sign-in, no refresh).
-          - toFQDNs:
-              - matchName: api.anthropic.com
-            toPorts:
-              - ports:
-                  - port: "443"
-                    protocol: TCP
+          # Any port: DNS (to the resolvers the template below names), HTTPS,
+          # git over SSH. The exceptions are every private range, which
+          # covers the nodes' network, pods, services and what UKS reserves
+          # (infra/cluster/variables.tf); 100.64.0.0/10, where UKS has the
+          # API server and load balancers; and link-local, for the metadata
+          # service at 169.254.169.254.
+          - toCIDRSet:
+              - cidr: 0.0.0.0/0
+                except:
+                  - 10.0.0.0/8
+                  - 172.16.0.0/12
+                  - 192.168.0.0/16
+                  - 100.64.0.0/10
+                  - 169.254.0.0/16
+        # The same again as a deny, by what the destination is and not its
+        # address. A deny wins over every allow, so it holds if the ranges
+        # above ever stop covering the cluster.
+        egressDeny:
+          - toEntities:
+              - cluster
+              - kube-apiserver
     # Nothing connects to a session: it's driven through exec, which goes
     # through the kubelet, not the pod network.
     - apiVersion: networking.k8s.io/v1
@@ -141,9 +135,10 @@ spec:
         name: claude-code
         namespace: sbx-<< inputs.user >>
       spec:
-        # Not agent-sandbox's own NetworkPolicy: its default lets a sandbox
-        # reach the whole public internet, and policies add up, so it would
-        # undo the one above.
+        # Not agent-sandbox's own NetworkPolicy: its default allows the
+        # internet too, but not 100.64.0.0/10 among its exceptions, where UKS
+        # has the API server and its load balancers. Policies add up, so it
+        # would open those.
         networkPolicyManagement: Unmanaged
         podTemplate:
           spec:
@@ -157,7 +152,7 @@ spec:
             terminationGracePeriodSeconds: 10
             # Public resolvers, not the cluster's: ClusterIPs time out under
             # gVisor (docs/kb/networking/gvisor-no-clusterip.md), CoreDNS's
-            # included. The policy above allows exactly these two.
+            # included.
             dnsPolicy: None
             dnsConfig:
               nameservers: [1.1.1.1, 9.9.9.9]
