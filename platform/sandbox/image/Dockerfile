@@ -55,6 +55,20 @@ RUN npm install -g "pnpm@${PNPM_VERSION}" && npm cache clean --force
 COPY --from=go /usr/local/go /usr/local/go
 COPY --from=uv /uv /uvx /usr/local/bin/
 
+# SSH into a session (mcloud sandbox ssh): mcloud runs `sshd -i` over the
+# exec channel for each connection, as the session's user, so nothing
+# listens. The package's host keys go: a session makes its own. (rsync, for
+# rsync over SSH, is among the tools above.) The node user's home becomes
+# the work volume, which sessions already have as HOME, so SSH logins start
+# there. A login shell's /etc/profile sets a PATH of its own: the profile.d
+# line gives it back the session's, which mcloud passes in as
+# MCLOUD_SSH_PATH.
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends openssh-server \
+  && rm -rf /var/lib/apt/lists/* /etc/ssh/ssh_host_*_key* \
+  && usermod -d /work node \
+  && echo 'if [ -n "${MCLOUD_SSH_PATH-}" ]; then PATH=$MCLOUD_SSH_PATH; fi' >/etc/profile.d/sandbox-ssh-path.sh
+
 # Last, so a new Claude Code version changes only the layers from here on:
 # the node pulls the rest once. No default: an empty version would install
 # whatever is latest.
