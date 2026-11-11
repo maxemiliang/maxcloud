@@ -161,6 +161,12 @@ spec:
               runAsUser: 1000
               runAsGroup: 1000
               fsGroup: 1000
+              # Group tty (5 in the image, as in every Debian): sshd gives a
+              # login's terminal to that group, and under gVisor may only
+              # if the user is in it. Without this, mcloud sandbox ssh dies
+              # with "chown(/dev/pts/0, 1000, 5) failed".
+              # docs/kb/ops/sshd-terminal-tty-group-gvisor.md.
+              supplementalGroups: [5]
               seccompProfile:
                 type: RuntimeDefault
             containers:
