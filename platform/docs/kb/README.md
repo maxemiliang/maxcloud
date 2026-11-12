@@ -48,6 +48,7 @@ Procedures live in [`../runbooks/`](../runbooks/) and the README, not here.
 - [How UpCloud Object Storage behaves for per-app users and buckets](data/upcloud-object-storage-behaviour.md): 400 for "already exists", Deny works, public read, presigned PUT
 - [How maxcloud databases come back after losing their Cluster or namespace](data/maxcloud-database-recovery.md): measured restore times, and why their disks are deleted
 - [maxcloud apps have owners, and their data belongs to one registration](data/maxcloud-app-owners-and-registrations.md): per-app owner bindings, admission, registration IDs, adopting old data
+- [Block storage: MaxIOPS for databases, Standard for the rest](data/block-storage-tiers.md): which class for which PVC, and why the classes sit with the controllers
 
 ## build-deploy
 
@@ -75,6 +76,7 @@ Procedures live in [`../runbooks/`](../runbooks/) and the README, not here.
 - [The sandbox image carries what a session can't install itself, modelled on boat.dev's, at about 2.2 GB](ops/sandbox-image-toolset.md): what's in it, what was left out and why
 - [Under gVisor, sshd as a plain user can't hand a terminal to group tty unless the user is in it](ops/sshd-terminal-tty-group-gvisor.md): `chown(/dev/pts/0, 1000, 5) failed` on `mcloud sandbox ssh`
 - [SSH into agent sessions is sshd -i over the exec channel, started by mcloud per connection](ops/agent-sessions-ssh.md): no listener, no new RBAC, host keys without trust on first use
+- [A StatefulSet's storage class can't be changed; delete the StatefulSet and its PVC](ops/statefulset-storage-class-change.md): `Forbidden: updates to statefulset spec`, and moving Loki's volume
 - [A killed tofu apply leaves a stale state lock](ops/tofu-killed-apply.md)
 - [Backups stay in one region for now; a copy to de-fra1 is the plan when needed](ops/off-region-backup-copy.md): deferred, with the plan and what it doesn't cover
 - [UpCloud sub-account usernames can't contain dashes; Object Storage users can](ops/upcloud-sub-account-names.md): `homelab_api`, `maxcloud_controller`

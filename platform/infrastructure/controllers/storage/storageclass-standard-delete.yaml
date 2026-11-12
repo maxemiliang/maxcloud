@@ -1,0 +1,17 @@
+# Like upcloud-block-storage-maxiops-encrypted-delete, but on UpCloud's
+# Standard tier: up to 10k IOPS instead of MaxIOPS's 100k, at well under half
+# the price per GB. Encrypted at rest; the disk is deleted together with its PVC.
+#
+# For disposable volumes that don't need MaxIOPS: write-ahead logs, queues,
+# caches. Databases and Prometheus stay on MaxIOPS.
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: upcloud-block-storage-standard-encrypted-delete
+provisioner: storage.csi.upcloud.com
+parameters:
+  tier: standard
+  encryption: data-at-rest
+reclaimPolicy: Delete
+allowVolumeExpansion: true
+volumeBindingMode: Immediate
