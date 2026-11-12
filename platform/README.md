@@ -291,9 +291,17 @@ applies its manifests itself.
     incoming request; Knative's routes set them again. So neither an app's
     route nor a client can point Traefik or the activator at another app.
   - Which hostnames an app's pods may ask Traefik's in-cluster entrypoint
-    (8081) for: a Cilium L7 rule on Traefik's side, one policy per app
-    plus `infrastructure/configs/run/traefik-ingress.yaml`
-    (`private/docs/kb/networking/traefik-ingress-host-rules.md`).
+    (8081) for is a Cilium L7 rule on Traefik's side, so an app can't undo
+    it with a policy of its own: one policy per app (`app-<name>`, from the
+    registry) plus the base `infrastructure/configs/run/traefik-ingress.yaml`.
+    An app may ask for only its own cluster-local names
+    (`<svc>.<app>.svc.cluster.local` and the short forms) and the public
+    `<svc>--<app>.gronblom.dev` names; any other Host gets a 403 from
+    Cilium's Envoy. Before 2026-11-12 every Host was allowed: any app could
+    call any other app's private service this way (audit M3, path 1; the
+    activator, route-rewrite and forged-header paths were closed on
+    2026-11-08). Rollout and verification procedure:
+    `private/docs/kb/networking/traefik-ingress-host-rules.md`.
   - The app repo is applied as a ServiceAccount with the built-in `admin`
     role in that namespace only, which can't change the quota.
   - `admin` would also let it make Flux objects and certificates from the
@@ -583,6 +591,17 @@ applies its manifests itself.
 
 ## Known gaps
 
+- **Cross-tenant cluster-local access through Traefik is fixed in the repo
+  (2026-11-12), not yet verified on the live cluster.** Until then, "private"
+  still means not on the internet, not hidden from other apps: any app's pod
+  could reach any other app's cluster-local service by sending its Host
+  header to `traefik-knative` (audit M3, path 1). The Cilium L7 rules on
+  Traefik's ingress now refuse every Host but the app's own names and the
+  public ones (`infrastructure/configs/run/traefik-ingress.yaml`,
+  `apps/maxcloud/resourceset.yaml`); after Flux applies them, verify with
+  Hubble that no 403s are legitimate traffic and no unexpected Hosts get
+  through, before relying on the isolation. Details: the private repo's
+  `docs/research/tenant-cluster-local-isolation.md`.
 - **A node reboot drops new connections for a few seconds.** Traefik runs as a
   DaemonSet, which a drain doesn't move, so the LB keeps sending connections to
   a rebooting node until its health check (every 2s, 2 failures) takes it out.
