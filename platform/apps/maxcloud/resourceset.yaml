@@ -226,7 +226,8 @@ spec:
     # policy is infrastructure/configs/run/traefik-ingress.yaml; this one
     # repeats its rules for everything else, so that this policy on its own
     # can't drop any other traffic to Traefik. Audit M3.
-    # STAGE 1, OBSERVING: allows every Host for now. Tightening:
+    # TIGHTENED (2026-11-12): only the app's own names below; public Knative
+    # names come from the base policy. Procedure:
     # private/docs/kb/networking/traefik-ingress-host-rules.md.
     - apiVersion: cilium.io/v2
       kind: CiliumNetworkPolicy
@@ -276,10 +277,12 @@ spec:
                     protocol: TCP
                 rules:
                   http:
-                    # Stage 1: any Host. Tightened, the app's own names,
-                    # <svc>.<app>, <svc>.<app>.svc, <svc>.<app>.svc.cluster.local:
-                    #   - host: '[a-z0-9]+(-+[a-z0-9]+)*\.<< inputs.name >>(\.svc(\.cluster\.local)?)?(:[0-9]+)?'
-                    - {}
+                    # The app's own names, full-string RE2 on the
+                    # :authority (single-quoted YAML, so \. stays one
+                    # backslash): <svc>.<app>, <svc>.<app>.svc,
+                    # <svc>.<app>.svc.cluster.local, with an optional port.
+                    # Case tricks and trailing dots fail closed.
+                    - host: '[a-z0-9]+(-+[a-z0-9]+)*\.<< inputs.name >>(\.svc(\.cluster\.local)?)?(:[0-9]+)?'
 
     # The app's own repo; only fetches the manifests directory. Not generated
     # for an app kept in this repo, which uses the flux-system source, nor for

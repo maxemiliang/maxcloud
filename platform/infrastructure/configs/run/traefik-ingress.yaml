@@ -12,10 +12,13 @@
 # This is the base; apps/maxcloud/resourceset.yaml makes one more per app
 # (app-<name>, here in traefik).
 #
-# STAGE 1, OBSERVING: the HTTP rules below allow every Host, but requests
-# from apps to 8081 now go through Cilium's Envoy, so Hubble shows their
-# Host. Nothing is refused yet. Tightening, after watching:
-# private/docs/kb/networking/traefik-ingress-host-rules.md.
+# TIGHTENED (2026-11-12): an app gets only the public Knative names below;
+# its own cluster-local names come from its per-app policy (app-<name>,
+# from apps/maxcloud/resourceset.yaml). Any other Host on 8081 from an app
+# is refused with a 403 from Cilium's Envoy. Audit M3, path 1:
+# private/docs/research/tenant-cluster-local-isolation.md and
+# private/docs/kb/networking/traefik-ingress-host-rules.md (rollout and
+# verification procedure).
 #
 # Rules that must stay true (they're why public traffic can't be dropped):
 # - Any policy selecting the Traefik pods puts them into ingress
@@ -76,10 +79,13 @@ spec:
         - ports:
             - port: "8081"
               protocol: TCP
-    # 8081 from any app. When tightened: public Knative names only
-    # (<svc>--<app>.gronblom.dev answers here too); each app's own names
-    # come from its own policy (L7 rules for the same port and peer add up).
-    # An app without its own policy then gets only these.
+    # 8081 from any app: public Knative names only (<svc>--<app>.gronblom.dev
+    # answers on this port too, via the public Gateway's in-cluster
+    # listener). Each app's own cluster-local names come from its own policy
+    # (L7 rules for the same port and peer add up), so an app without one
+    # gets only these. Cilium matches host as a full-string RE2 regex on the
+    # :authority (single-quoted YAML, so \. stays one backslash), which makes
+    # case tricks and trailing dots fail closed.
     - fromEndpoints:
         - matchLabels:
             k8s:io.cilium.k8s.namespace.labels.run.gronblom.dev/tenant: "true"
@@ -89,6 +95,4 @@ spec:
               protocol: TCP
           rules:
             http:
-              # Stage 1: any Host. Tightened:
-              #   - host: '[-a-z0-9]+--[-a-z0-9]+\.gronblom\.dev(:[0-9]+)?'
-              - {}
+              - host: '[-a-z0-9]+--[-a-z0-9]+\.gronblom\.dev(:[0-9]+)?'
