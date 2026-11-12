@@ -91,7 +91,11 @@ spec:
       replicas: 1
       persistence:
         size: 5Gi
-        storageClass: upcloud-block-storage-maxiops-encrypted-delete
+        # Standard tier: the volume only holds the WAL, which is written
+        # sequentially. A StatefulSet's volumeClaimTemplates can't be changed,
+        # so changing this class means deleting the StatefulSet and its PVC.
+        # See docs/kb/ops/statefulset-storage-class-change.md.
+        storageClass: upcloud-block-storage-standard-encrypted-delete
       # A PDB on a single replica would block every node drain.
       podDisruptionBudget:
         enabled: false

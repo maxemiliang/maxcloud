@@ -3,6 +3,9 @@ kind: Kustomization
 resources:
   # helm-controller's identity for the HelmReleases below.
   - flux-helm.yaml
+  # StorageClasses, here rather than in configs: the HelmReleases below have
+  # PVCs that use them, and configs only applies once these are healthy.
+  - storage
   - metrics-server
   - traefik
   - cert-manager
