@@ -25,8 +25,8 @@ spec:
   config:
     network:
       ingress-class: gateway-api.ingress.networking.knative.dev
-      # One level below the domain (web--shop.gronblom.dev, not
-      # web.shop.gronblom.dev), so the existing *.gronblom.dev wildcard
+      # One level below the domain (web--shop.makiya.dev, not
+      # web.shop.makiya.dev), so the *.makiya.dev wildcard
       # certificate and Cloudflare's free edge certificate both cover it.
       # "--", which app names can't contain and service names in app
       # namespaces may not (infrastructure/configs/run/tenant-routing.yaml):
@@ -42,14 +42,19 @@ spec:
 
     # Every service is cluster-local unless it opts in to a public domain with
     # a label, so forgetting a label can't expose anything:
-    #   run.gronblom.dev/expose: public  ->  <name>--<namespace>.gronblom.dev
+    #   run.gronblom.dev/expose: public  ->  <name>--<namespace>.makiya.dev
     # Custom hostnames (e.g. x.lankkupelit.fi) are maxcloud Domains: the
     # maxcloud controller copies a service's route onto the hostname
     # (README, Run platform, Custom domains). Not DomainMappings: no
     # ClusterDomainClaims are made (autocreate-cluster-domain-claims is off).
     domain:
       svc.cluster.local: ""
-      gronblom.dev: |
+      # maxcloud apps' domain since 2026-11-13 (gronblom.dev before; that
+      # zone now keeps the platform's own hosts and admin-allowed custom
+      # domains). Changing it moves every public service and public bucket
+      # (MAXCLOUD_PUBLIC_DOMAIN in controllers/maxcloud/config.yaml) and
+      # needs traefik-ingress.yaml's 8081 host rule changed with it.
+      makiya.dev: |
         selector:
           run.gronblom.dev/expose: public
 

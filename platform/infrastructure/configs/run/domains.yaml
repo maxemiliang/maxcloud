@@ -1,5 +1,5 @@
 # The hostnames each maxcloud app may have, besides the ones the platform
-# gives it (<service>--<app>.gronblom.dev, <service>.<app>.svc.cluster.local).
+# gives it (<service>--<app>.makiya.dev, <service>.<app>.svc.cluster.local).
 # An admin's call, kept here in git: apps can't change it.
 #
 # A name under lab.gronblom.dev (an SSO route,
@@ -12,7 +12,9 @@
 # One key per app, its hostnames comma-separated. `*.zone` allows any name
 # exactly one level below zone (as a wildcard certificate covers it). Never
 # give an app a wildcard on a zone others use: *.gronblom.dev would let it
-# take registry.gronblom.dev.
+# take registry.gronblom.dev, and *.makiya.dev every other app's names.
+# Never allow a makiya.dev name with "--" in it either: those are the
+# platform's <service>--<app>.makiya.dev and <bucket>--<app>.makiya.dev.
 #
 # Who reads it:
 #   - admission, when an app's registry entry asks for `domains`
@@ -23,8 +25,8 @@
 #     minutes. Remove it from the app's maxcloud.yaml too.
 #
 # A hostname also needs an HTTPS listener whose certificate covers it
-# (infrastructure/configs/gateway): today *.gronblom.dev, *.lab.gronblom.dev
-# and *.lankkupelit.fi. Domains outside those zones aren't supported yet
+# (infrastructure/configs/gateway): today *.makiya.dev, *.gronblom.dev,
+# *.lab.gronblom.dev and *.lankkupelit.fi. Domains outside those zones aren't supported yet
 # (docs/kb/networking/custom-domains-outside-managed-zones.md).
 #
 # Don't delete it: both policies fail closed without it ("no params found

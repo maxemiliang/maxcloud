@@ -17,6 +17,7 @@ Procedures live in [`../runbooks/`](../runbooks/) and the README, not here.
 
 - [Traefik runs as a DaemonSet with externalTrafficPolicy Local](networking/traefik-daemonset-local-traffic.md): why, and the LB health-check timing
 - [*.lab.gronblom.dev is DNS-only; one-level names may be proxied](networking/lab-subdomain-dns-only.md): Cloudflare's free certificate covers one level
+- [maxcloud apps live on makiya.dev; gronblom.dev keeps the platform's own hosts](networking/makiya-dev-app-domain.md): why a separate zone, and what moving it touches
 - [Traefik's Gateway API provider rejects ExternalName backends](networking/traefik-externalname-backends.md): how SSO routes reach Knative services, and public buckets reach Object Storage (and Traefik's name normalisation)
 - [Traefik 3 gives a request 60s, body included; the LB is not the limit](networking/traefik-read-timeout.md): large uploads cut off after a minute
 - [maxcloud custom domains cover the managed zones only; other people's domains are a later step](networking/custom-domains-outside-managed-zones.md): why a CNAME alone isn't enough (TLS, listeners, Cloudflare 1014, squatting), and the plan

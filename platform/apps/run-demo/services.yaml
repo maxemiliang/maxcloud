@@ -1,4 +1,4 @@
-# Public: https://hello--run-demo.gronblom.dev (<name>--<namespace>, from the
+# Public: https://hello--run-demo.makiya.dev (<name>--<namespace>, from the
 # label below). Proxied by Cloudflare, like hello.gronblom.dev.
 apiVersion: serving.knative.dev/v1
 kind: Service

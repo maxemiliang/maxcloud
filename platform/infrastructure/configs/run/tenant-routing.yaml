@@ -1,7 +1,7 @@
 # What an app's routing objects may say, in namespaces labelled
 # run.gronblom.dev/tenant. Hostnames on routes: route-admission.yaml.
 
-# Knative names. A public service is <service>--<app>.gronblom.dev, and a
+# Knative names. A public service is <service>--<app>.makiya.dev, and a
 # tagged revision <tag>-<service>--<app> (infrastructure/configs/knative/
 # serving.yaml). App names have no "--"; if service names and tags have none
 # either, everything before the "--" belongs to the app after it, and no
@@ -20,12 +20,12 @@ spec:
         resources: [services, routes]
   validations:
     - expression: "!object.metadata.name.contains('--')"
-      message: "Knative service and route names may not contain '--' (the hostname is <service>--<app>.gronblom.dev)"
+      message: "Knative service and route names may not contain '--' (the hostname is <service>--<app>.makiya.dev)"
       reason: Invalid
     - expression: >-
         !has(object.spec.traffic) ||
         object.spec.traffic.all(t, !has(t.tag) || !t.tag.contains('--'))
-      message: "traffic tags may not contain '--' (the hostname is <tag>-<service>--<app>.gronblom.dev)"
+      message: "traffic tags may not contain '--' (the hostname is <tag>-<service>--<app>.makiya.dev)"
       reason: Invalid
 ---
 apiVersion: admissionregistration.k8s.io/v1

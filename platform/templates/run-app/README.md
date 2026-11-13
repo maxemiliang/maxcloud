@@ -40,7 +40,7 @@ A change to `deploy/` only (scaling, env vars) is applied without a build.
   (8080).
   - It is private unless you add the label `run.gronblom.dev/expose: public`.
     Private means cluster-local: `http://web.<namespace>.svc.cluster.local`.
-  - Public means `https://web--<namespace>.gronblom.dev`.
+  - Public means `https://web--<namespace>.makiya.dev`.
 - `deploy/examples/`: copy into `deploy/k8s/` and list in its
   `kustomization.yaml` as needed.
   - `worker.yaml`: a background process with no HTTP.

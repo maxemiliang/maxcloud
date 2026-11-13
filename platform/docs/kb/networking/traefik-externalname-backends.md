@@ -29,7 +29,7 @@ every app.
 
 **Reaching a host outside the cluster (public buckets, 2026-11-05):** the
 same limit applies. The maxcloud controller routes
-`<bucket>--<app>.gronblom.dev` to Object Storage through Traefik's own
+`<bucket>--<app>.makiya.dev` to Object Storage through Traefik's own
 objects instead, all in `maxcloud-system`: an HTTPRoute whose backendRef is
 a TraefikService, which points at an ExternalName Service
 (`passHostHeader: false`, https). For that, Traefik has:
