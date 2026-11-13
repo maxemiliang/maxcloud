@@ -43,7 +43,7 @@ own, and it reaches the app.
 
 | Option | Default | |
 | --- | --- | --- |
-| `public` | `false` | Reachable from the internet at `https://<name>--<app>.gronblom.dev`. Otherwise cluster-local. |
+| `public` | `false` | Reachable from the internet at `https://<name>--<app>.makiya.dev`. Otherwise cluster-local. |
 | `minInstances` | `0` | Instances kept running when idle. |
 | `maxInstances` | `3` | |
 | `concurrency` | `0` | Requests one instance handles before another starts (0: no limit). |
@@ -206,7 +206,7 @@ Object Storage has no bucket events: uploads tell the app themselves
 ### Public buckets
 
 A bucket listed as `assets:public` can be read by anyone (not listed) at
-`https://<bucket>--<app>.gronblom.dev/<key>`, behind Cloudflare, which
+`https://<bucket>--<app>.makiya.dev/<key>`, behind Cloudflare, which
 caches it. Writing still needs the app's credentials. So a function
 uploads to it with the AWS SDK and hands out the public URL:
 
@@ -219,7 +219,7 @@ await s3.send(new PutObjectCommand({
   ContentType: "image/png",
   CacheControl: "public, max-age=31536000, immutable",
 }));
-const url = `https://assets--${process.env.MAXCLOUD_APP}.gronblom.dev/${key}`;
+const url = `https://assets--${process.env.MAXCLOUD_APP}.makiya.dev/${key}`;
 ```
 
 The objects are also readable straight from Object Storage, at

@@ -33,16 +33,16 @@ test("the URL is the Host header with the forwarded scheme", async (t) => {
         res.on("data", (c) => (body += c)).on("end", () => resolve(body));
       }).on("error", reject).end();
     });
-  assert.equal(await get({ host: "web--shop.gronblom.dev", "x-forwarded-proto": "https" }), "https://web--shop.gronblom.dev/x?y=1");
+  assert.equal(await get({ host: "web--shop.makiya.dev", "x-forwarded-proto": "https" }), "https://web--shop.makiya.dev/x?y=1");
   // A client's X-Forwarded-Host reaches the app through Cloudflare and
   // Traefik: it mustn't decide the URL.
   assert.equal(
-    await get({ host: "web--shop.gronblom.dev", "x-forwarded-proto": "https", "x-forwarded-host": "evil.example" }),
-    "https://web--shop.gronblom.dev/x?y=1",
+    await get({ host: "web--shop.makiya.dev", "x-forwarded-proto": "https", "x-forwarded-host": "evil.example" }),
+    "https://web--shop.makiya.dev/x?y=1",
   );
   assert.equal(await get({ host: "paja.lankkupelit.fi", "x-forwarded-proto": "https,http" }), "https://paja.lankkupelit.fi/x?y=1");
   assert.equal(await get({ host: "localhost:8080" }), "http://localhost:8080/x?y=1");
-  assert.equal(await get({ host: "web--shop.gronblom.dev", "x-forwarded-proto": "javascript" }), "http://web--shop.gronblom.dev/x?y=1");
+  assert.equal(await get({ host: "web--shop.makiya.dev", "x-forwarded-proto": "javascript" }), "http://web--shop.makiya.dev/x?y=1");
 });
 
 test("a throwing handler gets a 500", async (t) => {
