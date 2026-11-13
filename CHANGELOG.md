@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.16.1](https://github.com/maxemiliang/maxcloud/compare/v0.16.0...v0.16.1) (2026-11-13)
+
+
+### Bug Fixes
+
+* **mcloud:** help, maxcloud.yaml schema and docs name makiya.dev as apps' domain ([64e93af](https://github.com/maxemiliang/maxcloud/commit/64e93af92f9f5ba8815366581cd269b7c2823666))
+
 ## [0.16.0](https://github.com/maxemiliang/maxcloud/compare/v0.15.0...v0.16.0) (2026-11-11)
 
 
