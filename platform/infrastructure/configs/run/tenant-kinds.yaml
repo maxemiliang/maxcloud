@@ -49,9 +49,9 @@ spec:
         run.gronblom.dev/tenant: "true"
 ---
 # Certificates from a ClusterIssuer. letsencrypt-prod solves DNS-01 for all
-# of gronblom.dev and lankkupelit.fi, and cert-manager approves every
-# request, so an app could get a trusted certificate (and its key) for
-# auth.lab.gronblom.dev or *.gronblom.dev, outside domains.yaml, or burn the
+# of gronblom.dev, makiya.dev and lankkupelit.fi, and cert-manager approves
+# every request, so an app could get a trusted certificate (and its key) for
+# auth.lab.gronblom.dev or *.makiya.dev, outside domains.yaml, or burn the
 # zones' Let's Encrypt rate limits. Apps don't need certificates: the
 # Gateway's wildcard listeners terminate TLS. An Issuer of the app's own
 # (its own CA, its own DNS credentials) is still fine.

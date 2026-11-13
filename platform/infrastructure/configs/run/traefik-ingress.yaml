@@ -79,7 +79,7 @@ spec:
         - ports:
             - port: "8081"
               protocol: TCP
-    # 8081 from any app: public Knative names only (<svc>--<app>.gronblom.dev
+    # 8081 from any app: public Knative names only (<svc>--<app>.makiya.dev
     # answers on this port too, via the public Gateway's in-cluster
     # listener). Each app's own cluster-local names come from its own policy
     # (L7 rules for the same port and peer add up), so an app without one
@@ -95,4 +95,4 @@ spec:
               protocol: TCP
           rules:
             http:
-              - host: '[-a-z0-9]+--[-a-z0-9]+\.gronblom\.dev(:[0-9]+)?'
+              - host: '[-a-z0-9]+--[-a-z0-9]+\.makiya\.dev(:[0-9]+)?'

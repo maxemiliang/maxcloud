@@ -106,11 +106,14 @@ secret).
 | https://auth.lab.gronblom.dev | Authelia: SSO (OIDC), passkeys/TOTP | user in `authelia-users.sops.yaml` |
 | https://paja.lankkupelit.fi | Lankkupaja: run platform app `paja`, from its own repo (`deploy/maxcloud`) | the app's own |
 | https://hello.lab.gronblom.dev, https://hello.gronblom.dev | whoami test app | none |
-| https://hello--run-demo.gronblom.dev | run platform smoke test: public Knative service (`apps/run-demo`) | none |
+| https://hello--run-demo.makiya.dev | run platform smoke test: public Knative service (`apps/run-demo`) | none |
 | https://run-demo.lab.gronblom.dev | run platform smoke test: private Knative service behind SSO | Authelia |
 | https://registry.gronblom.dev | maxcloud's container registry (zot) | an Authelia ID token (`mcloud credential`); admins only for now |
 
-- `*.lab.gronblom.dev` is DNS-only, for admin tools. `*.gronblom.dev` and
+- `*.makiya.dev` is maxcloud apps' domain (`<service>--<app>.makiya.dev`,
+  public buckets). `*.gronblom.dev` is the platform's own (registry,
+  discovery) and admin-allowed custom domains. `*.lab.gronblom.dev` is
+  DNS-only, for admin tools. `*.makiya.dev`, `*.gronblom.dev` and
   `*.lankkupelit.fi` may be proxied by Cloudflare (SSL mode Full (strict)).
   external-dns creates the records from HTTPRoutes.
 - Alerts go to a Telegram group. Alertmanager's always-firing Watchdog pings
@@ -162,8 +165,8 @@ applies its manifests itself.
   broker that fits here keeps events in memory.
 - **Routing:** no second ingress. net-gateway-api turns each Knative service
   into HTTPRoutes on Traefik.
-  - Public services go on `traefik/public`, at `<service>--<namespace>.gronblom.dev`.
-    That's one level deep, so the existing wildcard certificate and
+  - Public services go on `traefik/public`, at `<service>--<namespace>.makiya.dev`.
+    That's one level deep, so the `*.makiya.dev` wildcard certificate and
     Cloudflare's edge certificate cover it. Knative copies the
     `external-dns.kubernetes.io/cloudflare-proxied` annotation to the route.
   - Every service also gets a cluster-local route on `traefik/knative-local`.
@@ -202,13 +205,14 @@ applies its manifests itself.
     GRPCRoute made in an app namespace (`route-admission.yaml`): an app
     may use only its cluster-local names and its allowed hostnames, and
     must name them. Before this, any app could put
-    a route on any name in gronblom.dev or lankkupelit.fi. Knative's
+    a route on any name in our zones. Knative's
     controller is exempt; it only makes names from `domain-template`.
   - The controller also refuses a hostname another route on the Gateway
     already has (`HostInUse`, retried every minute), and takes a route
     down when its hostname leaves the allowlist.
-  - Only hostnames under a listener's wildcard: `*.gronblom.dev`,
-    `*.lab.gronblom.dev`, `*.lankkupelit.fi`, one level deep. Other
+  - Only hostnames under a listener's wildcard: `*.makiya.dev`,
+    `*.gronblom.dev`, `*.lab.gronblom.dev`, `*.lankkupelit.fi`, one level
+    deep. Other
     people's domains aren't supported yet
     (`docs/kb/networking/custom-domains-outside-managed-zones.md`).
 - **App registry (maxcloud):** `apps/maxcloud/resourceset.yaml` is a Flux
@@ -296,7 +300,7 @@ applies its manifests itself.
     registry) plus the base `infrastructure/configs/run/traefik-ingress.yaml`.
     An app may ask for only its own cluster-local names
     (`<svc>.<app>.svc.cluster.local` and the short forms) and the public
-    `<svc>--<app>.gronblom.dev` names; any other Host gets a 403 from
+    `<svc>--<app>.makiya.dev` names; any other Host gets a 403 from
     Cilium's Envoy. Before 2026-11-12 every Host was allowed: any app could
     call any other app's private service this way (audit M3, path 1; the
     activator, route-rewrite and forged-header paths were closed on
@@ -399,7 +403,7 @@ applies its manifests itself.
     billed); delete those by hand.
   - **Public buckets** (`assets:public`): anyone can read (not list) the
     objects. The controller sets a public-read bucket policy and serves
-    the bucket at `https://<bucket>--<app>.gronblom.dev/` (GET and HEAD,
+    the bucket at `https://<bucket>--<app>.makiya.dev/` (GET and HEAD,
     proxied and cached by Cloudflare) through Traefik: HTTPRoute,
     TraefikService and an ExternalName Service in `maxcloud-system`, since
     the Gateway API can't route outside the cluster

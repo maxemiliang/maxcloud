@@ -1,10 +1,14 @@
 # Wildcard certificates for the Gateway's HTTPS listeners, so a new app only
 # needs an HTTPRoute, not its own certificate. Wildcards require DNS-01.
 #
-# Two zones of hostnames:
+# The zones of hostnames:
+#   *.makiya.dev        maxcloud apps: <service>--<app>.makiya.dev and public
+#                       buckets. May be Cloudflare-proxied: one level deep, so
+#                       it's covered by Cloudflare's free Universal SSL edge
+#                       certificate.
 #   *.lab.gronblom.dev  DNS-only (not proxied by Cloudflare): internal/admin tools.
-#   *.gronblom.dev      may be Cloudflare-proxied: one level deep, so it's covered
-#                       by Cloudflare's free Universal SSL edge certificate.
+#   *.gronblom.dev      the platform's own public hosts (registry) and custom
+#                       domains admins allow apps; may be Cloudflare-proxied.
 apiVersion: cert-manager.io/v1
 kind: Certificate
 metadata:
@@ -44,7 +48,25 @@ spec:
     kind: ClusterIssuer
     name: letsencrypt-prod
 ---
-# lankkupelit.fi, for apps outside gronblom.dev (lankkupaja). One level deep,
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: makiya-wildcard
+  namespace: traefik
+spec:
+  secretName: makiya-wildcard-tls
+  # The apex (makiya.dev) is deliberately left out; it isn't served by this cluster.
+  dnsNames:
+    - "*.makiya.dev"
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+    rotationPolicy: Always
+  issuerRef:
+    kind: ClusterIssuer
+    name: letsencrypt-prod
+---
+# lankkupelit.fi, for apps outside our own zones (lankkupaja). One level deep,
 # so Cloudflare-proxied hosts are covered by Cloudflare's edge certificate too.
 apiVersion: cert-manager.io/v1
 kind: Certificate

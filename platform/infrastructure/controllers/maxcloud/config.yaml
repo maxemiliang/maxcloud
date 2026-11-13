@@ -14,11 +14,11 @@ data:
   # bucket keeps the data, and a restore starts on a new disk. With the
   # default (Retain) class every restore left a billed Released disk.
   MAXCLOUD_DB_STORAGE_CLASS: upcloud-block-storage-maxiops-encrypted-delete
-  # Public buckets also get https://<bucket>--<app>.gronblom.dev/, proxied by
+  # Public buckets also get https://<bucket>--<app>.makiya.dev/, proxied by
   # Cloudflare, through the public Gateway (Traefik's crossProviderNamespaces
   # and allowExternalNameServices make that possible).
-  MAXCLOUD_PUBLIC_DOMAIN: gronblom.dev
-  MAXCLOUD_PUBLIC_GATEWAY: traefik/public/https-public
+  MAXCLOUD_PUBLIC_DOMAIN: makiya.dev
+  MAXCLOUD_PUBLIC_GATEWAY: traefik/public/https-makiya
   # Name those routes' TraefikServices by Traefik's safe naming
   # (<namespace>_<name>), as providers.kubernetesCRD.safeNaming in
   # infrastructure/controllers/traefik/release.yaml: the two go together.

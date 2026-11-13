@@ -49,6 +49,19 @@ spec:
       allowedRoutes:
         namespaces:
           from: All
+    # maxcloud apps' own names (Knative's domain, infrastructure/configs/knative,
+    # and public buckets, MAXCLOUD_PUBLIC_GATEWAY in controllers/maxcloud).
+    - name: https-makiya
+      protocol: HTTPS
+      port: 8443
+      hostname: "*.makiya.dev"
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - name: makiya-wildcard-tls
+      allowedRoutes:
+        namespaces:
+          from: All
     - name: https-lankkupelit
       protocol: HTTPS
       port: 8443

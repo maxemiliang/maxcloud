@@ -1,14 +1,15 @@
 # Which hostnames a route in an app namespace may have. The public Gateway
 # takes routes from every namespace and external-dns publishes every
 # hostname on it, so without this an app could put a route on any name in
-# gronblom.dev or lankkupelit.fi (someone else's, or one nobody uses yet),
+# gronblom.dev, makiya.dev or lankkupelit.fi (another app's, or one nobody
+# uses yet),
 # or claim another app's cluster-local name on Knative's local gateway.
 #
 # A route made by anyone in an app namespace (its Flux reconciler, its
 # developers, the maxcloud controller's Domain routes) may only have:
 #   - the app's own cluster-local names, <x>.<app>.svc.cluster.local (not
 #     the short forms <x>.<app> and <x>.<app>.svc: an app called `dev` or
-#     `fi` would get gronblom.dev or lankkupelit.fi);
+#     `fi` would get makiya.dev or lankkupelit.fi);
 #   - hostnames an admin allowed the app in domains.yaml (ConfigMap
 #     maxcloud-system/maxcloud-domains).
 # Not <app>.lab.gronblom.dev by default: Authelia's session cookie is valid
@@ -19,7 +20,7 @@
 # And it must name them: a route without hostnames would take every hostname
 # of the listeners it attaches to.
 #
-# Knative's controller is exempt: it makes routes for <service>--<app>.gronblom.dev
+# Knative's controller is exempt: it makes routes for <service>--<app>.makiya.dev
 # and the cluster-local names from its domain-template, never names an app
 # chooses.
 apiVersion: admissionregistration.k8s.io/v1

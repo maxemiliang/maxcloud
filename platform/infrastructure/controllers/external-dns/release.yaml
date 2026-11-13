@@ -35,7 +35,8 @@ spec:
   values:
     provider:
       name: cloudflare
-    # Scoped token: DNS edit on the zones in domainFilters only, usable only
+    # Scoped token: DNS edit on the zones in domainFilters only (a new zone
+    # needs adding to the token in Cloudflare first), usable only
     # from the NAT egress IP. Separate from cert-manager's token so each can be
     # revoked alone.
     env:
@@ -56,6 +57,7 @@ spec:
     # managed by lankkupaja's own OpenTofu.
     domainFilters:
       - gronblom.dev
+      - makiya.dev
       - lankkupelit.fi
 
     # sync: create, update and delete. Deleting is safe because of the TXT
@@ -73,10 +75,10 @@ spec:
     interval: 5m
 
     # Records are DNS-only by default (the --cloudflare-proxied flag stays off).
-    # A route under *.gronblom.dev opts in to the Cloudflare proxy with the
-    # annotation external-dns.kubernetes.io/cloudflare-proxied: "true" on the
-    # HTTPRoute. Never on *.lab.gronblom.dev: Cloudflare's free edge certificate
-    # doesn't cover two-level names.
+    # A route under *.makiya.dev or *.gronblom.dev opts in to the Cloudflare
+    # proxy with the annotation external-dns.kubernetes.io/cloudflare-proxied:
+    # "true" on the HTTPRoute. Never on *.lab.gronblom.dev: Cloudflare's free
+    # edge certificate doesn't cover two-level names.
 
     resources:
       requests:

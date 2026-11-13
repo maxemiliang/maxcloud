@@ -23,6 +23,7 @@ spec:
         selector:
           dnsZones:
             - gronblom.dev
+            - makiya.dev
             - lankkupelit.fi
 ---
 apiVersion: cert-manager.io/v1
@@ -43,4 +44,5 @@ spec:
         selector:
           dnsZones:
             - gronblom.dev
+            - makiya.dev
             - lankkupelit.fi

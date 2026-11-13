@@ -3,7 +3,7 @@
 #
 # Private by default: reachable inside the cluster only, at
 # http://web.<namespace>.svc.cluster.local. To publish it on the internet at
-# https://web--<namespace>.gronblom.dev, add the label below. For a login page
+# https://web--<namespace>.makiya.dev, add the label below. For a login page
 # in front of a private service instead, see ../examples/sso.yaml.
 apiVersion: serving.knative.dev/v1
 kind: Service

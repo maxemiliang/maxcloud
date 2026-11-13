@@ -18,7 +18,7 @@
 #
 # An entry's fields (spec.defaultValues):
 #   name     namespace and app name (required); public hostnames are
-#            <service>--<name>.gronblom.dev
+#            <service>--<name>.makiya.dev
 #   repo     <owner>/<repo> on GitHub; leave out for an app kept in this repo
 #   path     manifests directory in the repo (default deploy/k8s)
 #   branch   (default main)
