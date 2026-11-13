@@ -235,7 +235,7 @@ const (
 	DefaultPods   = "20"
 )
 
-// MaxNameLength keeps public hostnames, <service>--<name>.gronblom.dev, within
+// MaxNameLength keeps public hostnames, <service>--<name>.makiya.dev, within
 // DNS's 63-character label limit with room for the service name.
 const MaxNameLength = 30
 

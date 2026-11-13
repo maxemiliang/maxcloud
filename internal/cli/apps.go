@@ -140,7 +140,7 @@ owners are admin in its namespace, and only they and admins may change or
 remove it. Change them later with mcloud apps owners.
 
 The name becomes the namespace, and public services get
-https://<service>--<name>.gronblom.dev.`,
+https://<service>--<name>.makiya.dev.`,
 		Example: `  mcloud apps create shop --repo maxemiliang/shop
   mcloud apps create shop --repo maxemiliang/shop --cpu 500m --memory 2Gi --db
   mcloud apps create shop --repo maxemiliang/shop --owners alice,bob`,

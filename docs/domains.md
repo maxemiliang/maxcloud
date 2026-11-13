@@ -1,7 +1,7 @@
 # Custom domains
 
 A function (or any Knative service of the app) can have hostnames besides
-`<service>--<app>.gronblom.dev`, from `domains:` in `maxcloud.yaml`:
+`<service>--<app>.makiya.dev`, from `domains:` in `maxcloud.yaml`:
 
 ```yaml
 domains:
@@ -14,7 +14,8 @@ domains:
   pushed `maxcloud.yaml`) with any other, and refuses any route in the
   app's namespace with a hostname that isn't the app's.
 - **Zones the cluster has certificates for:** one level below
-  `gronblom.dev`, `lab.gronblom.dev` or `lankkupelit.fi`. external-dns
+  `makiya.dev`, `gronblom.dev`, `lab.gronblom.dev` or `lankkupelit.fi`.
+  Never a `makiya.dev` name with `--` in it: those are the platform's. external-dns
   makes the DNS record. `proxied: true` puts it behind Cloudflare (WAF,
   caching, Cloudflare Access), not for `*.lab.gronblom.dev`.
 - **`lab.gronblom.dev` is for apps trusted like an admin.** Authelia's

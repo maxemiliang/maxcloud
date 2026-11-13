@@ -122,7 +122,7 @@ app: %[1]s
 # What the app may reserve (defaults: 200m CPU, 1Gi memory, 20 pods):
 # quota: {cpu: 500m, memory: 2Gi}
 # S3 buckets in UpCloud Object Storage (bucketName("uploads") in the SDK);
-# ":public" lets anyone read one, at https://<bucket>--<app>.gronblom.dev/:
+# ":public" lets anyone read one, at https://<bucket>--<app>.makiya.dev/:
 # buckets: [uploads, assets:public]
 # A Postgres database (DATABASE_URL), backed up and restorable to a point in
 # time; queue functions need it. SQL migrations go in migrations/
@@ -133,7 +133,7 @@ app: %[1]s
 # private). Only ones an admin allowed this app (maxcloud's
 # platform/infrastructure/configs/run/domains.yaml); proxied: behind Cloudflare.
 # domains:
-#   - {host: shop.gronblom.dev, service: web, proxied: true}
+#   - {host: shop.makiya.dev, service: web, proxied: true}
 # The folder the app is built from and mcloud dev runs in, if it isn't this
 # one (e.g. the web app in worker/ of a repo whose root is a Go CLI):
 # source: worker

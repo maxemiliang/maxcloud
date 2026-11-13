@@ -11,7 +11,7 @@ quota: {cpu: 500m, memory: 2Gi}
 buckets: [uploads, assets:public]
 db: {size: 2Gi}          # or db: true
 domains:                 # hostnames of your own, within what an admin allowed
-  - {host: shop.gronblom.dev, service: web, proxied: true}
+  - {host: shop.makiya.dev, service: web, proxied: true}
 env:                     # plain variables for every function (environment.md)
   LOG_LEVEL: info
 # source: worker         # build the app from this folder, not the repo's root
