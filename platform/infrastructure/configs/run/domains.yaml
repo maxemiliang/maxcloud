@@ -46,3 +46,5 @@ data:
   # The platform's own smoke test (apps/run-demo/sso.yaml: whoami behind
   # Authelia). Under lab.gronblom.dev, so trusted like an admin (above).
   run-demo: run-demo.lab.gronblom.dev
+  # noccooo (github.com/maxemiliang/noccooo)
+  noccooo: noccooo.makiya.dev
