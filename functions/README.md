@@ -177,7 +177,7 @@ _, err = s3c.PutObject(ctx, &s3.PutObjectInput{Bucket: &bucket, Key: aws.String(
 ### Public buckets
 
 A bucket listed as `assets:public` can be read by anyone (not listed) at
-`https://<bucket>--<app>.gronblom.dev/<key>`, behind Cloudflare, which
+`https://<bucket>--<app>.makiya.dev/<key>`, behind Cloudflare, which
 caches it. Writing still needs the app's credentials:
 
 ```go
@@ -188,7 +188,7 @@ _, err = s3c.PutObject(ctx, &s3.PutObjectInput{
 	ContentType:  aws.String("image/png"),
 	CacheControl: aws.String("public, max-age=31536000, immutable"),
 })
-url := "https://assets--" + os.Getenv("MAXCLOUD_APP") + ".gronblom.dev/" + key
+url := "https://assets--" + os.Getenv("MAXCLOUD_APP") + ".makiya.dev/" + key
 ```
 
 The objects are also readable straight from Object Storage, at

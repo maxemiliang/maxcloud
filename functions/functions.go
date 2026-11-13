@@ -66,7 +66,7 @@ type options struct {
 type Option func(*options)
 
 // Public makes an HTTP function reachable from the internet, at
-// https://<name>--<app>.gronblom.dev. Without it, it's cluster-local.
+// https://<name>--<app>.makiya.dev. Without it, it's cluster-local.
 func Public() Option { return func(o *options) { o.public = true } }
 
 // Proxied puts a public HTTP function's hostname behind Cloudflare (its
