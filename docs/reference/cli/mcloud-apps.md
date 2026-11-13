@@ -32,7 +32,7 @@ owners are admin in its namespace, and only they and admins may change or
 remove it. Change them later with mcloud apps owners.
 
 The name becomes the namespace, and public services get
-https://&lt;service&gt;--&lt;name&gt;.gronblom.dev.
+https://&lt;service&gt;--&lt;name&gt;.makiya.dev.
 
 ```
 mcloud apps create NAME [flags]
