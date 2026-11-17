@@ -1,7 +1,8 @@
 # mcloud releases: builds the binaries (linux, macOS; amd64, arm64) for a v*
-# tag and adds them to its GitHub release (.goreleaser.yaml). release-please
-# (release-please.yaml) calls it when a release PR with mcloud in it is
-# merged; pushing a v* tag by hand still works.
+# tag, adds them to its GitHub release and publishes it (.goreleaser.yaml).
+# release-please (release-please.yaml) makes that release as a draft and
+# calls this when a release PR with mcloud in it is merged, so the release
+# appears with its binaries. Pushing a v* tag by hand still works.
 name: release
 
 on:

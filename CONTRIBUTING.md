@@ -49,7 +49,7 @@ Merging the PR releases those parts:
 
 | Part | Directory | Tag | Released by |
 | --- | --- | --- | --- |
-| mcloud | everything else | `vX.Y.Z` | `release.yaml`: GoReleaser adds the binaries to the GitHub release |
+| mcloud | everything else | `vX.Y.Z` | `release.yaml`: GoReleaser adds the binaries to the GitHub release, which is a draft until then |
 | controller | `controller/` | `controller/vX.Y.Z` | `release-controller.yaml`: the image (the PR bumps `newTag` in `config/kustomization.yaml`) |
 | Go SDK | `functions/` | `functions/vX.Y.Z` | the tag (Go modules) |
 | `@max-cloud/functions` | `packages/functions/` | `functions-js/vX.Y.Z` | `release-npm.yaml` (trusted publishing, no token) |
@@ -70,6 +70,9 @@ Merging the PR releases those parts:
   trusted publisher is the workflow `release-please.yaml` (npm checks the
   calling workflow). The release PR is opened with `GITHUB_TOKEN`, so CI
   doesn't run on it by itself.
+- **mcloud's release is a draft until its binaries are uploaded,** then
+  GoReleaser publishes it. If that job fails, the tag exists but nobody
+  sees a release: rerun the job.
 - **By hand,** if release-please is stuck: pushing a `v*` or
   `controller/v*` tag still runs its workflow. npm packages only publish
   through release-please.

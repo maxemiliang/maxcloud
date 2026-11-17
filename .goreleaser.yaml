@@ -1,7 +1,7 @@
-# mcloud releases: release-please tags v* and makes the GitHub release, and
-# .github/workflows/release.yaml runs GoReleaser, which adds the binaries to
-# it. The other parts' tags (functions/v*, functions-js/v*, nuxt-js/v*,
-# controller/v*) aren't mcloud's.
+# mcloud releases: release-please tags v* and makes the GitHub release as a
+# draft, and .github/workflows/release.yaml runs GoReleaser, which adds the
+# binaries to it and then publishes it. The other parts' tags (functions/v*,
+# functions-js/v*, nuxt-js/v*, controller/v*) aren't mcloud's.
 version: 2
 
 project_name: mcloud
@@ -47,3 +47,12 @@ release:
   # release-please made the release, with its changelog: add the binaries
   # and leave the notes alone.
   mode: keep-existing
+  # That release is a draft (release-please-config.json), found by its name,
+  # which is the tag. GoReleaser publishes it once every binary is uploaded,
+  # so nobody sees a release without them: mise's release proxy caches what
+  # it sees for half an hour, and run-deploy.yaml installs the newest
+  # published release. With no draft (a tag pushed by hand) it makes the
+  # release itself, the same way.
+  use_existing_draft: true
+  # A rerun after a failed upload replaces what the first run left behind.
+  replace_existing_artifacts: true

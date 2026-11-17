@@ -8,6 +8,8 @@
     ".": {
       "release-type": "go",
       "include-component-in-tag": false,
+      "draft": true,
+      "force-tag-creation": true,
       "exclude-paths": ["console", "controller", "functions", "packages", "platform"]
     },
     "controller": {
