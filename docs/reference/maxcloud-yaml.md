@@ -34,4 +34,24 @@ For completion and checking in an editor with the YAML language server, start th
 | `domains[].service` | string, required |  | The Knative service it routes to: an HTTP function's name. It can stay private. |
 | `domains[].proxied` | boolean | `false` | Behind Cloudflare's proxy (WAF, caching, Access). Not for \*.lab.gronblom.dev. |
 | `env` | object |  | Plain environment variables (not secrets) for every function, e.g. {LOG\_LEVEL: info}. The deploy writes them into the functions' manifests, so a change ships with the next deploy. Each value is taken exactly as written (0.10 stays 0.10). They win over mcloud env set, which refuses the names declared here. Names are A-Z, 0-9 and \_, not starting with a digit; the platform's own (DATABASE\_URL, PORT, AWS\_\*, MAXCLOUD\_\*, K\_\*) are refused. Apps with their own manifests don't get them. |
+| `environments` | object |  | Long-lived copies of the app besides production (staging), each deployed from its own branch into its own namespace, &lt;app&gt;--&lt;env&gt;, at https://&lt;function&gt;--&lt;app&gt;--&lt;env&gt;.makiya.dev/, with its own secrets, variables, buckets and database. The name: lowercase letters, digits and single dashes, at most 12 characters (and &lt;app&gt;--&lt;env&gt; at most 40); not pr-\*. At most 3 per app without an admin. {} removes them all; leaving the field out keeps what the app has. |
+| `environments.<name>.branch` | string | `the environment's name` | GitOps: the branch it deploys from. A push there runs the deploy workflow (add the branch to its on: push: branches), which writes the environment's manifests to deploy/env/&lt;env&gt; on that branch. Ignored for direct apps (mcloud deploy --env &lt;env&gt;). E.g. `staging`, `release/qa` |
+| `environments.<name>.quota` | object |  | The environment's own quota (default: the app's). Within what a developer may ask for, like the app's. |
+| `environments.<name>.quota.cpu` | string or number | `200m` | CPU requested by all the app's pods together, a Kubernetes quantity. E.g. `500m`, `1` |
+| `environments.<name>.quota.memory` | string | `1Gi` | Memory requested by all the app's pods together, a Kubernetes quantity. E.g. `2Gi` |
+| `environments.<name>.quota.pods` | integer or string | `20` | How many pods the app may have. |
+| `environments.<name>.buckets` | list of strings |  | Its buckets, mc-&lt;app&gt;--&lt;env&gt;--&lt;name&gt;: empty ones of its own, never the app's (default: the app's list). \[\] for none. E.g. `uploads`, `assets:public` |
+| `environments.<name>.db` | boolean or object |  | Its own database, empty to start with, backed up to mc-&lt;app&gt;--&lt;env&gt;--db (default: as the app's). false for none. |
+| `environments.<name>.db.size` | string | `1Gi` | Disk per instance, a Kubernetes quantity. Can grow, never shrink. |
+| `environments.<name>.db.instances` | integer or string: 1, 2 | `1` | 1, or 2 for a replica on the other node. |
+| `environments.<name>.domains` | list of objects |  | Hostnames of its own (default: none). An admin allows them for &lt;app&gt;--&lt;env&gt;, as for an app. |
+| `environments.<name>.domains[].host` | string, required |  | The hostname: lowercase, no wildcards. E.g. `shop.makiya.dev` |
+| `environments.<name>.domains[].service` | string, required |  | The Knative service it routes to: an HTTP function's name. It can stay private. |
+| `environments.<name>.domains[].proxied` | boolean | `false` | Behind Cloudflare's proxy (WAF, caching, Access). Not for \*.lab.gronblom.dev. |
+| `environments.<name>.env` | object |  | Variables for this environment's functions, over the app's env:. Its secrets and mcloud env values are its own (mcloud secrets set --env &lt;env&gt;). |
+| `previews` | boolean or object |  | Short-lived deploys at their own URLs, https://&lt;function&gt;--&lt;app&gt;--&lt;name&gt;.makiya.dev/: one per open pull request labelled preview (GitOps apps), and mcloud preview deploy's (any app). Each gets empty buckets of the app's names, an empty database with db: true, and none of the app's secrets or data; all of it goes when the preview does. true, or settings; false turns them off and removes them. |
+| `previews.ttl` | string | `72h` | How long a preview lives after its last deploy (a pull request's last push), in whole hours. At most 168h without an admin. |
+| `previews.max` | integer or string | `2` | How many previews the app may have at once; more wait. At most 3 without an admin. |
+| `previews.db` | boolean | `false` | An empty database in each preview (migrations run as on deploy), deleted with it. It doesn't scale to zero: 20m CPU while the preview lives. |
+| `previews.env` | object |  | Variables for previews' functions, over the app's env:. |
 

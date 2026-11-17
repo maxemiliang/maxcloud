@@ -14,9 +14,11 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 
+	"github.com/maxemiliang/maxcloud/internal/appapi"
 	"github.com/maxemiliang/maxcloud/internal/github"
 	"github.com/maxemiliang/maxcloud/internal/kube"
 	"github.com/maxemiliang/maxcloud/internal/registry"
+	"github.com/maxemiliang/maxcloud/internal/storage"
 	"github.com/maxemiliang/maxcloud/internal/ui"
 )
 
@@ -35,6 +37,12 @@ type globals struct {
 	ui          *ui.UI
 	// testKube, if set, is the cluster client (tests).
 	testKube *kube.Client
+	// testStorage, if set, makes the client for an app's buckets (tests).
+	testStorage func(app string) (*storage.Client, error)
+	// testAppAPI, if set, is the platform's apps API client (tests).
+	testAppAPI *appapi.Client
+	// testGitHub, if set, is the GitHub client (tests).
+	testGitHub *github.Client
 
 	in     io.Reader
 	out    io.Writer
@@ -88,8 +96,10 @@ $GH_TOKEN (or $GITHUB_TOKEN), else the GitHub CLI's login.`,
 	f.StringVar(&g.kubeconfig, "kubeconfig", "", "kubeconfig file (default $MCLOUD_KUBECONFIG, else mcloud login's, else $KUBECONFIG)")
 	f.StringVar(&g.kubeContext, "context", "", "kubeconfig context")
 	f.BoolVar(&g.plain, "plain", false, "plain output: no colors, spinners or interactive prompts (also $MCLOUD_PLAIN=1; always in CI, pipes, with NO_COLOR or TERM=dumb)")
+	f.StringVar(&envFlag, "env", "", "act on this environment or preview of the app (staging, pr-42; also $MCLOUD_ENV): its namespace <app>--<env>")
 
-	root.AddCommand(initCmd(g), deployCmd(g), appsCmd(g), statusCmd(g), logsCmd(g), generateCmd(g), buildCmd(g), devCmd(g), queueCmd(g), secretsCmd(g), envCmd(g), dbCmd(g), loginCmd(g), logoutCmd(g), credentialCmd(g), kubeconfigCmd(g), doctorCmd(g), runCmd(g), callCmd(g), sandboxCmd(g))
+	root.AddCommand(initCmd(g), deployCmd(g), appsCmd(g), statusCmd(g), logsCmd(g), generateCmd(g), buildCmd(g), devCmd(g), queueCmd(g), secretsCmd(g), envCmd(g), dbCmd(g), bucketCmd(g), historyCmd(g), rollbackCmd(g), metricsCmd(g), alertsCmd(g), loginCmd(g), logoutCmd(g), credentialCmd(g), kubeconfigCmd(g), doctorCmd(g), runCmd(g), callCmd(g), sandboxCmd(g))
+	root.AddCommand(previewCmd(g))
 	return root
 }
 
@@ -111,6 +121,9 @@ func (g *globals) kube() (*kube.Client, error) {
 }
 
 func (g *globals) github() (*github.Client, error) {
+	if g.testGitHub != nil {
+		return g.testGitHub, nil
+	}
 	t, err := github.Token()
 	if err != nil {
 		return nil, err
@@ -143,6 +156,11 @@ type project struct {
 	// Env: plain variables every function gets ({LOG_LEVEL: debug}), each
 	// value as written in the file. See parseProjectEnv.
 	Env map[string]string `json:"-"`
+	// Environments: long-lived copies of the app (staging), each from its
+	// own branch (environments.go).
+	Environments map[string]*projectEnvironment `json:"environments"`
+	// Previews: short-lived deploys of pull requests and working trees.
+	Previews *projectPreviews `json:"previews"`
 
 	Dir string `json:"-"` // where the file is: the repo's root
 }
@@ -212,19 +230,20 @@ func loadProject() (*project, error) {
 }
 
 // appName is the first argument, else $MCLOUD_APP, else the app named in
-// maxcloud.yaml in the current directory or a parent.
+// maxcloud.yaml in the current directory or a parent; with --env (or
+// $MCLOUD_ENV), that app's environment, <app>--<env>.
 func appName(args []string) (string, error) {
 	if len(args) > 0 && args[0] != "" {
-		return args[0], nil
+		return withEnvironment(args[0])
 	}
 	if v := os.Getenv("MCLOUD_APP"); v != "" {
-		return v, nil
+		return withEnvironment(v)
 	}
 	p, err := loadProject()
 	if err != nil {
 		return "", err
 	}
-	return p.App, nil
+	return withEnvironment(p.App)
 }
 
 // confirm asks a yes/no question on the terminal.

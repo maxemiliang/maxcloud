@@ -100,6 +100,14 @@ func New(kubeconfig, kubeContext string) (*Client, error) {
 	return &Client{Core: core, Dyn: dyn, config: cfg}, nil
 }
 
+// Host is the address this client reaches the cluster at ("" in tests).
+func (c *Client) Host() string {
+	if c.config == nil {
+		return ""
+	}
+	return c.config.Host
+}
+
 // list returns nothing, not an error, when the kind isn't installed.
 func (c *Client) list(ctx context.Context, gvr schema.GroupVersionResource, ns string, opts metav1.ListOptions) ([]unstructured.Unstructured, error) {
 	l, err := c.Dyn.Resource(gvr).Namespace(ns).List(ctx, opts)

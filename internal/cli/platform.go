@@ -2,9 +2,12 @@ package cli
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -19,6 +22,10 @@ const defaultPlatformURL = "https://maxcloud.gronblom.dev/.well-known/maxcloud.j
 // platform is the discovery document.
 type platform struct {
 	APIServer string `json:"apiServer"`
+	// Gateway is the platform's API gateway, if it runs one: the API server
+	// for machines whose address isn't on its allowlist. Its certificate is
+	// one every machine trusts, so it needs no CA.
+	Gateway string `json:"gateway"`
 	// CAData is the cluster's CA certificate (PEM), base64.
 	CAData string `json:"certificateAuthorityData"`
 	OIDC   *struct {
@@ -29,6 +36,12 @@ type platform struct {
 	Mcloud        *struct {
 		MinVersion string `json:"minVersion"`
 	} `json:"mcloud"`
+	// API: the apps API (logs, metrics, alerts): its URL on the gateway (a
+	// path on this document's host, from platforms before the gateway).
+	API *struct {
+		Apps     string   `json:"apps"`
+		Features []string `json:"features"`
+	} `json:"api"`
 }
 
 // platformURL is $MCLOUD_PLATFORM_URL, else the default; "off" turns
@@ -66,6 +79,64 @@ func discover(ctx context.Context) (*platform, error) {
 		return nil, fmt.Errorf("%s names no API server", u)
 	}
 	return &p, nil
+}
+
+// How mcloud reaches the API server (mcloud login --via).
+const (
+	viaAuto    = "auto"
+	viaDirect  = "direct"
+	viaGateway = "gateway"
+)
+
+// canReach reports whether a TCP connection to rawURL's host opens within
+// a few seconds. An API server that doesn't have this machine's address on
+// its allowlist drops the connection attempt, which is what this notices.
+// A variable so tests needn't dial.
+var canReach = func(ctx context.Context, rawURL string) bool {
+	u, err := url.Parse(rawURL)
+	if err != nil || u.Host == "" {
+		return false
+	}
+	host := u.Host
+	if u.Port() == "" {
+		host = net.JoinHostPort(u.Hostname(), "443")
+	}
+	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	conn, err := (&net.Dialer{}).DialContext(ctx, "tcp", host)
+	if err != nil {
+		return false
+	}
+	conn.Close()
+	return true
+}
+
+// route picks the address (and CA) mcloud's kubeconfig gets: the API server
+// itself, or the platform's gateway. auto takes the API server when this
+// machine can reach it and the gateway when it can't.
+func (p *platform) route(ctx context.Context, via string) (server string, ca []byte, err error) {
+	direct := func() (string, []byte, error) {
+		ca, err := base64.StdEncoding.DecodeString(p.CAData)
+		if err != nil {
+			return "", nil, fmt.Errorf("discovery document: certificateAuthorityData: %w", err)
+		}
+		return p.APIServer, ca, nil
+	}
+	switch via {
+	case viaDirect:
+		return direct()
+	case viaGateway:
+		if p.Gateway == "" {
+			return "", nil, fmt.Errorf("--via gateway: the platform has no API gateway (its discovery document names none)")
+		}
+		return p.Gateway, nil, nil
+	case viaAuto, "":
+		if p.Gateway == "" || canReach(ctx, p.APIServer) {
+			return direct()
+		}
+		return p.Gateway, nil, nil
+	}
+	return "", nil, fmt.Errorf("--via %s: it's auto, direct or gateway", via)
 }
 
 // minVersion is the oldest mcloud the platform works with ("" if it

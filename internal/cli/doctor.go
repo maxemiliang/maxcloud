@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"os/exec"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -79,15 +81,28 @@ func doctorCmd(g *globals) *cobra.Command {
 				line(false, "login", "expired: mcloud login")
 			}
 
-			// The cluster, as mcloud reaches it.
+			// The cluster, as mcloud reaches it: directly, or through the
+			// platform's gateway.
 			path, why := kube.KubeconfigSource(g.kubeconfig)
 			where := firstNonEmpty(path, why) + " (" + why + ")"
 			if k, err := g.kube(); err != nil {
 				line(false, "cluster", err.Error())
-			} else if r, err := k.Core.AuthenticationV1().SelfSubjectReviews().Create(ctx, &authv1.SelfSubjectReview{}, metav1.CreateOptions{}); err != nil {
-				line(false, "cluster", fmt.Sprintf("%s: %v", where, err))
 			} else {
-				line(true, "cluster", fmt.Sprintf("%s as %s", where, r.Status.UserInfo.Username))
+				gateway := p != nil && p.Gateway != "" && strings.TrimRight(k.Host(), "/") == p.Gateway
+				if gateway {
+					where += ", through the gateway"
+				}
+				r, err := k.Core.AuthenticationV1().SelfSubjectReviews().Create(ctx, &authv1.SelfSubjectReview{}, metav1.CreateOptions{})
+				switch {
+				case err == nil:
+					line(true, "cluster", fmt.Sprintf("%s as %s", where, r.Status.UserInfo.Username))
+				case !gateway && p != nil && p.Gateway != "" && isNetworkError(err):
+					// The API server only takes connections from addresses
+					// an admin listed; the gateway takes them from anywhere.
+					line(false, "cluster", fmt.Sprintf("%s: the API server doesn't answer from this network: mcloud login switches to the gateway (%v)", where, err))
+				default:
+					line(false, "cluster", fmt.Sprintf("%s: %v", where, err))
+				}
 			}
 
 			// GitHub, for following GitOps deploys.
@@ -145,4 +160,11 @@ func doctorCmd(g *globals) *cobra.Command {
 	}
 	f.bind(c)
 	return c
+}
+
+// isNetworkError reports whether err is a connection that didn't open or
+// answer (a timeout, a refusal, no route), not an answer from the cluster.
+func isNetworkError(err error) bool {
+	var netErr net.Error
+	return errors.As(err, &netErr) || errors.Is(err, context.DeadlineExceeded)
 }

@@ -25,6 +25,7 @@ type LogOptions struct {
 	Since         time.Duration
 	Tail          int64 // lines per container; 0 means all
 	AllContainers bool  // include Knative's queue-proxy sidecar
+	Timestamps    bool  // start each line with its time (RFC 3339)
 	Color         bool
 	PollInterval  time.Duration
 }
@@ -218,7 +219,7 @@ func forName(name string) string {
 }
 
 func (c *Client) stream(ctx context.Context, p *corev1.Pod, container string, o LogOptions, since time.Duration, tail int64, follow bool, out *lineWriter) error {
-	opts := &corev1.PodLogOptions{Container: container, Follow: follow}
+	opts := &corev1.PodLogOptions{Container: container, Follow: follow, Timestamps: o.Timestamps}
 	if since > 0 {
 		s := int64(since.Seconds())
 		opts.SinceSeconds = &s

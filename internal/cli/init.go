@@ -146,15 +146,21 @@ name: deploy
 
 on:
   push:
+    # And each environment's branch (environments: in maxcloud.yaml).
     branches: [main]
     # The deploy commit itself only changes deploy/.
     paths-ignore: ["deploy/**"]
+  # Previews (previews: in maxcloud.yaml) of pull requests labelled preview;
+  # closing one removes its preview.
+  pull_request:
+    types: [opened, synchronize, reopened, labeled, closed]
   workflow_dispatch: {}
 
 permissions: {}
 
 jobs:
   deploy:
+    if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'preview')
     permissions:
       contents: write # the deploy commit
       id-token: write # pushing to the maxcloud registry, as this repo

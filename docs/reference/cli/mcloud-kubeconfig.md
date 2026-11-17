@@ -15,6 +15,8 @@ somewhere else for kubectl.
 
 The cluster's address and CA come from the platform's discovery document
 (https://maxcloud.gronblom.dev/.well-known/maxcloud.json), else from your current kubeconfig.
+--via gateway writes the platform's API gateway as the address instead,
+which works from any network.
 
 mcloud uses it unless --kubeconfig or $MCLOUD\_KUBECONFIG say otherwise.
 For kubectl: set -gx KUBECONFIG &lt;file&gt;.
@@ -38,4 +40,5 @@ Flags:
 | `--issuer` string | `https://auth.lab.gronblom.dev` | OpenID Connect provider the cluster trusts ($MCLOUD\_OIDC\_ISSUER) |
 | `--name` string | `homelab` | cluster and context name in it |
 | `--out` string | `~/.config/mcloud/kubeconfig` | where to write it |
+| `--via` string | `auto` | how to reach the API server: direct, gateway (the platform's API gateway, from any network), or auto: direct if this machine can reach it, else the gateway ($MCLOUD\_VIA) |
 

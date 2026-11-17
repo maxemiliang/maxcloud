@@ -40,6 +40,11 @@ container). Without docker, an app without a Dockerfile builds in the
 cluster instead (--build cluster): a buildpacks pod in the app's
 namespace, with the source streamed to it.
 
+With --env, an environment (environments: in maxcloud.yaml) instead: a
+GitOps app's is its branch's deploy (run this on that branch; on an
+environment's branch, mcloud deploy deploys that environment by itself),
+and a direct app's is this working tree, applied in &lt;app&gt;--&lt;env&gt;.
+
 ```
 mcloud deploy [flags]
 ```

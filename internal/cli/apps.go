@@ -28,7 +28,8 @@ func appsCmd(g *globals) *cobra.Command {
 }
 
 func appsListCmd(g *globals) *cobra.Command {
-	return &cobra.Command{
+	var asJSON bool
+	c := &cobra.Command{
 		Use:   "list",
 		Short: "List registered apps and whether their last deploy applied",
 		Args:  cobra.NoArgs,
@@ -40,6 +41,15 @@ func appsListCmd(g *globals) *cobra.Command {
 			apps, err := k.Apps(cmd.Context())
 			if err != nil {
 				return err
+			}
+			if asJSON {
+				out := struct {
+					Apps []appJSON `json:"apps"`
+				}{Apps: []appJSON{}}
+				for _, a := range apps {
+					out.Apps = append(out.Apps, appOf(a))
+				}
+				return g.printJSON(out)
 			}
 			if len(apps) == 0 {
 				g.UI().Note("no apps registered: mcloud deploy in an app's repo registers it")
@@ -58,6 +68,8 @@ func appsListCmd(g *globals) *cobra.Command {
 			return nil
 		},
 	}
+	jsonFlag(c, &asJSON)
+	return c
 }
 
 // owners is how apps list and status show an app's owners.
@@ -309,6 +321,11 @@ func diffEntries(a, b *registry.Entry) []string {
 		{"db-size", a.DBSize, b.DBSize, "1Gi"},
 		{"domains", a.Domains, b.Domains, "none"},
 		{"owners", a.Owners, b.Owners, "none, admins only"},
+		{"environments", a.Environments, b.Environments, "unchanged"},
+		{"previews", a.Previews, b.Previews, "off"},
+		{"previews.ttl", a.PreviewTTL, b.PreviewTTL, "72h"},
+		{"previews.max", a.PreviewMax, b.PreviewMax, "2"},
+		{"previews.db", a.PreviewDB, b.PreviewDB, "none"},
 	} {
 		if f.a != f.b {
 			out = append(out, fmt.Sprintf("%s %s -> %s", f.name, show(f.a, f.def), show(f.b, f.def)))

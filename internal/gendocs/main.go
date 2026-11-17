@@ -212,6 +212,26 @@ type jsonSchema struct {
 	Enum        []any         `json:"enum"`
 	Default     any           `json:"default"`
 	Examples    []any         `json:"examples"`
+	// AdditionalProperties: a map's values (true or false is no schema).
+	AdditionalProperties *jsonSchema `json:"additionalProperties"`
+}
+
+func (s *jsonSchema) UnmarshalJSON(data []byte) error {
+	type plain jsonSchema
+	var raw struct {
+		plain
+		AdditionalProperties json.RawMessage `json:"additionalProperties"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	*s = jsonSchema(raw.plain)
+	s.AdditionalProperties = nil
+	if a := raw.AdditionalProperties; len(a) > 0 && a[0] == '{' {
+		s.AdditionalProperties = &jsonSchema{}
+		return json.Unmarshal(a, s.AdditionalProperties)
+	}
+	return nil
 }
 
 func schemaDoc(files map[string]string) error {
@@ -266,6 +286,8 @@ func schemaRows(b *strings.Builder, prefix string, s *jsonSchema) {
 			schemaRows(b, path+".", p)
 		case p.Items != nil && p.Items.Properties != nil:
 			schemaRows(b, path+"[].", p.Items)
+		case p.AdditionalProperties != nil && p.AdditionalProperties.Properties != nil:
+			schemaRows(b, path+".<name>.", p.AdditionalProperties)
 		}
 		for _, alt := range p.OneOf {
 			if alt.Properties != nil {

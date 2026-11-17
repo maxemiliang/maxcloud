@@ -96,8 +96,14 @@ Flags:
 List registered apps and whether their last deploy applied.
 
 ```
-mcloud apps list
+mcloud apps list [flags]
 ```
+
+Flags:
+
+| Flag | Default | |
+| --- | --- | --- |
+| `--json` |  | print JSON instead of a table (fields: docs/mcloud.md, JSON output) |
 
 ## mcloud apps owners
 

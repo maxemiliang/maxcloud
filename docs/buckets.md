@@ -10,6 +10,27 @@ SDKs' `bucketName("uploads")` gives the full name; so does the variable
 started before the bucket existed doesn't have it). Removing a bucket from
 the list keeps it and its objects.
 
+## Looking into a bucket
+
+`mcloud bucket` lists the app's buckets and moves files in and out of
+them, with the app's own credentials (so only its owners and admins can).
+An object is `BUCKET:KEY`, with the bucket's name from `maxcloud.yaml`:
+
+```fish
+mcloud bucket ls                          # the buckets: size, objects, where a public one is served
+mcloud bucket ls uploads:img/             # what's in a folder (-r: everything below)
+mcloud bucket cp logo.png assets:         # a file in; the content type comes from its extension
+mcloud bucket cp -r dist/ assets:app/     # a directory in
+mcloud bucket cp uploads:img/cat.png .    # an object out (- writes it to stdout)
+mcloud bucket rm -r uploads:tmp/          # a folder; it says how much that is, and asks
+```
+
+A bucket taken off the list in `maxcloud.yaml` is still there with
+everything in it, and still stored. It's no longer in `mcloud bucket ls`,
+but its objects are reachable by its name while the app has any bucket
+left (the credentials go with the last one): `mcloud bucket ls old:`, and
+`mcloud bucket rm -r old:` to empty it. An empty bucket stores nothing.
+
 ## Public buckets
 
 Add `:public` to a bucket's name in the list, and anyone can read its
@@ -32,7 +53,8 @@ https://assets--shop.makiya.dev/logo.png      # object logo.png in mc-shop--asse
   (`app.3f2a91.js`), or set `Cache-Control` when you upload.
 - The same objects are also readable straight from Object Storage, at
   `<AWS_ENDPOINT_URL_S3>/mc-shop--assets/logo.png` (not cached).
-- `kubectl get maxcloud -n shop` shows each bucket's URL.
+- `mcloud status` shows each bucket's URL (and `kubectl get maxcloud -n
+  shop`).
 - Removing `:public` makes the bucket private again: its hostname and the
   public read go, its objects stay.
 - Public functions are at `<function>--<app>.makiya.dev` too: don't give

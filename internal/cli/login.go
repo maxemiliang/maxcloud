@@ -3,7 +3,6 @@ package cli
 import (
 	"bytes"
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -26,6 +25,13 @@ import (
 
 type authFlags struct {
 	issuer, clientID string
+	// via is how the kubeconfig reaches the API server: auto, direct or
+	// gateway (only login and kubeconfig bind it).
+	via string
+}
+
+func (f *authFlags) bindVia(c *cobra.Command) {
+	c.Flags().StringVar(&f.via, "via", envOr("MCLOUD_VIA", viaAuto), "how to reach the API server: direct, gateway (the platform's API gateway, from any network), or auto: direct if this machine can reach it, else the gateway ($MCLOUD_VIA)")
 }
 
 func (f *authFlags) bind(c *cobra.Command) {
@@ -48,6 +54,12 @@ what your groups allow (admins: everything).
 The first login also writes mcloud's kubeconfig (` + "`mcloud kubeconfig`" + ` says
 where), with the cluster's address and CA from the platform's discovery
 document; mcloud uses it from then on. Nothing else to set up.
+
+The API server only takes connections from addresses an admin has listed.
+From anywhere else mcloud goes through the platform's API gateway, with
+the same login and the same rights: mcloud login notices which one this
+network needs (--via says it outright). After moving to another network,
+mcloud login again picks again.
 
 By default it's the device code flow: mcloud shows a link and a code, and
 you approve them in any browser (also from another machine, e.g. over SSH).
@@ -82,6 +94,7 @@ expires (12 hours) or with mcloud logout.`,
 		},
 	}
 	f.bind(c)
+	f.bindVia(c)
 	c.Flags().BoolVar(&browser, "browser", false, "log in in this machine's browser instead of with a device code")
 	return c
 }
@@ -230,6 +243,8 @@ somewhere else for kubectl.
 
 The cluster's address and CA come from the platform's discovery document
 (` + defaultPlatformURL + `), else from your current kubeconfig.
+--via gateway writes the platform's API gateway as the address instead,
+which works from any network.
 
 mcloud uses it unless --kubeconfig or $MCLOUD_KUBECONFIG say otherwise.
 For kubectl: set -gx KUBECONFIG <file>.`,
@@ -247,32 +262,49 @@ For kubectl: set -gx KUBECONFIG <file>.`,
 		},
 	}
 	f.bind(c)
+	f.bindVia(c)
 	c.Flags().StringVar(&out, "out", kube.OwnKubeconfig(), "where to write it")
 	c.Flags().StringVar(&name, "name", "homelab", "cluster and context name in it")
 	return c
 }
 
 // writeKubeconfig writes the Authelia kubeconfig to out. Without force it
-// leaves an existing file alone, unless the discovery document says the
-// cluster's address or CA changed (a rebuilt cluster). Returns out.
+// leaves an existing file alone, unless the cluster's address or CA in it
+// isn't what this machine should use any more: the discovery document has
+// another (a rebuilt cluster), or the route changed (f.via: the API server
+// directly, or the platform's gateway). Returns out.
 func (g *globals) writeKubeconfig(ctx context.Context, f authFlags, out, name string, force bool) (string, error) {
 	var server string
 	var ca []byte
 	p, derr := discover(ctx)
 	if p != nil {
 		g.warnIfOutdated(p)
-		server = p.APIServer
 		var err error
-		if ca, err = base64.StdEncoding.DecodeString(p.CAData); err != nil {
-			return "", fmt.Errorf("discovery document: certificateAuthorityData: %w", err)
+		if server, ca, err = p.route(ctx, f.via); err != nil {
+			return "", err
 		}
+	} else if f.via == viaGateway {
+		return "", fmt.Errorf("--via gateway: no discovery document to find the gateway in (%v)", derr)
 	}
-	if existing, err := clientcmd.LoadFromFile(out); err == nil && !force {
+	viaGW := p != nil && p.Gateway != "" && server == p.Gateway
+	existing, err := clientcmd.LoadFromFile(out)
+	if err == nil && !force {
 		cl := existing.Clusters[name]
 		if p == nil || (cl != nil && cl.Server == server && bytes.Equal(cl.CertificateAuthorityData, ca)) {
 			return out, nil
 		}
-		g.UI().Note("the cluster's address or CA changed; rewriting %s", out)
+		switch {
+		case cl != nil && viaGW && cl.Server != server && f.via == viaGateway:
+			g.UI().Note("%s now goes through the gateway (%s)", out, server)
+		case cl != nil && viaGW && cl.Server != server:
+			g.UI().Note("the API server doesn't take connections from this network: %s now goes through the gateway (%s)", out, server)
+		case cl != nil && !viaGW && p.Gateway != "" && cl.Server == p.Gateway:
+			g.UI().Note("%s now goes to the API server directly", out)
+		default:
+			g.UI().Note("the cluster's address or CA changed; rewriting %s", out)
+		}
+	} else if viaGW && f.via != viaGateway {
+		g.UI().Note("the API server doesn't take connections from this network: going through the gateway (%s)", server)
 	}
 	if p == nil {
 		// No discovery: copy the address and CA from your current kubeconfig

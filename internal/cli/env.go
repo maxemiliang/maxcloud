@@ -189,6 +189,7 @@ env (in this checkout) wins over what mcloud env set keeps in the cluster.`,
 
 func envListCmd(g *globals) *cobra.Command {
 	var f secretsFlags
+	var asJSON bool
 	c := &cobra.Command{
 		Use:   "list",
 		Short: "List the app's variables and their values",
@@ -214,6 +215,9 @@ maxcloud.yaml's value: that's the one the functions get.`,
 			for n := range file {
 				delete(cluster, n)
 			}
+			if asJSON {
+				return g.printJSON(envJSON(app, file, cluster))
+			}
 			if len(file) == 0 && len(cluster) == 0 {
 				g.UI().Note("no variables")
 				return nil
@@ -233,6 +237,7 @@ maxcloud.yaml's value: that's the one the functions get.`,
 		},
 	}
 	f.bind(c, false)
+	jsonFlag(c, &asJSON)
 	return c
 }
 

@@ -196,6 +196,47 @@ func (f Function) validateContainer() error {
 	return nil
 }
 
+// What an app's functions can hold on its database at once. Each instance
+// keeps a pool of its own: the SDKs' db() pool has up to PoolSize
+// connections, and a queue worker another one per job it works on, plus
+// one. Postgres takes 100 connections (CloudNativePG's default
+// max_connections); ConnectionBudget leaves room for its own (the
+// superuser's reserve, the instance manager, a replica, KEDA's backlog
+// query, mcloud db psql).
+const (
+	PoolSize         = 4
+	ConnectionBudget = 80
+)
+
+// DatabaseConnections is the most connections the app's functions can hold
+// at once, every function scaled all the way out and every pool full.
+func (d *Description) DatabaseConnections() int {
+	n := 0
+	for _, f := range d.Functions {
+		instances := max(f.MaxInstances, 1) // as the manifests scale it
+		switch f.Kind {
+		case "http":
+			n += instances * PoolSize
+		case "queue":
+			n += instances * (PoolSize + max(f.Concurrency, 1) + 1)
+		case "schedule":
+			n += PoolSize // one run at a time
+		}
+	}
+	return n
+}
+
+// ConnectionsWarning says so when the functions could together hold more
+// connections than the database has to give ("" if they can't). It can only
+// warn: which functions use the database isn't in the description.
+func ConnectionsWarning(d *Description) string {
+	n := d.DatabaseConnections()
+	if n <= ConnectionBudget {
+		return ""
+	}
+	return fmt.Sprintf("scaled all the way out, these functions can hold %d database connections (%d per instance, more for queue workers), and Postgres has about %d to give: past that, queries fail with \"too many clients already\". Lower maxInstances on the functions that use the database", n, PoolSize, ConnectionBudget)
+}
+
 // NeedsDatabase reports whether any function uses a queue.
 func (d *Description) NeedsDatabase() bool {
 	for _, f := range d.Functions {
@@ -226,6 +267,16 @@ type Options struct {
 	// the manifests themselves (a change is a new revision). They win over
 	// the app's ConfigMap app-env and Secret app-secrets.
 	Env map[string]string
+	// Environment is the app's environment or preview these are for
+	// (staging, pr-42): every function gets it as MAXCLOUD_ENVIRONMENT. App
+	// is then the environment's own name, <app>--<env>, which bucket
+	// names are made from (mc-<app>--<env>--<bucket>).
+	Environment string
+	// Preview: a short-lived deploy that mustn't take room. HTTP functions
+	// scale from zero to one instance, queue workers to one, and scheduled
+	// functions don't run on their schedule (suspended; mcloud run still
+	// runs one).
+	Preview bool
 }
 
 const (
@@ -261,7 +312,7 @@ func Objects(d *Description, o Options) []map[string]any {
 		case "schedule":
 			docs = append(docs, cronJob(f, o))
 		case "queue":
-			docs = append(docs, worker(f, o), scaledObject(f))
+			docs = append(docs, worker(f, o), scaledObject(f, o))
 		}
 	}
 	if d.NeedsDatabase() && !o.LegacyDatabase {
@@ -306,6 +357,9 @@ func env(f Function, o Options) []any {
 	e := []any{obj{"name": "FUNCTION_TARGET", "value": f.Name}}
 	if o.App != "" {
 		e = append(e, obj{"name": "MAXCLOUD_APP", "value": o.App})
+	}
+	if o.Environment != "" {
+		e = append(e, obj{"name": "MAXCLOUD_ENVIRONMENT", "value": o.Environment})
 	}
 	ref := obj{"name": DatabaseName + "-app", "key": "uri"}
 	if !o.LegacyDatabase {
@@ -445,9 +499,13 @@ func knativeService(f Function, o Options) obj {
 		// external-dns reads it.
 		meta["annotations"] = obj{"external-dns.kubernetes.io/cloudflare-proxied": "true"}
 	}
+	minScale, maxScale := f.MinInstances, max(f.MaxInstances, 1)
+	if o.Preview {
+		minScale, maxScale = 0, 1
+	}
 	ann := obj{
-		"autoscaling.knative.dev/min-scale": fmt.Sprint(f.MinInstances),
-		"autoscaling.knative.dev/max-scale": fmt.Sprint(max(f.MaxInstances, 1)),
+		"autoscaling.knative.dev/min-scale": fmt.Sprint(minScale),
+		"autoscaling.knative.dev/max-scale": fmt.Sprint(maxScale),
 	}
 	c := container(f, o, "")
 	c["ports"] = []any{obj{"containerPort": 8080}}
@@ -514,6 +572,9 @@ func cronJob(f Function, o Options) obj {
 	if f.TimeZone != "" && f.TimeZone != "UTC" {
 		spec["timeZone"] = f.TimeZone
 	}
+	if o.Preview {
+		spec["suspend"] = true
+	}
 	return obj{"apiVersion": "batch/v1", "kind": "CronJob", "metadata": obj{"name": f.Name, "labels": labels(f)}, "spec": spec}
 }
 
@@ -540,8 +601,12 @@ func worker(f Function, o Options) obj {
 	}
 }
 
-func scaledObject(f Function) obj {
+func scaledObject(f Function, o Options) obj {
 	perInstance := max(f.Concurrency, 1)
+	maxReplicas := max(f.MaxInstances, 1)
+	if o.Preview {
+		maxReplicas = 1
+	}
 	return obj{
 		"apiVersion": "keda.sh/v1alpha1",
 		"kind":       "ScaledObject",
@@ -549,7 +614,7 @@ func scaledObject(f Function) obj {
 		"spec": obj{
 			"scaleTargetRef":  obj{"name": f.Name},
 			"minReplicaCount": 0,
-			"maxReplicaCount": max(f.MaxInstances, 1),
+			"maxReplicaCount": maxReplicas,
 			"pollingInterval": 10,
 			// Seconds the queue must stay empty before the worker stops.
 			"cooldownPeriod": 120,

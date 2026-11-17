@@ -22,21 +22,27 @@ $GH\_TOKEN (or $GITHUB\_TOKEN), else the GitHub CLI's login.
 
 | Command | |
 | --- | --- |
+| [`mcloud alerts`](mcloud-alerts.md) | Show the platform's active alerts about an app |
 | [`mcloud apps`](mcloud-apps.md) | Register, change and remove apps |
+| [`mcloud bucket`](mcloud-bucket.md) | An app's buckets: list them, and list, copy and remove their objects |
 | [`mcloud build`](mcloud-build.md) | Build the app's image and push it to the maxcloud registry |
 | [`mcloud call`](mcloud-call.md) | Send a request to an HTTP function, private ones too |
-| [`mcloud db`](mcloud-db.md) | An app's database: migrate it, restore it, recover it, branch it |
+| [`mcloud db`](mcloud-db.md) | An app's database: migrate it, restore it, recover it, branch it, dump it |
 | [`mcloud deploy`](mcloud-deploy.md) | Push this repo and follow the build and the rollout (direct apps: build here and apply) |
 | [`mcloud dev`](mcloud-dev.md) | Run the app here, all its functions in one process |
 | [`mcloud doctor`](mcloud-doctor.md) | Check that everything mcloud needs is set up, and say how to fix what isn't |
 | [`mcloud env`](mcloud-env.md) | An app's plain environment variables, for all its functions |
 | [`mcloud generate`](mcloud-generate.md) | Write deploy/k8s from the app's functions |
+| [`mcloud history`](mcloud-history.md) | List an app's past deploys, to roll back to one |
 | [`mcloud init`](mcloud-init.md) | Set up this repo as a functions app on maxcloud |
 | [`mcloud kubeconfig`](mcloud-kubeconfig.md) | Write the kubeconfig that logs in through Authelia (mcloud login does this) |
 | [`mcloud login`](mcloud-login.md) | Log in to the cluster through Authelia |
 | [`mcloud logout`](mcloud-logout.md) | Forget the cached login |
 | [`mcloud logs`](mcloud-logs.md) | Show an app's logs |
+| [`mcloud metrics`](mcloud-metrics.md) | Show an app's requests, errors, latency, queues and jobs |
+| [`mcloud preview`](mcloud-preview.md) | Short-lived deploys of a working tree or a pull request, each at its own URLs |
 | [`mcloud queue`](mcloud-queue.md) | Look at and retry an app's queued jobs |
+| [`mcloud rollback`](mcloud-rollback.md) | Deploy an earlier deploy again |
 | [`mcloud run`](mcloud-run.md) | Run a scheduled function now, and show its output |
 | [`mcloud sandbox`](mcloud-sandbox.md) | Agent sessions: Claude Code in a sandbox in the cluster |
 | [`mcloud secrets`](mcloud-secrets.md) | An app's secrets: environment variables for all its functions |
@@ -49,6 +55,7 @@ Every command takes these.
 | Flag | Default | |
 | --- | --- | --- |
 | `--context` string |  | kubeconfig context |
+| `--env` string |  | act on this environment or preview of the app (staging, pr-42; also $MCLOUD\_ENV): its namespace &lt;app&gt;--&lt;env&gt; |
 | `--kubeconfig` string |  | kubeconfig file (default $MCLOUD\_KUBECONFIG, else mcloud login's, else $KUBECONFIG) |
 | `--plain` |  | plain output: no colors, spinners or interactive prompts (also $MCLOUD\_PLAIN=1; always in CI, pipes, with NO\_COLOR or TERM=dumb) |
 

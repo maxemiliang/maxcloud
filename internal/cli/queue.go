@@ -38,6 +38,7 @@ func queueLsCmd(g *globals) *cobra.Command {
 	var f queueFlags
 	var state string
 	var limit int
+	var asJSON bool
 	c := &cobra.Command{
 		Use:   "ls [APP]",
 		Short: "Jobs per queue and state, and the latest jobs in one state",
@@ -68,7 +69,8 @@ WHERE :'queue' = '' OR queue = :'queue'
 GROUP BY queue ORDER BY queue;
 SELECT '---';
 SELECT id, queue, state, attempts, to_char(created_at, 'YYYY-MM-DD HH24:MI'),
-       coalesce(replace(left(last_error, 100), E'\n', ' '), '')
+       coalesce(replace(left(last_error, 100), E'\n', ' '), ''),
+       to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')
 FROM ` + jobsTable + `
 WHERE (:'queue' = '' OR queue = :'queue') AND (:'state' = 'all' OR state = :'state')
 ORDER BY id DESC LIMIT :lim;
@@ -78,6 +80,9 @@ ORDER BY id DESC LIMIT :lim;
 				return err
 			}
 			counts, jobs, _ := strings.Cut(out, "---\n")
+			if asJSON {
+				return g.printJSON(queueOf(name, state, counts, jobs))
+			}
 			u := g.UI()
 			var rows [][]string
 			for _, line := range lines(counts) {
@@ -99,6 +104,9 @@ ORDER BY id DESC LIMIT :lim;
 			rows = nil
 			for _, line := range lines(jobs) {
 				c := strings.Split(line, "\t")
+				if len(c) == 7 {
+					c = c[:6] // the last is the time for --json
+				}
 				if len(c) == 6 {
 					switch c[2] {
 					case "failed":
@@ -126,6 +134,7 @@ ORDER BY id DESC LIMIT :lim;
 	f.bind(c)
 	c.Flags().StringVar(&state, "state", "failed", "jobs to list: pending, running, failed, done or all")
 	c.Flags().IntVar(&limit, "limit", 20, "how many jobs to list")
+	jsonFlag(c, &asJSON)
 	return c
 }
 

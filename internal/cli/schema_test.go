@@ -27,6 +27,7 @@ func TestSchemaMatchesProject(t *testing.T) {
 		Items *struct {
 			Properties map[string]json.RawMessage `json:"properties"`
 		} `json:"items"`
+		AdditionalProperties json.RawMessage `json:"additionalProperties"`
 	}
 	var root schema
 	if err := json.Unmarshal(data, &root); err != nil {
@@ -62,6 +63,20 @@ func TestSchemaMatchesProject(t *testing.T) {
 	}
 	// projectDB.UnmarshalJSON reads {size, instances}.
 	check("db", db.OneOf[1].Properties, []string{"size", "instances"})
+
+	// environments: a map of names to projectEnvironment, whose env
+	// parseProject reads too.
+	var env schema
+	if err := json.Unmarshal(sub("environments").AdditionalProperties, &env); err != nil {
+		t.Fatal(err)
+	}
+	check("environments.<env>", env.Properties, append(jsonFields(projectEnvironment{}), "env"))
+	// projectPreviews.UnmarshalJSON reads {ttl, max, db, env}.
+	previews := sub("previews")
+	if len(previews.OneOf) != 2 {
+		t.Fatalf("previews: want oneOf [boolean, settings]")
+	}
+	check("previews", previews.OneOf[1].Properties, []string{"ttl", "max", "db", "env"})
 }
 
 func jsonFields(v any) []string {
