@@ -14,6 +14,9 @@ domains:                 # hostnames of your own, within what an admin allowed
   - {host: shop.makiya.dev, service: web, proxied: true}
 env:                     # plain variables for every function (environment.md)
   LOG_LEVEL: info
+environments:            # staging and the like (environments-and-previews.md)
+  staging: {quota: {cpu: 100m}}
+previews: true           # pull requests labelled preview, mcloud preview deploy
 # source: worker         # build the app from this folder, not the repo's root
 # deploy: direct         # mcloud deploy builds and applies from here, no git
 ```
@@ -30,8 +33,10 @@ grant anyone access ([owners](mcloud.md#owners)).
 `deploy`, `quota`, `buckets`, `db` and `domains` are the file's: once it
 declares one, `mcloud apps set` refuses to change it, since the next push
 or deploy would undo it. For a GitOps app a push applies `quota`,
-`buckets`, `db` and `domains` too, without mcloud: the controller reads
-`maxcloud.yaml` at the repo's root from Flux's copy of the repo.
+`buckets`, `db`, `domains`, `environments` and `previews` too, without
+mcloud: the controller reads `maxcloud.yaml` at the repo's root from
+Flux's copy of the repo, on the app's branch only (an environment's branch
+doesn't change anything).
 
 `deploy` takes effect on the next `mcloud deploy` only. Changing it
 switches the app between GitOps and direct, which `mcloud deploy` asks
@@ -51,10 +56,11 @@ digits and single hyphens (or is `db`, or is listed twice), a quota or
 size that isn't above 0, `pods` below 1, `db.instances` other than 1 or 2.
 
 A `maxcloud.yaml` asking for more than a developer may have is refused.
-`mcloud deploy` says why; for a push, the reason is only on the entry in
-`flux-system` (the annotation `maxcloud.gronblom.dev/sync-error`, and a
-`SyncFailed` Warning event), which mcloud doesn't show yet. Without an
-admin, an app gets at most:
+`mcloud deploy` says why; for a push, `mcloud status` does (`maxcloud.yaml
+✗ not applied: ...`, and `sync.error` in `--json`), until a push that
+works. It comes from the entry in `flux-system` (the annotation
+`maxcloud.gronblom.dev/sync-error`, and a `SyncFailed` Warning event).
+Without an admin, an app gets at most:
 
 | Field | At most |
 | --- | --- |
@@ -75,6 +81,18 @@ sets these.
 - `buckets`: lowercase letters, digits and single dashes. `db` is the
   database's backups. The full name, `mc-<app>--<bucket>`, has to fit in
   S3's 63 characters.
+- `environments` (and previews' names): lowercase letters, digits and
+  single dashes, at most 12 characters, and `<app>--<env>` at most 40,
+  since it's in every hostname (`<function>--<app>--<env>.makiya.dev`).
+  `pr-*` is pull requests' previews'. An environment's buckets are
+  `mc-<app>--<env>--<bucket>`, so a long app name leaves less room for
+  them.
+
+## environments and previews
+
+Copies of the app besides production, each an app of its own (namespace
+`<app>--<env>`) with its own secrets, buckets and database:
+[Environments and previews](environments-and-previews.md).
 
 ## source
 

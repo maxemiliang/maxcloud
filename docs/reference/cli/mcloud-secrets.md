@@ -40,6 +40,7 @@ Flags:
 | Flag | Default | |
 | --- | --- | --- |
 | `--app` string |  | the app (default: $MCLOUD\_APP, else maxcloud.yaml's) |
+| `--json` |  | print JSON instead of a table (fields: docs/mcloud.md, JSON output) |
 
 ## mcloud secrets migrate
 

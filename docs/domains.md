@@ -26,8 +26,8 @@ domains:
 - **The service can stay private.** The hostname reaches its revisions
   directly, scale-to-zero included, and the app sees the `Host` the
   client sent (`paja.lankkupelit.fi`, not a cluster-local name).
-- `kubectl get maxcloud -n <app>` shows each Domain. One that isn't Ready
-  says why: not on the admin's list, no certificate covers it, the
+- `mcloud status` shows each Domain (so does `kubectl get maxcloud -n
+  <app>`). One that isn't Ready says why: not on the admin's list, no certificate covers it, the
   service isn't deployed yet, or another route already has the hostname
   (it takes over once that one is gone).
 - Removing a domain from the list removes its route and DNS record.

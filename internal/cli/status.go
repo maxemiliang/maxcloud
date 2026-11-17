@@ -11,10 +11,15 @@ import (
 )
 
 func statusCmd(g *globals) *cobra.Command {
-	return &cobra.Command{
+	var asJSON bool
+	c := &cobra.Command{
 		Use:   "status [APP]",
 		Short: "Show an app's deploy, services, workloads, databases and problems",
-		Args:  cobra.MaximumNArgs(1),
+		Long: `Show an app's deploy, services, workloads, databases, buckets, custom
+domains and problems: pods that aren't well, recent warnings, why a pushed
+maxcloud.yaml wasn't applied, and the platform's alerts about the app
+(for its owners, where the platform serves them; mcloud alerts has more).`,
+		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name, err := appName(args)
 			if err != nil {
@@ -31,10 +36,18 @@ func statusCmd(g *globals) *cobra.Command {
 			if st.Entry == nil && !st.Applied && st.Services == nil && st.Workloads == nil {
 				return fmt.Errorf("no app %s on the cluster; `mcloud apps list` shows the registered ones", name)
 			}
+			alerts := g.statusAlerts(cmd.Context(), k, name)
+			if asJSON {
+				return g.printJSON(statusOf(st, alerts))
+			}
 			printStatus(g.UI(), st)
+			printStatusExtras(g.UI(), st, alerts)
+			g.printEnvironments(cmd.Context(), k, name)
 			return nil
 		},
 	}
+	jsonFlag(c, &asJSON)
+	return c
 }
 
 func printStatus(u *ui.UI, st *kube.Status) {
@@ -58,6 +71,10 @@ func printStatus(u *ui.UI, st *kube.Status) {
 		kv = append(kv, [2]string{"Deploy", u.Mark(st.Deploy.Status, true) + " " + firstLine(st.Deploy.Message)})
 	default:
 		kv = append(kv, [2]string{"Deploy", u.Amber("not created yet") + " (Flux picks up a new entry within a minute)"})
+	}
+	if st.SyncError != "" {
+		kv = append(kv, [2]string{"maxcloud.yaml", u.Red("✗") + " not applied: " + st.SyncError})
+		kv = append(kv, [2]string{"", u.Dim("the pushed file at " + shortSHA(st.SyncedRevision) + "; the app keeps what it had until a push fixes it")})
 	}
 	if len(st.Quota) > 0 {
 		var q []string
@@ -100,6 +117,7 @@ func printStatus(u *ui.UI, st *kube.Status) {
 		u.Println()
 		u.Table([]string{"Database", "Instances", "State"}, rows)
 	}
+	printResources(u, st)
 	if len(st.Problems) > 0 {
 		u.Heading("Problems")
 		for _, p := range st.Problems {

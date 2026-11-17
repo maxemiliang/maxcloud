@@ -142,6 +142,7 @@ func secretsUnsetCmd(g *globals) *cobra.Command {
 
 func secretsListCmd(g *globals) *cobra.Command {
 	var f secretsFlags
+	var asJSON bool
 	c := &cobra.Command{
 		Use:   "list",
 		Short: "List the app's secrets (names only)",
@@ -164,6 +165,19 @@ func secretsListCmd(g *globals) *cobra.Command {
 				names = append(names, n)
 			}
 			sort.Strings(names)
+			if asJSON {
+				type secret struct {
+					Name string `json:"name"`
+				}
+				out := struct {
+					App     string   `json:"app"`
+					Secrets []secret `json:"secrets"`
+				}{App: app, Secrets: []secret{}}
+				for _, n := range names {
+					out.Secrets = append(out.Secrets, secret{Name: n})
+				}
+				return g.printJSON(out)
+			}
 			if len(names) == 0 {
 				g.UI().Note("no secrets")
 			}
@@ -177,6 +191,7 @@ func secretsListCmd(g *globals) *cobra.Command {
 		},
 	}
 	f.bind(c, false)
+	jsonFlag(c, &asJSON)
 	return c
 }
 

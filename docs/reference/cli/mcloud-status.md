@@ -8,7 +8,18 @@ _Generated from the command's help in `internal/cli`._
 
 Show an app's deploy, services, workloads, databases and problems.
 
+Show an app's deploy, services, workloads, databases, buckets, custom
+domains and problems: pods that aren't well, recent warnings, why a pushed
+maxcloud.yaml wasn't applied, and the platform's alerts about the app
+(for its owners, where the platform serves them; mcloud alerts has more).
+
 ```
-mcloud status [APP]
+mcloud status [APP] [flags]
 ```
+
+Flags:
+
+| Flag | Default | |
+| --- | --- | --- |
+| `--json` |  | print JSON instead of a table (fields: docs/mcloud.md, JSON output) |
 

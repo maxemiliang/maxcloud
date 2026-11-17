@@ -382,3 +382,58 @@ func TestParseFractionalBackoff(t *testing.T) {
 		t.Errorf("backoffSeconds = %v", got)
 	}
 }
+
+func TestDatabaseConnections(t *testing.T) {
+	d := &Description{Functions: []Function{
+		{Name: "api", Kind: "http"},                                      // 1 instance x 4
+		{Name: "web", Kind: "http", MaxInstances: 5},                     // 5 x 4
+		{Name: "resize", Kind: "queue", MaxInstances: 2, Concurrency: 3}, // 2 x (4 + 3 + 1)
+		{Name: "mail", Kind: "queue"},                                    // 1 x (4 + 1 + 1)
+		{Name: "nightly", Kind: "schedule"},                              // 4
+	}}
+	if got, want := d.DatabaseConnections(), 4+20+16+6+4; got != want {
+		t.Errorf("DatabaseConnections = %d, want %d", got, want)
+	}
+	if w := ConnectionsWarning(d); w != "" {
+		t.Errorf("within the budget, but warned: %s", w)
+	}
+	d.Functions = append(d.Functions, Function{Name: "big", Kind: "http", MaxInstances: 10})
+	if w := ConnectionsWarning(d); !strings.Contains(w, "90 database connections") {
+		t.Errorf("over the budget: %q", w)
+	}
+}
+
+// A preview takes no room it doesn't need, and knows its environment.
+func TestManifestsPreview(t *testing.T) {
+	d, _ := Parse([]byte(desc))
+	out, err := Manifests(d, Options{App: "shop--pr-4", Environment: "pr-4", Preview: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := docs(t, out)
+	ann := get(m["Service/api"], "spec", "template", "metadata", "annotations")
+	if get(ann, "autoscaling.knative.dev/min-scale") != "0" || get(ann, "autoscaling.knative.dev/max-scale") != "1" {
+		t.Errorf("scale %v", ann)
+	}
+	if get(m["CronJob/nightly"], "spec", "suspend") != true {
+		t.Error("the schedule isn't suspended")
+	}
+	if get(m["ScaledObject/resize"], "spec", "maxReplicaCount") != float64(1) {
+		t.Errorf("queue worker max %v", get(m["ScaledObject/resize"], "spec", "maxReplicaCount"))
+	}
+	c := get(m["Service/api"], "spec", "template", "spec", "containers", 0)
+	if get(c, "env", 1, "name") != "MAXCLOUD_APP" || get(c, "env", 1, "value") != "shop--pr-4" ||
+		get(c, "env", 2, "name") != "MAXCLOUD_ENVIRONMENT" || get(c, "env", 2, "value") != "pr-4" {
+		t.Errorf("env %v", get(c, "env"))
+	}
+
+	// Not a preview: as before, no MAXCLOUD_ENVIRONMENT, no suspend.
+	out, _ = Manifests(d, Options{App: "shop"})
+	m = docs(t, out)
+	if _, ok := get(m["CronJob/nightly"], "spec").(map[string]any)["suspend"]; ok {
+		t.Error("an app's schedule is suspended")
+	}
+	if strings.Contains(string(out), "MAXCLOUD_ENVIRONMENT") {
+		t.Error("an app's functions get MAXCLOUD_ENVIRONMENT")
+	}
+}

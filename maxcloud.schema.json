@@ -131,6 +131,205 @@
       "type": "object",
       "propertyNames": {"pattern": "^[A-Z_][A-Z0-9_]*$"},
       "additionalProperties": {"type": ["string", "number", "boolean"]}
+    },
+    "environments": {
+      "description": "Long-lived copies of the app besides production (staging), each deployed from its own branch into its own namespace, <app>--<env>, at https://<function>--<app>--<env>.makiya.dev/, with its own secrets, variables, buckets and database. The name: lowercase letters, digits and single dashes, at most 12 characters (and <app>--<env> at most 40); not pr-*. At most 3 per app without an admin. {} removes them all; leaving the field out keeps what the app has.",
+      "type": "object",
+      "propertyNames": {
+        "pattern": "^[a-z]([a-z0-9]|-[a-z0-9])*$",
+        "maxLength": 12
+      },
+      "additionalProperties": {
+        "description": "Settings of one environment. What it leaves out is the app's (quota, buckets, db), except domains.",
+        "type": [
+          "object",
+          "null"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "branch": {
+            "description": "GitOps: the branch it deploys from. A push there runs the deploy workflow (add the branch to its on: push: branches), which writes the environment's manifests to deploy/env/<env> on that branch. Ignored for direct apps (mcloud deploy --env <env>).",
+            "type": "string",
+            "default": "the environment's name",
+            "examples": [
+              "staging",
+              "release/qa"
+            ]
+          },
+          "quota": {
+            "description": "The environment's own quota (default: the app's). Within what a developer may ask for, like the app's.",
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "cpu": {
+                "description": "CPU requested by all the app's pods together, a Kubernetes quantity.",
+                "type": [
+                  "string",
+                  "number"
+                ],
+                "default": "200m",
+                "examples": [
+                  "500m",
+                  1
+                ]
+              },
+              "memory": {
+                "description": "Memory requested by all the app's pods together, a Kubernetes quantity.",
+                "type": "string",
+                "default": "1Gi",
+                "examples": [
+                  "2Gi"
+                ]
+              },
+              "pods": {
+                "description": "How many pods the app may have.",
+                "type": [
+                  "integer",
+                  "string"
+                ],
+                "default": 20
+              }
+            }
+          },
+          "buckets": {
+            "description": "Its buckets, mc-<app>--<env>--<name>: empty ones of its own, never the app's (default: the app's list). [] for none.",
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^[a-z0-9]([a-z0-9]|-[a-z0-9])*(:public)?$",
+              "examples": [
+                "uploads",
+                "assets:public"
+              ]
+            },
+            "uniqueItems": true
+          },
+          "db": {
+            "description": "Its own database, empty to start with, backed up to mc-<app>--<env>--db (default: as the app's). false for none.",
+            "oneOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "size": {
+                    "description": "Disk per instance, a Kubernetes quantity. Can grow, never shrink.",
+                    "type": "string",
+                    "default": "1Gi"
+                  },
+                  "instances": {
+                    "description": "1, or 2 for a replica on the other node.",
+                    "type": [
+                      "integer",
+                      "string"
+                    ],
+                    "enum": [
+                      1,
+                      2,
+                      "1",
+                      "2"
+                    ],
+                    "default": 1
+                  }
+                }
+              }
+            ]
+          },
+          "domains": {
+            "description": "Hostnames of its own (default: none). An admin allows them for <app>--<env>, as for an app.",
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "host",
+                "service"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "host": {
+                  "description": "The hostname: lowercase, no wildcards.",
+                  "type": "string",
+                  "examples": [
+                    "shop.makiya.dev"
+                  ]
+                },
+                "service": {
+                  "description": "The Knative service it routes to: an HTTP function's name. It can stay private.",
+                  "type": "string"
+                },
+                "proxied": {
+                  "description": "Behind Cloudflare's proxy (WAF, caching, Access). Not for *.lab.gronblom.dev.",
+                  "type": "boolean",
+                  "default": false
+                }
+              }
+            }
+          },
+          "env": {
+            "description": "Variables for this environment's functions, over the app's env:. Its secrets and mcloud env values are its own (mcloud secrets set --env <env>).",
+            "type": "object",
+            "propertyNames": {
+              "pattern": "^[A-Z_][A-Z0-9_]*$"
+            },
+            "additionalProperties": {
+              "type": [
+                "string",
+                "number",
+                "boolean"
+              ]
+            }
+          }
+        }
+      }
+    },
+    "previews": {
+      "description": "Short-lived deploys at their own URLs, https://<function>--<app>--<name>.makiya.dev/: one per open pull request labelled preview (GitOps apps), and mcloud preview deploy's (any app). Each gets empty buckets of the app's names, an empty database with db: true, and none of the app's secrets or data; all of it goes when the preview does. true, or settings; false turns them off and removes them.",
+      "oneOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "ttl": {
+              "description": "How long a preview lives after its last deploy (a pull request's last push), in whole hours. At most 168h without an admin.",
+              "type": "string",
+              "pattern": "^[1-9][0-9]{0,3}h$",
+              "default": "72h"
+            },
+            "max": {
+              "description": "How many previews the app may have at once; more wait. At most 3 without an admin.",
+              "type": [
+                "integer",
+                "string"
+              ],
+              "default": 2
+            },
+            "db": {
+              "description": "An empty database in each preview (migrations run as on deploy), deleted with it. It doesn't scale to zero: 20m CPU while the preview lives.",
+              "type": "boolean",
+              "default": false
+            },
+            "env": {
+              "description": "Variables for previews' functions, over the app's env:.",
+              "type": "object",
+              "propertyNames": {
+                "pattern": "^[A-Z_][A-Z0-9_]*$"
+              },
+              "additionalProperties": {
+                "type": [
+                  "string",
+                  "number",
+                  "boolean"
+                ]
+              }
+            }
+          }
+        }
+      ]
     }
   }
 }

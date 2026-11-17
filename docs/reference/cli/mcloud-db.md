@@ -6,7 +6,7 @@ _Generated from the command's help in `internal/cli`._
 
 [All commands](README.md)
 
-An app's database: migrate it, restore it, recover it, branch it.
+An app's database: migrate it, restore it, recover it, branch it, dump it.
 
 For apps whose database the maxcloud controller runs (db: in
 maxcloud.yaml, or mcloud apps set &lt;app&gt; --db). Its backups are
@@ -16,6 +16,8 @@ starts a new one and leaves the older ones as they are.
 | Command | |
 | --- | --- |
 | [`mcloud db branch`](#mcloud-db-branch) | Throwaway copies of the database, now or at a point in time |
+| [`mcloud db dump`](#mcloud-db-dump) | Write the database (or a branch) to a file with pg\_dump |
+| [`mcloud db import`](#mcloud-db-import) | Load a dump into the database (or a branch) |
 | [`mcloud db migrate`](#mcloud-db-migrate) | Apply the app's SQL migrations (migrations/\*.sql) to its database |
 | [`mcloud db proxy`](#mcloud-db-proxy) | Reach the app's database (or a branch's) on localhost |
 | [`mcloud db psql`](#mcloud-db-psql) | Open psql in the app's database (or a branch's) |
@@ -73,8 +75,91 @@ mcloud db branch delete [APP] NAME
 List the database's branches.
 
 ```
-mcloud db branch list [APP]
+mcloud db branch list [APP] [flags]
 ```
+
+Flags:
+
+| Flag | Default | |
+| --- | --- | --- |
+| `--json` |  | print JSON instead of a table (fields: docs/mcloud.md, JSON output) |
+
+## mcloud db dump
+
+Write the database (or a branch) to a file with pg\_dump.
+
+Dump the app's database with pg\_dump, run in the database's primary, and
+write it here: for a copy on your machine, moving data to another app
+(mcloud db import), or a look at the schema.
+
+The dump names no owner and no grants (--no-owner, --no-privileges), so it
+loads into any Postgres, as whoever loads it. --format custom writes
+pg\_dump's compressed archive instead of SQL; pg\_restore and mcloud db
+import read it.
+
+It isn't the backup: the database is backed up continuously by itself
+(mcloud db restore, mcloud db branch). A dump is one moment, as consistent
+as one transaction.
+
+```
+mcloud db dump [APP] [flags]
+```
+
+Examples:
+
+```fish
+mcloud db dump                          # shop-20261117-1030.sql
+mcloud db dump --schema-only -o schema.sql
+mcloud db dump -o - | grep 'CREATE TABLE'
+mcloud db dump shop --branch try --format custom -o try.dump
+```
+
+Flags:
+
+| Flag | Default | |
+| --- | --- | --- |
+| `--branch` string |  | a branch of the database (mcloud db branch list) |
+| `--data-only` |  | the rows, no definitions |
+| `--format` string | `plain` | plain (SQL) or custom (pg\_dump's compressed archive) |
+| `-o`, `--output` string |  | the file to write (default &lt;app&gt;-&lt;date&gt;-&lt;time&gt;.sql; - for stdout) |
+| `--schema-only` |  | the tables and other definitions, no rows |
+
+## mcloud db import
+
+Load a dump into the database (or a branch).
+
+Load a dump into the app's database: SQL (what mcloud db dump and plain
+pg\_dump write) with psql, or a custom-format archive (pg\_dump -Fc) with
+pg\_restore. mcloud tells them apart by the file's first bytes. FILE - reads
+stdin.
+
+It loads as the app's own user, so the app owns what's created, and in one
+transaction: a dump that fails halfway leaves the database as it was. It
+adds to what's there. Loading into tables that already exist fails (and
+changes nothing); for a clean slate, import into a new branch, or drop
+what's in the way first.
+
+It asks before it writes to the deployed database (-y doesn't). Try it on
+a branch first: mcloud db branch create try, then --branch try.
+
+```
+mcloud db import [APP] FILE [flags]
+```
+
+Examples:
+
+```fish
+mcloud db import shop-20261117-1030.sql
+mcloud db import shop old.dump --branch try
+pg_dump --no-owner --no-privileges "$OLD_DATABASE_URL" | mcloud db import -
+```
+
+Flags:
+
+| Flag | Default | |
+| --- | --- | --- |
+| `--branch` string |  | load into a branch of the database (mcloud db branch list) |
+| `-y`, `--yes` |  | don't ask before loading into the deployed database |
 
 ## mcloud db migrate
 

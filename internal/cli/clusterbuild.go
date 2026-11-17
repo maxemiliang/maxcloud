@@ -59,6 +59,9 @@ func (g *globals) clusterBuildPush(ctx context.Context, k *kube.Client, p *proje
 		return "", nil, fmt.Errorf("a cluster build pushes to the maxcloud registry, not %s (image: in maxcloud.yaml)", p.Image)
 	}
 	repo := registry + "/" + p.App + "/" + p.App
+	if p.Image != "" {
+		repo = p.Image // in the maxcloud registry (a preview's repository)
+	}
 	token, _, err := k.RegistryPushToken(ctx, p.App, registry, time.Hour)
 	if err != nil {
 		return "", nil, err

@@ -20,7 +20,54 @@ func parseProject(data []byte) (*project, error) {
 		return nil, err
 	}
 	p.Env = env
+	// The environments' and previews' env:, the same way.
+	for name, e := range p.Environments {
+		if e == nil {
+			e = &projectEnvironment{}
+			p.Environments[name] = e
+		}
+		if e.Env, err = parseEnvAt(data, "environments", name, "env"); err != nil {
+			return nil, fmt.Errorf("environments.%s.%w", name, err)
+		}
+	}
+	if p.Previews != nil {
+		if p.Previews.Env, err = parseEnvAt(data, "previews", "env"); err != nil {
+			return nil, fmt.Errorf("previews.%w", err)
+		}
+	}
 	return &p, nil
+}
+
+// parseEnvAt reads an env: map below the top level (environments.staging.env),
+// as parseProjectEnv does the app's. nil if it isn't there.
+func parseEnvAt(data []byte, path ...string) (map[string]string, error) {
+	var doc yaml3.Node
+	if err := yaml3.Unmarshal(data, &doc); err != nil {
+		return nil, err
+	}
+	if doc.Kind != yaml3.DocumentNode || len(doc.Content) == 0 {
+		return nil, nil
+	}
+	node := doc.Content[0]
+	for _, key := range path {
+		if node.Kind == yaml3.AliasNode {
+			node = node.Alias
+		}
+		if node.Kind != yaml3.MappingNode {
+			return nil, nil
+		}
+		var next *yaml3.Node
+		for i := 0; i+1 < len(node.Content); i += 2 {
+			if node.Content[i].Value == key {
+				next = node.Content[i+1]
+			}
+		}
+		if next == nil {
+			return nil, nil
+		}
+		node = next
+	}
+	return envFromNode(node)
 }
 
 // parseProjectEnv reads maxcloud.yaml's env: a map of variable names to
@@ -41,6 +88,12 @@ func parseProjectEnv(data []byte) (map[string]string, error) {
 			envNode = top.Content[i+1]
 		}
 	}
+	return envFromNode(envNode)
+}
+
+// envFromNode reads an env: node: a map of names to scalars, each as
+// written.
+func envFromNode(envNode *yaml3.Node) (map[string]string, error) {
 	if envNode == nil || (envNode.Kind == yaml3.ScalarNode && envNode.Tag == "!!null") {
 		return nil, nil
 	}

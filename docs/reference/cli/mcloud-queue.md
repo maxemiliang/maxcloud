@@ -37,6 +37,7 @@ Flags:
 | Flag | Default | |
 | --- | --- | --- |
 | `--db` string | `db` | the app's database (CloudNativePG cluster) holding the queue |
+| `--json` |  | print JSON instead of a table (fields: docs/mcloud.md, JSON output) |
 | `--limit` int | `20` | how many jobs to list |
 | `--queue` string |  | only this queue |
 | `--state` string | `failed` | jobs to list: pending, running, failed, done or all |

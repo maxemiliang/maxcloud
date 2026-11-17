@@ -17,6 +17,8 @@ This repo holds:
 - `maxcloud-controller` (`controller/`), which gives apps their S3
   buckets and Postgres databases, keeps their secrets safe through a
   cluster rebuild, and describes the platform to mcloud. See its README.
+- The web console (`console/`), a read-only site where a developer logs in
+  and sees their apps. See [docs/console.md](docs/console.md).
 
 ## Getting started
 
@@ -39,7 +41,10 @@ mcloud deploy                             # register it, push, follow the build 
 Guides:
 
 - [Deploying an app](docs/deploying.md): GitOps and direct deploys, what
-  each kind of function becomes
+  each kind of function becomes, logs, metrics and alerts, rolling back
+- [Environments and previews](docs/environments-and-previews.md): staging
+  from its own branch, short-lived previews of pull requests and working
+  trees
 - [maxcloud.yaml](docs/maxcloud-yaml.md): the app's definition, and what a
   developer may ask for
 - [Local development](docs/local-development.md): `mcloud dev`
@@ -52,13 +57,14 @@ Guides:
   Code in a pod that reaches the internet but not the cluster
 - [mcloud](docs/mcloud.md): installing, logging in, which app a command
   acts on, an app's owners
+- [The web console](docs/console.md): your apps in a browser, read-only
 
 Reference, generated from the code:
 
 - [mcloud commands](docs/reference/cli/README.md)
 - [maxcloud.yaml fields](docs/reference/maxcloud-yaml.md)
 - [Custom resources](docs/reference/crds.md): Bucket, Database,
-  DatabaseBranch, Domain
+  DatabaseBranch, Domain, Preview
 
 Writing functions: [`@max-cloud/functions`](packages/functions/README.md)
 (Node.js, TypeScript), [`functions`](functions/README.md) (Go),

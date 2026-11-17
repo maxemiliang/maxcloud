@@ -92,6 +92,10 @@ A public HTTP function is at `https://<function>--<app>.makiya.dev/`;
 jobs in the app's Postgres database: `db: true` in `maxcloud.yaml` (mcloud
 says so when an app with a queue has none).
 
+Staging-style environments, each from its own branch, and short-lived
+previews of pull requests and working trees:
+[Environments and previews](environments-and-previews.md).
+
 How to write functions: the SDKs' READMEs,
 [`@max-cloud/functions`](../packages/functions/README.md) for Node.js and
 TypeScript and [`functions`](../functions/README.md) for Go.
@@ -109,10 +113,52 @@ platform side.
 ## Seeing how it's doing
 
 ```fish
-mcloud status                       # deploy, services and URLs, workloads, databases, problems
+mcloud status                       # deploy, services and URLs, workloads, databases, buckets, domains, problems, alerts
 mcloud logs -f                      # logs of every pod; mcloud logs shop web -f for one service
+mcloud logs --since 6h --timestamps # older logs, gone pods included (Loki)
+mcloud metrics --window 24h         # requests, 5xx, p95 latency, pods, queue backlog, jobs
+mcloud alerts                       # the platform's alerts about the app, now
 mcloud call api /health             # a request to a function, private ones too
 mcloud run nightly                  # a scheduled function, now
 mcloud queue ls                     # jobs per queue and state, latest failed ones
 mcloud queue retry 41 42            # run failed jobs again (or --failed)
+mcloud bucket ls uploads:           # what's in a bucket (cp, rm: buckets.md)
 ```
+
+`mcloud logs` reads the pods that run now (and those just finished); a
+service that scaled to zero has none. With `--since` or `--until` it reads
+the platform's Loki instead, which keeps every pod's logs for 30 days.
+Loki, `mcloud metrics` and `mcloud alerts` go through the platform (the
+maxcloud controller), which answers only an app's owners and admins, about
+their own app, with your mcloud login. They're the numbers and alerts of
+the "Run platform" Grafana dashboard and the admins' alerts. Nobody is
+told about an alert by push yet: run `mcloud alerts --json` on a schedule
+if you want to be.
+
+Every command that lists or shows something takes `--json`
+([mcloud](mcloud.md#json-output)).
+
+## Rolling back
+
+```fish
+mcloud history                      # past deploys, and which is deployed now
+mcloud rollback                     # back to the one before (asks first; --dry-run shows it)
+mcloud rollback --to 3f2a9c1        # back to one from mcloud history
+```
+
+- **GitOps:** a rollback is a commit. mcloud commits `deploy/k8s` as it was
+  at that deploy on top of the branch (through GitHub, with your GitHub
+  login), with `[skip ci]` so the deploy workflow doesn't build the branch
+  over it, and follows Flux applying it. The code on the branch stays as it
+  is: the next push deploys it again, so fix or revert the bad commit
+  first. (A `kubectl` change instead would be undone by Flux.)
+- **Direct:** `mcloud deploy` keeps the last 10 deploys in the app's
+  namespace (ConfigMaps `mcloud-deploy-<n>`), with what each applied. A
+  rollback applies one again: the HTTP functions get a new revision of the
+  old image, the scheduled and queue functions their old CronJob or
+  ScaledJob. Deploys from before mcloud recorded them aren't there.
+- **Not rolled back:** the database (migrations only go forward; when it
+  has migrations the old deploy doesn't know, mcloud says which, and the
+  old code runs on the newer schema), variables from `mcloud env set`,
+  secrets, buckets and domains. `env:` from `maxcloud.yaml` is in the
+  manifests, so it rolls back with them.

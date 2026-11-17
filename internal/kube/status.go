@@ -23,6 +23,10 @@ type App struct {
 	Revision string          // last revision Flux applied
 	Applied  bool            // the Kustomization exists
 	InGit    bool            // registered in git (platform/), not with mcloud
+	// SyncError is why the app's pushed maxcloud.yaml wasn't applied to
+	// its entry (the controller's annotation); SyncedRevision is the
+	// commit it last read.
+	SyncError, SyncedRevision string
 }
 
 // Apps lists the registered apps.
@@ -56,6 +60,8 @@ func (c *Client) app(ctx context.Context, provider *unstructured.Unstructured) (
 		a.Entry = &registry.Entry{Name: s("name"), Repo: s("repo"), Path: s("path"), Branch: s("branch"), CPU: s("cpu"), Memory: s("memory"), Pods: s("pods"), Deploy: s("deploy"),
 			Buckets: s("buckets"), DB: s("db"), DBInstances: s("dbInstances"), DBSize: s("dbSize"), Domains: s("domains"), Owners: s("owners")}
 		a.InGit = provider.GetLabels()[registry.FluxOwnerLabel] != ""
+		a.SyncError = provider.GetAnnotations()[SyncErrorAnnotation]
+		a.SyncedRevision = provider.GetAnnotations()[SyncedRevisionAnnotation]
 		if a.Entry.Name != "" {
 			a.Name = a.Entry.Name
 		}
@@ -84,6 +90,8 @@ type Status struct {
 	Databases       []Database
 	Quota           []QuotaLine
 	Problems        []string // pods that aren't well, recent warnings
+	Buckets         []Bucket
+	Domains         []Domain
 }
 
 type Service struct {
@@ -242,6 +250,8 @@ func (c *Client) AppStatus(ctx context.Context, name string) (*Status, error) {
 			Healthy: condition(d, "Ready").Ready(),
 		})
 	}
+
+	st.Buckets, st.Domains = c.storageAndDomains(ctx, ns)
 
 	if q, err := c.Core.CoreV1().ResourceQuotas(ns).Get(ctx, "tenant", metav1.GetOptions{}); err == nil {
 		for _, r := range []corev1.ResourceName{"requests.cpu", "requests.memory", "pods"} {

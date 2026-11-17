@@ -16,6 +16,12 @@ The first login also writes mcloud's kubeconfig (\`mcloud kubeconfig\` says
 where), with the cluster's address and CA from the platform's discovery
 document; mcloud uses it from then on. Nothing else to set up.
 
+The API server only takes connections from addresses an admin has listed.
+From anywhere else mcloud goes through the platform's API gateway, with
+the same login and the same rights: mcloud login notices which one this
+network needs (--via says it outright). After moving to another network,
+mcloud login again picks again.
+
 By default it's the device code flow: mcloud shows a link and a code, and
 you approve them in any browser (also from another machine, e.g. over SSH).
 --browser opens the login in this machine's browser instead.
@@ -35,4 +41,5 @@ Flags:
 | `--browser` |  | log in in this machine's browser instead of with a device code |
 | `--client-id` string | `kubernetes` | its client for the cluster, the API server's audience ($MCLOUD\_OIDC\_CLIENT\_ID) |
 | `--issuer` string | `https://auth.lab.gronblom.dev` | OpenID Connect provider the cluster trusts ($MCLOUD\_OIDC\_ISSUER) |
+| `--via` string | `auto` | how to reach the API server: direct, gateway (the platform's API gateway, from any network), or auto: direct if this machine can reach it, else the gateway ($MCLOUD\_VIA) |
 

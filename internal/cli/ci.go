@@ -11,6 +11,7 @@ import (
 
 	"github.com/maxemiliang/maxcloud/internal/functions"
 	"github.com/maxemiliang/maxcloud/internal/kube"
+	"github.com/maxemiliang/maxcloud/internal/registry"
 )
 
 type ciOptions struct {
@@ -25,14 +26,19 @@ func (g *globals) ciBuild(ctx context.Context, o ciOptions) error {
 	if os.Getenv("GITHUB_ACTIONS") != "true" {
 		return errors.New("--ci is for the deploy workflow in GitHub Actions; run mcloud deploy here")
 	}
+	// A pull request: a preview, or nothing. Decided before anything that
+	// needs credentials, which a fork's run doesn't get.
+	if ev := os.Getenv("GITHUB_EVENT_NAME"); ev == "pull_request" || ev == "pull_request_target" {
+		return g.ciPreview(ctx, o, ev)
+	}
 	if os.Getenv("ACTIONS_ID_TOKEN_REQUEST_URL") == "" {
 		return errors.New("the maxcloud registry takes this repo's GitHub OIDC token: grant `id-token: write` in the repo's deploy workflow (mcloud init writes it)")
 	}
+	p, perr := loadProject()
 	app := o.app
 	if app == "" {
-		p, err := loadProject()
-		if err != nil {
-			return fmt.Errorf("no app name: set app: in maxcloud.yaml, or the app input (%w)", err)
+		if perr != nil {
+			return fmt.Errorf("no app name: set app: in maxcloud.yaml, or the app input (%w)", perr)
 		}
 		app = p.App
 	}
@@ -43,6 +49,16 @@ func (g *globals) ciBuild(ctx context.Context, o ciOptions) error {
 	sha, branch := os.Getenv("GITHUB_SHA"), os.Getenv("GITHUB_REF_NAME")
 	if sha == "" || branch == "" {
 		return errors.New("GITHUB_SHA and GITHUB_REF_NAME aren't set")
+	}
+	// An environment's branch deploys that environment: its own manifests
+	// directory on its branch, its name and variables in the functions.
+	target, env, appManifests := app, "", o.manifests
+	if perr == nil && p.App == app && branch != p.branch() {
+		if e, ok := p.environmentForBranch(branch); ok {
+			env, target = e, registry.EnvironmentName(app, e)
+			o.manifests = environmentManifests(e)
+			fmt.Fprintf(g.out, "Branch %s is environment %s: deploying %s from %s\n", branch, env, target, o.manifests)
+		}
 	}
 	registry := imageRegistry()
 	repo := registry + "/" + app + "/" + app
@@ -72,6 +88,18 @@ func (g *globals) ciBuild(ctx context.Context, o ciOptions) error {
 		return err
 	}
 
+	if env != "" {
+		// The environment starts from a copy of the app's manifests, and
+		// keeps its own after that.
+		if _, err := os.Stat(o.manifests); os.IsNotExist(err) {
+			if _, err := os.Stat(appManifests); err == nil {
+				if err := copyDir(appManifests, o.manifests); err != nil {
+					return err
+				}
+			}
+		}
+	}
+
 	// Ask the image, not the source, so the manifests match what was built.
 	if o.functions {
 		fmt.Fprintln(g.out, "Asking the image for its functions ...")
@@ -79,11 +107,14 @@ func (g *globals) ciBuild(ctx context.Context, o ciOptions) error {
 		if err != nil {
 			return err
 		}
-		env, err := manifestEnv(app)
+		vars, err := manifestEnv(app)
 		if err != nil {
 			return err
 		}
-		changed, err := functions.WriteDir(o.manifests, desc, functions.Options{Image: o.image, App: app, Env: env})
+		if env != "" {
+			vars = p.envFor(env, false)
+		}
+		changed, err := functions.WriteDir(o.manifests, desc, functions.Options{Image: o.image, App: target, Env: vars, Environment: env})
 		if err != nil {
 			return err
 		}
@@ -99,6 +130,9 @@ func (g *globals) ciBuild(ctx context.Context, o ciOptions) error {
 		}
 		if w := imageMigrationsWarning(desc); w != "" {
 			fmt.Fprintln(g.errOut, "::warning title=Migrations the image won't apply::"+w)
+		}
+		if w := functions.ConnectionsWarning(desc); w != "" {
+			fmt.Fprintln(g.errOut, "::warning title=More database connections than Postgres has::"+w)
 		}
 	}
 

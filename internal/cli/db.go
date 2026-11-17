@@ -21,13 +21,13 @@ import (
 func dbCmd(g *globals) *cobra.Command {
 	c := &cobra.Command{
 		Use:   "db",
-		Short: "An app's database: migrate it, restore it, recover it, branch it",
+		Short: "An app's database: migrate it, restore it, recover it, branch it, dump it",
 		Long: `For apps whose database the maxcloud controller runs (db: in
 maxcloud.yaml, or mcloud apps set <app> --db). Its backups are
 generations: db-1, db-2, ... in the bucket mc-<app>--db; every restore
 starts a new one and leaves the older ones as they are.`,
 	}
-	c.AddCommand(dbPsqlCmd(g), dbProxyCmd(g), dbRestoreCmd(g), dbRecoverCmd(g), dbBranchCmd(g), dbMigrateCmd(g))
+	c.AddCommand(dbPsqlCmd(g), dbProxyCmd(g), dbRestoreCmd(g), dbRecoverCmd(g), dbBranchCmd(g), dbMigrateCmd(g), dbDumpCmd(g), dbImportCmd(g))
 	return c
 }
 
@@ -347,7 +347,8 @@ func dbBranchCreateCmd(g *globals) *cobra.Command {
 }
 
 func dbBranchListCmd(g *globals) *cobra.Command {
-	return &cobra.Command{
+	var asJSON bool
+	c := &cobra.Command{
 		Use:   "list [APP]",
 		Short: "List the database's branches",
 		Args:  cobra.MaximumNArgs(1),
@@ -363,6 +364,9 @@ func dbBranchListCmd(g *globals) *cobra.Command {
 			bs, err := k.Branches(cmd.Context(), name)
 			if err != nil {
 				return err
+			}
+			if asJSON {
+				return g.printJSON(branchesJSON(name, bs))
 			}
 			if len(bs) == 0 {
 				g.UI().Note("no branches")
@@ -390,6 +394,8 @@ func dbBranchListCmd(g *globals) *cobra.Command {
 			return nil
 		},
 	}
+	jsonFlag(c, &asJSON)
+	return c
 }
 
 func dbBranchDeleteCmd(g *globals) *cobra.Command {

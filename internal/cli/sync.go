@@ -60,6 +60,18 @@ func (p *project) entry(base *registry.Entry) registry.Entry {
 			e.DB, e.DBSize, e.DBInstances = "", "", ""
 		}
 	}
+	if p.Environments != nil {
+		e.Environments = p.environmentsValue()
+	}
+	if pp := p.Previews; pp != nil {
+		e.Previews, e.PreviewTTL, e.PreviewMax, e.PreviewDB = "", "", "", ""
+		if pp.Enabled {
+			e.Previews, e.PreviewTTL, e.PreviewMax = "true", pp.TTL, pp.Max
+			if pp.DB {
+				e.PreviewDB = "true"
+			}
+		}
+	}
 	return e
 }
 
@@ -74,6 +86,9 @@ func (p *project) target(base *registry.Entry, direct bool) (registry.Entry, err
 			return registry.Entry{}, fmt.Errorf("--direct, but %s says deploy: %s: change it there", ProjectFile, p.Deploy)
 		}
 		q.Deploy = registry.DeployDirect
+	}
+	if err := p.checkEnvironments(); err != nil {
+		return registry.Entry{}, fmt.Errorf("%s: %w", ProjectFile, err)
 	}
 	e := q.entry(base)
 	if err := e.Validate(); err != nil {
@@ -108,6 +123,12 @@ func (p *project) syncedFields() []string {
 	}
 	if p.Domains != nil {
 		out = append(out, "domains")
+	}
+	if p.Environments != nil {
+		out = append(out, "environments")
+	}
+	if p.Previews != nil {
+		out = append(out, "previewDB", "previewMax", "previewTTL", "previews")
 	}
 	sort.Strings(out)
 	return out

@@ -12,6 +12,7 @@ import (
 
 	"github.com/maxemiliang/maxcloud/internal/github"
 	"github.com/maxemiliang/maxcloud/internal/kube"
+	"github.com/maxemiliang/maxcloud/internal/registry"
 )
 
 func deployCmd(g *globals) *cobra.Command {
@@ -50,7 +51,12 @@ and applies the functions' manifests with your kubeconfig.
 It builds with docker: the Dockerfile, or buildpacks (pack, or pack in a
 container). Without docker, an app without a Dockerfile builds in the
 cluster instead (--build cluster): a buildpacks pod in the app's
-namespace, with the source streamed to it.`,
+namespace, with the source streamed to it.
+
+With --env, an environment (environments: in maxcloud.yaml) instead: a
+GitOps app's is its branch's deploy (run this on that branch; on an
+environment's branch, mcloud deploy deploys that environment by itself),
+and a direct app's is this working tree, applied in <app>--<env>.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			ctx := cmd.Context()
@@ -70,7 +76,13 @@ namespace, with the source streamed to it.`,
 			// the first deploy, kept in line after that. No platform commit.
 			// How it deploys is the entry's: maxcloud.yaml's deploy: when it
 			// has one, else what the app was last switched to.
-			e, created, err := g.syncApp(ctx, k, p, direct, yes)
+			env := targetEnvironment()
+			if env != "" {
+				if _, ok := p.Environments[env]; !ok {
+					return fmt.Errorf("%s declares no environment %s (environments: in %s); a preview deploys with mcloud preview deploy", ProjectFile, env, ProjectFile)
+				}
+			}
+			e, created, err := g.syncAppFromBranch(ctx, k, p, direct, yes)
 			if err != nil {
 				return err
 			}
@@ -79,6 +91,13 @@ namespace, with the source streamed to it.`,
 					if err := g.waitNamespace(ctx, name, 3*time.Minute); err != nil {
 						return err
 					}
+				}
+				if env != "" {
+					// The controller makes the environment from the entry.
+					if err := g.waitNamespace(ctx, registry.EnvironmentName(name, env), 3*time.Minute); err != nil {
+						return err
+					}
+					return g.deployDirectTo(ctx, k, p, directTarget{env: env}, started)
 				}
 				return g.deployDirect(ctx, k, p, started)
 			}
@@ -91,6 +110,19 @@ namespace, with the source streamed to it.`,
 				return err
 			}
 			u := g.UI()
+			// An environment deploys from its own branch: pushing that
+			// branch deploys it.
+			if env == "" {
+				if own, ok := p.environmentForBranch(branch); ok {
+					env = own
+					u.Note("%s is environment %s's branch: deploying %s", branch, env, registry.EnvironmentName(name, env))
+				}
+			} else if want := p.environmentBranch(env); branch != want {
+				return fmt.Errorf("environment %s deploys from branch %s, and this is %s: check it out (or merge into it) and run this there", env, want, branch)
+			}
+			if env != "" {
+				name = registry.EnvironmentName(name, env)
+			}
 			if dirty, _ := git("status", "--porcelain"); dirty != "" {
 				u.Warn("uncommitted changes aren't part of this deploy")
 			}
@@ -334,4 +366,28 @@ func sleep(ctx context.Context, d time.Duration) error {
 	case <-time.After(d):
 		return nil
 	}
+}
+
+// syncAppFromBranch is syncApp, except on a GitOps app's environment's
+// branch: there the app's settings stay what its own branch's
+// maxcloud.yaml made them (an environment's branch mustn't change the app,
+// or its environments), and the deploy goes on with the entry as it is.
+func (g *globals) syncAppFromBranch(ctx context.Context, k *kube.Client, p *project, direct, yes bool) (*registry.Entry, bool, error) {
+	cur, err := k.GetRegistryEntry(ctx, p.App)
+	if err != nil {
+		return nil, false, err
+	}
+	if cur != nil && !cur.Entry.Direct() && !direct {
+		own := cur.Entry.Branch
+		if own == "" {
+			own = registry.DefaultBranch
+		}
+		if branch, err := git("rev-parse", "--abbrev-ref", "HEAD"); err == nil && branch != own {
+			if _, isEnv := p.environmentForBranch(branch); isEnv {
+				g.UI().Note("on %s, not %s: %s's settings stay as %s's %s left them", branch, own, p.App, own, ProjectFile)
+				return cur.Entry, false, nil
+			}
+		}
+	}
+	return g.syncApp(ctx, k, p, direct, yes)
 }

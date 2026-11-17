@@ -9,11 +9,22 @@ _Generated from the command's help in `internal/cli`._
 Show an app's logs.
 
 Show the logs of an app's pods: all of them, or those of one service,
-Deployment, CronJob or ScaledJob (NAME). Only running pods and recently
-finished ones have logs; older logs are in Grafana (Loki).
+Deployment, CronJob or ScaledJob (NAME).
+
+They come from one of two places (--source):
+
+  - pods: the pods running now and those recently finished, from the
+    cluster. A service that scaled to zero has none.
+  - loki: every pod's, gone ones included, from the platform's Loki (kept
+    30 days). --since and --until pick the time, --tail the newest lines.
+    The platform answers only the app's owners and admins.
+
+The default, auto, reads Loki when --since or --until is given, else the
+pods; if the platform doesn't offer Loki, it says so and reads the pods.
 
 With -f it follows them, including pods that start later, so it also shows a
-service waking up from zero.
+service waking up from zero. After --since it first prints what Loki has,
+then follows the pods (a line where the two meet may show twice).
 
 ```
 mcloud logs [APP [NAME]] [flags]
@@ -22,9 +33,11 @@ mcloud logs [APP [NAME]] [flags]
 Examples:
 
 ```fish
-mcloud logs shop            # every pod of the app
-mcloud logs shop web -f     # follow the web service
-mcloud logs -f              # in an app's repo, with a maxcloud.yaml
+mcloud logs shop                          # every pod of the app, now
+mcloud logs shop web -f                   # follow the web service
+mcloud logs --since 2h --timestamps       # the last two hours, from Loki
+mcloud logs shop nightly --since 2026-11-16T22:00:00Z --until 2026-11-16T23:00:00Z
+mcloud logs -f                            # in an app's repo, with a maxcloud.yaml
 ```
 
 Flags:
@@ -33,7 +46,10 @@ Flags:
 | --- | --- | --- |
 | `--all-containers` |  | include Knative's queue-proxy sidecar |
 | `-f`, `--follow` |  | keep streaming, including pods that start later |
-| `-l`, `--selector` string |  | pods matching this label selector instead of NAME |
-| `--since` duration | `0s` | only lines newer than this, e.g. 10m |
-| `--tail` int |  | only the last N lines per container |
+| `-l`, `--selector` string |  | pods matching this label selector instead of NAME (pods only) |
+| `--since` string |  | only lines newer than this: a duration ago (10m, 48h) or a time (2026-11-16T22:00:00Z, "2026-11-16 22:00"); from Loki unless --source pods |
+| `--source` string | `auto` | where the logs come from: auto, loki or pods (see above) |
+| `--tail` int |  | only the last N lines per container (from Loki: the last N lines in all; default 1000, at most 5000) |
+| `--timestamps` |  | start each line with its time |
+| `--until` string |  | only lines older than this, from Loki: a duration ago (30m) or a time (2026-11-16T23:00:00Z, "2026-11-16 23:00") |
 

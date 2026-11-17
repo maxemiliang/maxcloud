@@ -53,6 +53,55 @@ type Entry struct {
 	// Never taken from maxcloud.yaml: a push mustn't grant it. An entry
 	// without owners (one from git) is an admin's.
 	Owners string `json:"owners,omitempty"`
+	// Environments are the app's long-lived environments (staging), JSON:
+	// {"staging":{"branch":"staging","cpu":"100m"}}, each environment's
+	// registry keys that differ from the app's. The maxcloud controller
+	// makes an entry <name>--<env> for each. "{}": none; empty: leave the
+	// ones the app has.
+	Environments string `json:"environments,omitempty"`
+	// Previews is "true" for an app with previews (pull requests labelled
+	// preview, mcloud preview deploy), PreviewTTL how long one lives after
+	// its last deploy (72h), PreviewMax how many it may have at once (2),
+	// PreviewDB "true" for an empty database in each.
+	Previews   string `json:"previews,omitempty"`
+	PreviewTTL string `json:"previewTTL,omitempty"`
+	PreviewMax string `json:"previewMax,omitempty"`
+	PreviewDB  string `json:"previewDB,omitempty"`
+}
+
+// EnvironmentSeparator joins an app and one of its environments into the
+// environment's name (registry entry, namespace): shop--staging.
+const EnvironmentSeparator = "--"
+
+// Environment limits (the maxcloud controller and admission have the same):
+// an environment's name is at most 12 characters, and <app>--<env> at most
+// 40, since it's in every hostname, <service>--<app>--<env>.makiya.dev.
+const (
+	MaxEnvironmentName     = 12
+	MaxEnvironmentFullName = 40
+	// PullRequestPrefix starts pull requests' previews' names (pr-42).
+	PullRequestPrefix = "pr-"
+)
+
+var envNameRe = regexp.MustCompile(`^[a-z]([a-z0-9]|-[a-z0-9])*$`)
+
+// EnvironmentName is the name of app's environment env: shop--staging.
+func EnvironmentName(app, env string) string { return app + EnvironmentSeparator + env }
+
+// SplitEnvironment splits shop--staging into shop and staging.
+func SplitEnvironment(name string) (app, env string, ok bool) {
+	return strings.Cut(name, EnvironmentSeparator)
+}
+
+// ValidateEnvironment checks an environment's or preview's name for app.
+func ValidateEnvironment(app, env string) error {
+	if !envNameRe.MatchString(env) || len(env) > MaxEnvironmentName {
+		return fmt.Errorf("environment %q: lowercase letters, digits and single dashes, starting with a letter, at most %d characters", env, MaxEnvironmentName)
+	}
+	if n := len(EnvironmentName(app, env)); n > MaxEnvironmentFullName {
+		return fmt.Errorf("environment %q: %s would be %d characters, at most %d (it's in every hostname)", env, EnvironmentName(app, env), n, MaxEnvironmentFullName)
+	}
+	return nil
 }
 
 // ownerRe: an Authelia username as the API server sees it after
@@ -358,8 +407,26 @@ func (e *Entry) Validate() error {
 			return fmt.Errorf("pods %q: expected a positive whole number", e.Pods)
 		}
 	}
+	switch e.Previews {
+	case "", "true":
+	case "false":
+		e.Previews, e.PreviewTTL, e.PreviewMax, e.PreviewDB = "", "", "", ""
+	default:
+		return fmt.Errorf("previews %q: true or false", e.Previews)
+	}
+	if e.PreviewTTL != "" && !previewTTLRe.MatchString(e.PreviewTTL) {
+		return fmt.Errorf("previews.ttl %q: whole hours, such as 72h", e.PreviewTTL)
+	}
+	if e.PreviewMax != "" && (len(e.PreviewMax) != 1 || e.PreviewMax[0] < '0' || e.PreviewMax[0] > '9') {
+		return fmt.Errorf("previews.max %q: 0 to 9", e.PreviewMax)
+	}
+	if e.PreviewDB != "" && e.PreviewDB != "true" {
+		return fmt.Errorf("previews.db %q: true or false", e.PreviewDB)
+	}
 	return nil
 }
+
+var previewTTLRe = regexp.MustCompile(`^[1-9][0-9]{0,3}h$`)
 
 // FilePath is where e's entry lives, relative to the registry directory.
 func FilePath(name string) string { return "apps/" + name + ".yaml" }
@@ -398,6 +465,8 @@ func (e *Entry) fields() []field {
 		{"db", e.DB}, {"dbInstances", e.DBInstances}, {"dbSize", e.DBSize},
 		{"domains", e.Domains},
 		{"owners", e.Owners},
+		{"environments", e.Environments},
+		{"previews", e.Previews}, {"previewTTL", e.PreviewTTL}, {"previewMax", e.PreviewMax}, {"previewDB", e.PreviewDB},
 	} {
 		if f.value != "" {
 			fs = append(fs, f)
@@ -434,6 +503,9 @@ func Parse(data []byte) (*Entry, error) {
 		DB:      s("db"), DBInstances: s("dbInstances"), DBSize: s("dbSize"),
 		Domains: s("domains"),
 		Owners:  s("owners"),
+
+		Environments: s("environments"),
+		Previews:     s("previews"), PreviewTTL: s("previewTTL"), PreviewMax: s("previewMax"), PreviewDB: s("previewDB"),
 	}
 	if e.Name == "" {
 		return nil, fmt.Errorf("entry has no name")
