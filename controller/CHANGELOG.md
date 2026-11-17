@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.14.0](https://github.com/maxemiliang/maxcloud/compare/controller/v0.13.0...controller/v0.14.0) (2026-11-17)
+
+
+### Features
+
+* **controller:** API gateway, apps API, environments and previews ([269f551](https://github.com/maxemiliang/maxcloud/commit/269f55152528be8b32494f513850acd4c8a49ac1))
+
 ## [0.13.0](https://github.com/maxemiliang/maxcloud/compare/controller/v0.12.0...controller/v0.13.0) (2026-11-08)
 
 

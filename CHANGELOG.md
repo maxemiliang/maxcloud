@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.17.0](https://github.com/maxemiliang/maxcloud/compare/v0.16.0...v0.17.0) (2026-11-17)
+
+
+### Features
+
+* **console:** a read-only web console ([bce529b](https://github.com/maxemiliang/maxcloud/commit/bce529b2fe34c47fcdd3e89e78032b84cb3166fe))
+* **controller:** API gateway, apps API, environments and previews ([269f551](https://github.com/maxemiliang/maxcloud/commit/269f55152528be8b32494f513850acd4c8a49ac1))
+* **mcloud:** day-2 commands, bucket and database tooling, environments and previews ([7be2f61](https://github.com/maxemiliang/maxcloud/commit/7be2f61da7d7ed3fbc942842e1b1016ba93521ca))
+
+
+### Bug Fixes
+
+* **mcloud:** help, maxcloud.yaml schema and docs name makiya.dev as apps' domain ([64e93af](https://github.com/maxemiliang/maxcloud/commit/64e93af92f9f5ba8815366581cd269b7c2823666))
+
 ## [0.16.0](https://github.com/maxemiliang/maxcloud/compare/v0.15.0...v0.16.0) (2026-11-11)
 
 
