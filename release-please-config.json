@@ -8,7 +8,7 @@
     ".": {
       "release-type": "go",
       "include-component-in-tag": false,
-      "exclude-paths": ["controller", "functions", "packages", "platform"]
+      "exclude-paths": ["console", "controller", "functions", "packages", "platform"]
     },
     "controller": {
       "release-type": "go",
