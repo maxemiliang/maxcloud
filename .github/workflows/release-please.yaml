@@ -69,6 +69,22 @@ jobs:
     with:
       tag: ${{ needs.release-please.outputs.controller_tag }}
 
+  # The cluster's controller pin (platform/clusters/personal/maxcloud.yaml):
+  # Renovate opens the PR that moves it to the new tag (renovate.json), now
+  # that the image the tag names is pushed. Starting a workflow by
+  # workflow_dispatch is something GITHUB_TOKEN may do. Merging that PR is
+  # the deploy, and stays by hand.
+  controller-pin:
+    needs: controller
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write # start the renovate workflow
+    steps:
+      - name: Start Renovate
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run renovate.yaml --repo "$GITHUB_REPOSITORY" --ref main
+
   functions-js:
     needs: release-please
     if: needs.release-please.outputs.functions_js == 'true'

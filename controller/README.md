@@ -649,6 +649,9 @@ release-please does it ([CONTRIBUTING.md](../CONTRIBUTING.md#releasing)): its re
 `controller/vX.Y.Z` and runs `release-controller.yaml`, which builds and
 pushes `ghcr.io/maxemiliang/maxcloud-controller:X.Y.Z` (and refuses if
 `newTag` doesn't match). Clusters pick the tag in their `GitRepository`.
+For this repo's own cluster (`platform/clusters/personal/maxcloud.yaml`)
+Renovate opens that pull request: the release starts it once the image is
+pushed. Merging it is the deploy.
 
 By hand: bump `newTag`, commit, then
 `git tag controller/vX.Y.Z && git push origin controller/vX.Y.Z`.

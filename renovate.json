@@ -78,6 +78,16 @@
       "groupName": "agent-sandbox"
     },
     {
+      "description": "The cluster's maxcloud controller (platform/clusters/personal/maxcloud.yaml) follows this repo's own controller/v* tags. The regex keeps Renovate off mcloud's v* tags, which it would otherwise read as newer versions of the same thing. Our own release: a PR as soon as there is one, no waiting period. release-please.yaml starts Renovate once the release's image is pushed.",
+      "matchManagers": ["flux"],
+      "matchFileNames": ["platform/clusters/personal/maxcloud.yaml"],
+      "versioning": "regex:^controller/v(?<major>\\d+)\\.(?<minor>\\d+)\\.(?<patch>\\d+)$",
+      "minimumReleaseAge": null,
+      "schedule": ["at any time"],
+      "commitMessageTopic": "the cluster's maxcloud controller",
+      "labels": ["dependencies", "controller"]
+    },
+    {
       "description": "Knative supports upgrading one minor version at a time: one PR per minor, merged in order.",
       "matchPackageNames": ["knative-operator"],
       "separateMultipleMinor": true
