@@ -43,7 +43,8 @@ const (
 // ConfigMap zot-base, which the cluster's repo owns, plus one access rule
 // per app on the platform, from the app registry:
 //
-//	<app>/**  read:          <app>:pull  (the app's pull ServiceAccount)
+//	<app>/**  read:          <app>:pull  (the app's pull ServiceAccount),
+//	                         <app>--<env>:pull (its environments' and previews')
 //	          read and push: <app>:push  (its push ServiceAccount, for mcloud)
 //	                         github:<repo> (the app's repo's GitHub Actions)
 //
@@ -78,8 +79,17 @@ func (r *ZotAccess) Reconcile(ctx context.Context, _ ctrl.Request) (ctrl.Result,
 		return ctrl.Result{}, err
 	}
 	var apps []zotApp
+	// An app's environments and previews run the app's own images: they
+	// read <app>/** as <app>--<env>:pull, and push nothing (CI and mcloud
+	// push as the app).
+	readers := map[string][]string{}
 	for _, e := range list.Items {
 		if !e.GetDeletionTimestamp().IsZero() {
+			continue
+		}
+		if isChildEntry(&e) {
+			app := e.GetLabels()[EnvironmentOfLabel]
+			readers[app] = append(readers[app], e.GetName()+":pull")
 			continue
 		}
 		v, _, _ := unstructured.NestedMap(e.Object, "spec", "defaultValues")
@@ -92,6 +102,10 @@ func (r *ZotAccess) Reconcile(ctx context.Context, _ ctrl.Request) (ctrl.Result,
 			repo = "" // nothing pushes from its repo
 		}
 		apps = append(apps, zotApp{Name: name, Repo: repo})
+	}
+	for i := range apps {
+		apps[i].Readers = readers[apps[i].Name]
+		slices.Sort(apps[i].Readers)
 	}
 
 	rendered, err := renderZotConfig(baseJSON, apps)
@@ -109,7 +123,11 @@ func (r *ZotAccess) Reconcile(ctx context.Context, _ ctrl.Request) (ctrl.Result,
 	return ctrl.Result{RequeueAfter: 2 * time.Minute}, nil
 }
 
-type zotApp struct{ Name, Repo string }
+type zotApp struct {
+	Name, Repo string
+	// Readers: the app's environments' pull identities.
+	Readers []string
+}
 
 // renderZotConfig adds the apps' rules to the base configuration. Rules in
 // the base for the same pattern are kept as they are.
@@ -143,7 +161,7 @@ func renderZotConfig(base string, apps []zotApp) ([]byte, error) {
 			pushers = append(pushers, "github:"+a.Repo)
 		}
 		repos[pattern] = map[string]any{"policies": []any{
-			map[string]any{"users": []string{a.Name + ":pull"}, "actions": []string{"read"}},
+			map[string]any{"users": append([]string{a.Name + ":pull"}, a.Readers...), "actions": []string{"read"}},
 			map[string]any{"users": pushers, "actions": []string{"read", "create", "update"}},
 		}}
 	}

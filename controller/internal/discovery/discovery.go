@@ -30,11 +30,27 @@ const caConfigMap = "kube-root-ca.crt"
 
 // Document is the JSON served.
 type Document struct {
-	APIServer                string  `json:"apiServer"`
+	APIServer string `json:"apiServer"`
+	// Gateway is the API gateway's URL (internal/gateway): the API server
+	// for whoever can't reach APIServer, with a certificate any machine
+	// trusts.
+	Gateway                  string  `json:"gateway,omitempty"`
 	CertificateAuthorityData string  `json:"certificateAuthorityData"`
 	OIDC                     *OIDC   `json:"oidc,omitempty"`
 	ImageRegistry            string  `json:"imageRegistry,omitempty"`
 	Mcloud                   *Mcloud `json:"mcloud,omitempty"`
+	API                      *API    `json:"api,omitempty"`
+}
+
+// API says what else the platform answers to a caller's bearer token (an
+// mcloud login's ID token). It's served on the API gateway, not here: this
+// server stays public, and holds nothing that needs a login.
+type API struct {
+	// Apps is the URL of the apps API (package appapi), on the gateway:
+	// https://<gateway>/api/v1/apps/.
+	Apps string `json:"apps,omitempty"`
+	// Features the apps API serves: logs, metrics, alerts.
+	Features []string `json:"features,omitempty"`
 }
 
 type OIDC struct {

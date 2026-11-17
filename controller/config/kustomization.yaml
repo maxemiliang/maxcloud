@@ -10,11 +10,21 @@
 #     MAXCLOUD_PUBLIC_GATEWAY, MAXCLOUD_DOMAINS_GATEWAY,
 #     MAXCLOUD_DOMAINS_ALLOWLIST, and for the discovery document
 #     MAXCLOUD_API_SERVER, MAXCLOUD_OIDC_ISSUER, MAXCLOUD_OIDC_CLIENT_ID,
-#     MAXCLOUD_MIN_MCLOUD_VERSION)
+#     MAXCLOUD_MIN_MCLOUD_VERSION, for the apps API next to it
+#     MAXCLOUD_LOKI_URL, MAXCLOUD_PROMETHEUS_URL,
+#     MAXCLOUD_ALERT_RULE_NAMESPACES, for the API gateway
+#     MAXCLOUD_GATEWAY_URL, and for apps' environments and previews
+#     MAXCLOUD_ENVIRONMENTS_MAX, MAXCLOUD_PREVIEWS_MAX, MAXCLOUD_PREVIEW_QUOTA)
 #   - the public route to the Service maxcloud-controller's port discovery,
 #     if it serves the discovery document
+#   - the public route (not through a proxy that can't carry SPDY upgrades
+#     or long streams) to its port gateway, if it runs the API gateway
+#     (the apps API is served there too)
 #   - ConfigMap maxcloud-domains (MAXCLOUD_DOMAINS_ALLOWLIST): the hostnames
 #     each app may have, for Domains; without it, no app gets one
+#   - for apps' environments: a Role in flux-system letting the user
+#     maxcloud:environments create, update and delete registry entries
+#     (admission keeps it to environments' entries)
 # Databases need CloudNativePG and its barman-cloud plugin in the cluster.
 # The homelab's are in platform/infrastructure/controllers/maxcloud.
 apiVersion: kustomize.config.k8s.io/v1beta1
@@ -25,6 +35,7 @@ resources:
   - crd/maxcloud.gronblom.dev_databases.yaml
   - crd/maxcloud.gronblom.dev_databasebranches.yaml
   - crd/maxcloud.gronblom.dev_domains.yaml
+  - crd/maxcloud.gronblom.dev_previews.yaml
   - rbac/role.yaml
   - rbac/role_binding.yaml
   - rbac/leader_election.yaml

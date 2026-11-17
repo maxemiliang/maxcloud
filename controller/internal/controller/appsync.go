@@ -10,8 +10,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"math"
 	"net/http"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -253,6 +255,132 @@ type project struct {
 	Buckets []string        `json:"buckets"`
 	DB      *projectDB      `json:"db"`
 	Domains []projectDomain `json:"domains"`
+	// Environments: long-lived copies of the app (staging), each deployed
+	// from its own branch. The entry keeps them as JSON in environments;
+	// the Environments reconciler makes their entries.
+	Environments map[string]projectEnvironment `json:"environments"`
+	// Previews: short-lived deploys of pull requests and working trees.
+	Previews *projectPreviews `json:"previews"`
+}
+
+// projectEnvironment is one of environments:. What it leaves out is the
+// app's (quota, buckets, db), except domains, which it has none of unless
+// it says. env is mcloud build's alone.
+type projectEnvironment struct {
+	Branch string `json:"branch"`
+	Quota  *struct {
+		CPU    string `json:"cpu"`
+		Memory string `json:"memory"`
+		Pods   any    `json:"pods"`
+	} `json:"quota"`
+	Buckets []string        `json:"buckets"`
+	DB      *projectDB      `json:"db"`
+	Domains []projectDomain `json:"domains"`
+	Env     map[string]any  `json:"env"`
+}
+
+// projectPreviews is previews: true, false, or settings.
+type projectPreviews struct {
+	Enabled bool
+	TTL     string
+	Max     string
+	DB      bool
+}
+
+func (pp *projectPreviews) UnmarshalJSON(b []byte) error {
+	var on bool
+	if err := json.Unmarshal(b, &on); err == nil {
+		pp.Enabled = on
+		return nil
+	}
+	var v struct {
+		TTL string         `json:"ttl"`
+		Max any            `json:"max"`
+		DB  bool           `json:"db"`
+		Env map[string]any `json:"env"`
+	}
+	if err := json.Unmarshal(b, &v); err != nil {
+		return errors.New("previews: true, false, or {ttl: 72h, max: 2, db: true}")
+	}
+	pp.Enabled, pp.TTL, pp.DB = true, v.TTL, v.DB
+	if v.Max != nil {
+		pp.Max = fmt.Sprint(v.Max)
+	}
+	return nil
+}
+
+// spec is the environment as the entry's environments JSON keeps it:
+// registry keys that differ from the app's.
+func (e projectEnvironment) spec() envSpec {
+	s := envSpec{}
+	if e.Branch != "" {
+		s["branch"] = e.Branch
+	}
+	if q := e.Quota; q != nil {
+		if q.CPU != "" {
+			s["cpu"] = q.CPU
+		}
+		if q.Memory != "" {
+			s["memory"] = q.Memory
+		}
+		if q.Pods != nil {
+			s["pods"] = fmt.Sprint(q.Pods)
+		}
+	}
+	if e.Buckets != nil {
+		parts := make([]string, 0, len(e.Buckets))
+		for _, b := range e.Buckets {
+			parts = append(parts, strings.TrimSpace(b))
+		}
+		s["buckets"] = strings.Join(parts, ",")
+	}
+	if d := e.DB; d != nil {
+		if d.Enabled {
+			s["db"] = "true"
+			if d.Size != "" {
+				s["dbSize"] = d.Size
+			}
+			if d.Instances != "" {
+				s["dbInstances"] = d.Instances
+			}
+		} else {
+			s["db"] = "false"
+		}
+	}
+	if e.Domains != nil {
+		s["domains"] = formatProjectDomains(e.Domains)
+	}
+	return s
+}
+
+// environmentsValue is the entry's environments value: JSON, keys sorted.
+// None is "{}", not "": an entry without the key keeps the environments it
+// has (see Environments).
+func (p *project) environmentsValue() string {
+	if len(p.Environments) == 0 {
+		return "{}"
+	}
+	out := map[string]envSpec{}
+	for name, e := range p.Environments {
+		out[name] = e.spec()
+	}
+	b, err := json.Marshal(out)
+	if err != nil {
+		panic(err) // strings only
+	}
+	return string(b)
+}
+
+func formatProjectDomains(ds []projectDomain) string {
+	parts := make([]string, 0, len(ds))
+	for _, d := range ds {
+		v := strings.ToLower(strings.TrimSpace(d.Host)) + ":" + strings.TrimSpace(d.Service)
+		if d.Proxied {
+			v += ":proxied"
+		}
+		parts = append(parts, v)
+	}
+	return strings.Join(parts, ",")
 }
 
 // projectDomain is one of domains: {host, service, proxied}. Which
@@ -349,8 +477,44 @@ func (p *project) validate(app string) error {
 			}
 		}
 	}
+	// An environment is checked as the app it becomes, <app>--<env>, with
+	// what it inherits.
+	for _, name := range slices.Sorted(maps.Keys(p.Environments)) {
+		if err := ValidEnvironmentName(app, name); err != nil {
+			return fmt.Errorf("environments: %w", err)
+		}
+		if strings.HasPrefix(name, PullRequestPrefix) {
+			return fmt.Errorf("environments: %s: names starting with %s are pull requests' previews", name, PullRequestPrefix)
+		}
+		e := p.Environments[name]
+		if e.Branch != "" && (!branchRe.MatchString(e.Branch) || strings.Contains(e.Branch, "..")) {
+			return fmt.Errorf("environments.%s.branch: %q isn't a branch name", name, e.Branch)
+		}
+		sub := project{Quota: e.Quota, Buckets: e.Buckets, DB: e.DB}
+		if sub.Buckets == nil {
+			sub.Buckets = p.Buckets
+		}
+		if err := sub.validate(naming.Environment(app, name)); err != nil {
+			return fmt.Errorf("environments.%s: %w", name, err)
+		}
+	}
+	if pp := p.Previews; pp != nil && pp.Enabled {
+		if pp.TTL != "" {
+			if d, err := time.ParseDuration(pp.TTL); err != nil || d <= 0 || d%time.Hour != 0 {
+				return fmt.Errorf("previews.ttl: %q: whole hours, such as 72h", pp.TTL)
+			}
+		}
+		if pp.Max != "" {
+			if _, err := intInRange(pp.Max, 0, 9); err != nil {
+				return fmt.Errorf("previews.max: %w", err)
+			}
+		}
+	}
 	return nil
 }
+
+// branchRe: the registry's rule for a branch (registry-admission.yaml).
+var branchRe = regexp.MustCompile(`^[A-Za-z0-9._/-]+$`)
 
 func positiveQuantity(s string) error {
 	q, err := resource.ParseQuantity(s)
@@ -410,15 +574,24 @@ func (p *project) apply(values map[string]any) []string {
 		set("buckets", strings.Join(parts, ","))
 	}
 	if p.Domains != nil {
-		parts := make([]string, 0, len(p.Domains))
-		for _, d := range p.Domains {
-			v := strings.ToLower(strings.TrimSpace(d.Host)) + ":" + strings.TrimSpace(d.Service)
-			if d.Proxied {
-				v += ":proxied"
+		set("domains", formatProjectDomains(p.Domains))
+	}
+	if p.Environments != nil {
+		set("environments", p.environmentsValue())
+	}
+	if pp := p.Previews; pp != nil {
+		on, db := "", ""
+		ttl, max := "", ""
+		if pp.Enabled {
+			on, ttl, max = "true", pp.TTL, pp.Max
+			if pp.DB {
+				db = "true"
 			}
-			parts = append(parts, v)
 		}
-		set("domains", strings.Join(parts, ","))
+		set("previews", on)
+		set("previewTTL", ttl)
+		set("previewMax", max)
+		set("previewDB", db)
 	}
 	if d := p.DB; d != nil {
 		if d.Enabled {
@@ -464,6 +637,12 @@ func (p *project) declares() []string {
 	}
 	if p.Domains != nil {
 		keys = append(keys, "domains")
+	}
+	if p.Environments != nil {
+		keys = append(keys, "environments")
+	}
+	if p.Previews != nil {
+		keys = append(keys, "previewDB", "previewMax", "previewTTL", "previews")
 	}
 	slices.Sort(keys)
 	return keys

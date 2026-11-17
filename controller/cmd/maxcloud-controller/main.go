@@ -24,6 +24,12 @@
 //	MAXCLOUD_OIDC_ISSUER         optional, in the discovery document
 //	MAXCLOUD_OIDC_CLIENT_ID      optional, in the discovery document
 //	MAXCLOUD_MIN_MCLOUD_VERSION  optional, in the discovery document
+//	MAXCLOUD_GATEWAY_URL         the API gateway's public URL: turns it on, and puts it in the discovery document (off if unset; needs the two OIDC settings)
+//	MAXCLOUD_GATEWAY_ADDR        where the gateway listens (default :8083)
+//	MAXCLOUD_GATEWAY_USER_PREFIX what the API server puts before a person's username (default authelia:)
+//	MAXCLOUD_LOKI_URL            Loki's base URL: turns on apps' logs (/api/v1/apps/ on the API gateway, so it needs MAXCLOUD_GATEWAY_URL)
+//	MAXCLOUD_PROMETHEUS_URL      Prometheus's base URL: turns on apps' metrics and alerts (likewise)
+//	MAXCLOUD_ALERT_RULE_NAMESPACES  namespaces whose PrometheusRules' alerts apps see (default monitoring)
 //	AWS_ACCESS_KEY_ID            the controller's own S3 user
 //	AWS_SECRET_ACCESS_KEY
 package main
@@ -32,6 +38,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"net/http"
 	"net/url"
 	"os"
 	"strconv"
@@ -52,8 +59,11 @@ import (
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
 	v1 "github.com/maxemiliang/maxcloud/controller/api/v1alpha1"
+	"github.com/maxemiliang/maxcloud/controller/internal/appapi"
+	"github.com/maxemiliang/maxcloud/controller/internal/caller"
 	"github.com/maxemiliang/maxcloud/controller/internal/controller"
 	"github.com/maxemiliang/maxcloud/controller/internal/discovery"
+	"github.com/maxemiliang/maxcloud/controller/internal/gateway"
 	"github.com/maxemiliang/maxcloud/controller/internal/objectstorage"
 )
 
@@ -69,9 +79,14 @@ type config struct {
 	registryBucket                                                     string
 	secretsKey                                                         *age.X25519Identity
 	apiServer, discoveryAddr, oidcIssuer, oidcClientID, minMcloud      string
+	gatewayURL, gatewayAddr, gatewayUserPrefix                         string
 	imageRegistry, zotNamespace                                        string
+	lokiURL, prometheusURL                                             string
+	alertRuleNamespaces                                                []string
 	pullTokenLifetime                                                  time.Duration
 	tokenExpires                                                       time.Time
+	maxEnvironments, maxPreviews                                       int
+	previewQuota                                                       controller.PreviewQuota
 }
 
 func configFromEnv() (config, error) {
@@ -105,7 +120,24 @@ func configFromEnv() (config, error) {
 	c.oidcIssuer = os.Getenv("MAXCLOUD_OIDC_ISSUER")
 	c.oidcClientID = os.Getenv("MAXCLOUD_OIDC_CLIENT_ID")
 	c.minMcloud = os.Getenv("MAXCLOUD_MIN_MCLOUD_VERSION")
+	c.gatewayURL = strings.TrimRight(os.Getenv("MAXCLOUD_GATEWAY_URL"), "/")
+	if c.gatewayAddr = os.Getenv("MAXCLOUD_GATEWAY_ADDR"); c.gatewayAddr == "" {
+		c.gatewayAddr = ":8083"
+	}
+	if c.gatewayUserPrefix = os.Getenv("MAXCLOUD_GATEWAY_USER_PREFIX"); c.gatewayUserPrefix == "" {
+		c.gatewayUserPrefix = "authelia:"
+	}
+	if c.gatewayURL != "" && (c.oidcIssuer == "" || c.oidcClientID == "") {
+		return c, errors.New("MAXCLOUD_GATEWAY_URL needs MAXCLOUD_OIDC_ISSUER and MAXCLOUD_OIDC_CLIENT_ID: the gateway only passes on that provider's logins")
+	}
 	c.imageRegistry = os.Getenv("MAXCLOUD_IMAGE_REGISTRY")
+	c.lokiURL = strings.TrimRight(os.Getenv("MAXCLOUD_LOKI_URL"), "/")
+	c.prometheusURL = strings.TrimRight(os.Getenv("MAXCLOUD_PROMETHEUS_URL"), "/")
+	for _, ns := range strings.Split(os.Getenv("MAXCLOUD_ALERT_RULE_NAMESPACES"), ",") {
+		if ns = strings.TrimSpace(ns); ns != "" {
+			c.alertRuleNamespaces = append(c.alertRuleNamespaces, ns)
+		}
+	}
 	c.zotNamespace = os.Getenv("MAXCLOUD_ZOT_NAMESPACE")
 	c.pullTokenLifetime = 7 * 24 * time.Hour
 	if s := os.Getenv("MAXCLOUD_IMAGE_PULL_TOKEN_LIFETIME"); s != "" {
@@ -114,6 +146,29 @@ func configFromEnv() (config, error) {
 			return c, fmt.Errorf("MAXCLOUD_IMAGE_PULL_TOKEN_LIFETIME %q: a duration of at least 10m", s)
 		}
 		c.pullTokenLifetime = d
+	}
+	for _, v := range []struct {
+		name string
+		dst  *int
+		def  int
+	}{{"MAXCLOUD_ENVIRONMENTS_MAX", &c.maxEnvironments, 3}, {"MAXCLOUD_PREVIEWS_MAX", &c.maxPreviews, 6}} {
+		*v.dst = v.def
+		if s := os.Getenv(v.name); s != "" {
+			n, err := strconv.Atoi(s)
+			if err != nil || n < 0 {
+				return c, fmt.Errorf("%s %q: a whole number", v.name, s)
+			}
+			*v.dst = n
+		}
+	}
+	c.previewQuota = controller.DefaultPreviewQuota
+	if s := os.Getenv("MAXCLOUD_PREVIEW_QUOTA"); s != "" {
+		// cpu,memory,pods,dbSize: 100m,512Mi,10,1Gi
+		parts := strings.Split(s, ",")
+		if len(parts) != 4 {
+			return c, fmt.Errorf("MAXCLOUD_PREVIEW_QUOTA %q: cpu,memory,pods,dbSize (100m,512Mi,10,1Gi)", s)
+		}
+		c.previewQuota = controller.PreviewQuota{CPU: parts[0], Memory: parts[1], Pods: parts[2], DBSize: parts[3]}
 	}
 	c.publicDomain = os.Getenv("MAXCLOUD_PUBLIC_DOMAIN")
 	if c.publicGateway = os.Getenv("MAXCLOUD_PUBLIC_GATEWAY"); c.publicGateway == "" {
@@ -318,19 +373,59 @@ func run(metricsAddr, probeAddr string, leaderElect bool) error {
 		return fmt.Errorf("registry backup: %w", err)
 	}
 
+	// Apps' logs, metrics and alerts, for their owners: served on the API
+	// gateway, so a request gets here only with a login that passed its
+	// check; the handler then asks who it is and what they may do in the
+	// app's namespace (TokenReview, SubjectAccessReview), and fixes the
+	// namespace in every query itself.
+	var appsAPI *appapi.Handler
+	switch {
+	case cfg.lokiURL == "" && cfg.prometheusURL == "":
+	case cfg.gatewayURL == "":
+		ctrl.Log.WithName("setup").Info("MAXCLOUD_LOKI_URL/MAXCLOUD_PROMETHEUS_URL need MAXCLOUD_GATEWAY_URL (the API gateway they're served on): apps' logs, metrics and alerts are off")
+	default:
+		appsAPI = &appapi.Handler{
+			Reviewer: &caller.Reviewer{Client: mgr.GetClient()},
+			Reader:   mgr.GetAPIReader(),
+			Loki:     cfg.lokiURL, Prometheus: cfg.prometheusURL,
+			RuleNamespaces: cfg.alertRuleNamespaces,
+		}
+		appsAPI.Init()
+	}
+
 	// The public discovery document, on every replica.
 	if cfg.apiServer != "" {
-		doc := discovery.Document{APIServer: cfg.apiServer, ImageRegistry: cfg.imageRegistry}
+		doc := discovery.Document{APIServer: cfg.apiServer, Gateway: cfg.gatewayURL, ImageRegistry: cfg.imageRegistry}
 		if cfg.oidcIssuer != "" {
 			doc.OIDC = &discovery.OIDC{Issuer: cfg.oidcIssuer, ClientID: cfg.oidcClientID}
 		}
 		if cfg.minMcloud != "" {
 			doc.Mcloud = &discovery.Mcloud{MinVersion: cfg.minMcloud}
 		}
+		// Apps' logs, metrics and alerts are served on the API gateway;
+		// the document says where.
+		if appsAPI != nil {
+			doc.API = &discovery.API{Apps: cfg.gatewayURL + appapi.Prefix, Features: appsAPI.Features()}
+		}
 		if err := mgr.Add(&discovery.Server{
 			Addr: cfg.discoveryAddr, Reader: mgr.GetAPIReader(), Namespace: cfg.namespace, Document: doc,
 		}); err != nil {
 			return fmt.Errorf("discovery: %w", err)
+		}
+	}
+
+	// The API gateway, on every replica: the API server for people whose
+	// address isn't on its allowlist, with their own login.
+	if cfg.gatewayURL != "" {
+		gw, err := newGateway(restConfig, cfg)
+		if err != nil {
+			return fmt.Errorf("gateway: %w", err)
+		}
+		if appsAPI != nil {
+			gw.Mounts = map[string]http.Handler{appapi.Prefix: appsAPI}
+		}
+		if err := mgr.Add(gw); err != nil {
+			return fmt.Errorf("gateway: %w", err)
 		}
 	}
 
@@ -368,6 +463,23 @@ func run(metricsAddr, probeAddr string, leaderElect bool) error {
 		return fmt.Errorf("app sync: %w", err)
 	}
 
+	// Apps' environments and previews: registry entries of their own,
+	// written as maxcloud:environments, so the developer ceiling applies to
+	// each.
+	envConfig := rest.CopyConfig(restConfig)
+	envConfig.Impersonate = rest.ImpersonationConfig{UserName: controller.EnvironmentsUser}
+	envWriter, err := client.New(envConfig, client.Options{Scheme: scheme})
+	if err != nil {
+		return fmt.Errorf("environments client: %w", err)
+	}
+	if err := (&controller.Environments{
+		Client: mgr.GetClient(), Writer: envWriter, Objects: s3c, Bucket: cfg.registryBucket,
+		Recorder:        mgr.GetEventRecorderFor("maxcloud-controller"),
+		MaxEnvironments: cfg.maxEnvironments, MaxPreviews: cfg.maxPreviews, Quota: cfg.previewQuota,
+	}).SetupWithManager(mgr); err != nil {
+		return fmt.Errorf("environments: %w", err)
+	}
+
 	if !cfg.tokenExpires.IsZero() {
 		controller.SetTokenExpiry(cfg.tokenExpires)
 	}
@@ -380,4 +492,30 @@ func run(metricsAddr, probeAddr string, leaderElect bool) error {
 
 	ctrl.Log.WithName("setup").Info("starting", "version", Version, "objectStorage", cfg.serviceUUID, "endpoint", cfg.endpoint)
 	return mgr.Start(ctrl.SetupSignalHandler())
+}
+
+// newGateway is the API gateway towards the API server this controller
+// talks to, with that connection's CA and none of its credentials.
+func newGateway(restConfig *rest.Config, cfg config) (*gateway.Server, error) {
+	upstream, err := url.Parse(restConfig.Host)
+	if err != nil || upstream.Host == "" {
+		return nil, fmt.Errorf("the API server's address %q isn't a URL", restConfig.Host)
+	}
+	tlsConfig, err := rest.TLSConfigFor(rest.AnonymousClientConfig(restConfig))
+	if err != nil {
+		return nil, err
+	}
+	return &gateway.Server{
+		Addr:     cfg.gatewayAddr,
+		Upstream: upstream,
+		Transport: &http.Transport{
+			TLSClientConfig:       tlsConfig,
+			ForceAttemptHTTP2:     true,
+			MaxIdleConnsPerHost:   32,
+			IdleConnTimeout:       90 * time.Second,
+			TLSHandshakeTimeout:   10 * time.Second,
+			ResponseHeaderTimeout: time.Minute,
+		},
+		Issuer: cfg.oidcIssuer, Audience: cfg.oidcClientID, UserPrefix: cfg.gatewayUserPrefix,
+	}, nil
 }

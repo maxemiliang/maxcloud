@@ -5,6 +5,12 @@
 // bucket names never contain "--", so the prefix "mc-shop--" can only match
 // shop's own buckets. With a single hyphen, mc-shop-* would also match the
 // buckets of an app called shop-x, and so would shop's S3 policy.
+//
+// An app's environments and previews are apps of their own, named
+// <app>--<env> (shop--staging): exactly one "--", so their buckets are
+// mc-shop--staging--<bucket>. Their prefix matches only their own buckets;
+// shop's prefix matches theirs too, which shop's policy takes back with a
+// Deny (s3policy.App).
 package naming
 
 import (
@@ -32,13 +38,25 @@ const (
 // label: lowercase letters and digits, single hyphens between them.
 var label = regexp.MustCompile(`^[a-z0-9]([a-z0-9]|-[a-z0-9])*$`)
 
-// ValidateApp checks that an app name can be used in bucket and user names.
+// ValidateApp checks that an app name can be used in bucket and user names:
+// an app (shop), or an app's environment (shop--staging).
 func ValidateApp(app string) error {
-	if !label.MatchString(app) {
-		return fmt.Errorf("app %q: only lowercase letters, digits and single hyphens", app)
+	parent, env, isEnv := strings.Cut(app, sep)
+	if !label.MatchString(parent) || (isEnv && !label.MatchString(env)) {
+		return fmt.Errorf("app %q: only lowercase letters, digits and single hyphens (an environment: <app>--<env>)", app)
 	}
 	return nil
 }
+
+// SplitEnvironment splits an environment's name, shop--staging, into its
+// app and environment; an app's own name has no environment.
+func SplitEnvironment(name string) (app, env string, ok bool) {
+	return strings.Cut(name, sep)
+}
+
+// Environment is the name of an app's environment or preview: its
+// registry entry, namespace and S3 user.
+func Environment(app, env string) string { return app + sep + env }
 
 // Bucket returns the Object Storage bucket name of an app's bucket.
 func Bucket(app, name string) (string, error) {

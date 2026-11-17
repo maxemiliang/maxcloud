@@ -167,3 +167,30 @@ func TestRegistryIgnoresOtherProviders(t *testing.T) {
 	}
 	var _ client.Object = u
 }
+
+// An app's environment is copied like mcloud's entries (a rebuild brings it
+// back with its registration); a preview gets a registration ID but no
+// copy.
+func TestRegistryEnvironmentsAndPreviews(t *testing.T) {
+	envLabels := map[string]string{appLabel: "true", EnvironmentOfLabel: "shop", EnvironmentKindLabel: KindEnvironment, ManagedByLabel: controllerManaged}
+	prLabels := map[string]string{appLabel: "true", EnvironmentOfLabel: "shop", EnvironmentKindLabel: KindPreview, ManagedByLabel: controllerManaged}
+	e := newDBEnv(t, entry("shop--staging", envLabels), entry("shop--pr-1", prLabels))
+	r := e.registry()
+	if err := r.Restore(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	e.reconcileEntry(r, "shop--staging")
+	e.reconcileEntry(r, "shop--pr-1")
+	for _, name := range []string{"shop--staging", "shop--pr-1"} {
+		u, _ := e.getEntry(name)
+		if u.GetAnnotations()[RegistrationAnnotation] == "" {
+			t.Errorf("%s has no registration ID", name)
+		}
+	}
+	if _, ok := e.objects.objects[registryBucket]["apps/shop--staging.yaml"]; !ok {
+		t.Error("the environment wasn't copied")
+	}
+	if _, ok := e.objects.objects[registryBucket]["apps/shop--pr-1.yaml"]; ok {
+		t.Error("the preview was copied")
+	}
+}
