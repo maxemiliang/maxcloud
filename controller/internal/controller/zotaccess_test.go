@@ -172,3 +172,32 @@ func TestZotAccessWriteSample(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// An app's environments and previews read the app's images and push none.
+func TestZotAccessEnvironmentsReadTheAppsImages(t *testing.T) {
+	staging := registryEntry("shop--staging", map[string]any{"name": "shop--staging", "repo": "ann/shop", "branch": "staging"})
+	staging.SetLabels(map[string]string{appLabel: "true", EnvironmentOfLabel: "shop", EnvironmentKindLabel: KindEnvironment})
+	pr := registryEntry("shop--pr-4", map[string]any{"name": "shop--pr-4", "repo": "ann/shop"})
+	pr.SetLabels(map[string]string{appLabel: "true", EnvironmentOfLabel: "shop", EnvironmentKindLabel: KindPreview})
+	c, r := newZotEnv(t, registryEntry("shop", map[string]any{"name": "shop", "repo": "ann/shop"}), staging, pr)
+	if _, err := r.Reconcile(context.Background(), ctrl.Request{}); err != nil {
+		t.Fatal(err)
+	}
+	rules := renderedRules(t, c)
+	for _, p := range []string{"shop--staging/**", "shop--pr-4/**"} {
+		if _, ok := rules[p]; ok {
+			t.Errorf("an environment has its own repository rule %s", p)
+		}
+	}
+	shop := rules["shop/**"].Policies
+	if len(shop) != 2 {
+		t.Fatalf("shop's rules: %+v", shop)
+	}
+	want := []string{"shop:pull", "shop--pr-4:pull", "shop--staging:pull"}
+	if got := shop[0].Users; len(got) != 3 || got[0] != want[0] || got[1] != want[1] || got[2] != want[2] || len(shop[0].Actions) != 1 {
+		t.Errorf("shop's readers = %v, want %v", got, want)
+	}
+	if got := shop[1].Users; len(got) != 2 || got[0] != "shop:push" {
+		t.Errorf("shop's pushers = %v", got)
+	}
+}

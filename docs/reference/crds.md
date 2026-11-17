@@ -10,6 +10,7 @@ What the maxcloud controller works from. The app registry creates Buckets, Datab
 - [Database](#database)
 - [DatabaseBranch](#databasebranch)
 - [Domain](#domain)
+- [Preview](#preview)
 
 ## Bucket
 
@@ -131,4 +132,32 @@ The name is the hostname: lowercase DNS labels, at least two of them.
 | `observedGeneration` | integer (int64) |  | ObservedGeneration is the spec generation the conditions describe. |
 | `revisions` | list |  | Revisions the hostname currently sends requests to, as Knative's own route for the service does. |
 | `url` | string |  | URL the service is reached at on this hostname. Empty while the Domain isn't Ready. |
+
+## Preview
+
+`apiVersion: maxcloud.gronblom.dev/v1alpha1`, `kubectl get previews`
+
+Preview is a short-lived deploy of an app (a pull request, or a
+developer's working tree) in an environment of its own. It lives in the
+app's own namespace; the controller turns it into a registry entry
+&lt;app&gt;--&lt;name&gt; (the environment), and removes that when the preview
+expires or is deleted. Only the app's owners may make one (mcloud
+preview deploy); the controller makes pull requests' itself.
+
+### spec
+
+| Field | Type | Default | |
+| --- | --- | --- | --- |
+| `expiresAt` | string (date-time) |  | ExpiresAt is when the preview is removed. mcloud preview deploy sets it (now plus the app's previews.ttl) and every deploy moves it on; for a pull request, the controller does on every push. An expired working-tree preview is deleted; an expired pull request's stays, Expired, until its next push. |
+| `pullRequest` | integer (int64) |  | PullRequest is the number of the GitHub pull request this previews. The controller makes these by itself, one per open pull request of a GitOps app labelled \`preview\`, and deletes them when the pull request closes or loses the label. Flux deploys the branch maxcloud/preview/&lt;number&gt;, which the app's deploy workflow writes for such a pull request. 0: a preview of a working tree, which mcloud preview deploy builds and applies. |
+| `revision` | string |  | Revision is the pull request's head commit the controller last saw. A new one extends the preview by the app's previews.ttl. |
+
+### status
+
+| Field | Type | Default | |
+| --- | --- | --- | --- |
+| `conditions` | list of conditions |  | Conditions: Ready, with the reason Active, PreviewsOff, OverLimit, NameTaken or Expired. |
+| `environment` | string |  | Environment is the preview's registry entry and namespace, &lt;app&gt;--&lt;preview name&gt;. |
+| `observedGeneration` | integer (int64) |  | ObservedGeneration is the spec generation the conditions describe. |
+| `phase` | string |  | Phase: Active, Waiting or Expired. |
 

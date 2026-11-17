@@ -1,5 +1,5 @@
-# The discovery document (/.well-known/maxcloud.json). The cluster's repo
-# routes to it publicly.
+# The discovery document (/.well-known/maxcloud.json) and the API gateway.
+# The cluster's repo routes to them publicly.
 apiVersion: v1
 kind: Service
 metadata:
@@ -13,3 +13,6 @@ spec:
     - name: discovery
       port: 8082
       targetPort: discovery
+    - name: gateway
+      port: 8083
+      targetPort: gateway

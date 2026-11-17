@@ -41,10 +41,15 @@ const MarkerKey = "maxcloud.json"
 // in its database bucket either; the database's backups themselves it must
 // be able to delete, since the backup plugin enforces retention with the
 // same credentials.
+//
+// An app's prefix (mc-shop--) also covers its environments' and previews'
+// buckets (mc-shop--staging--uploads), which belong to them: the app's
+// policy denies those, anything with a second "--". Its own bucket names
+// never have one.
 func App(app string) Document {
 	buckets := arn(naming.BucketPrefix(app) + "*")
 	marker := arn(naming.BucketPrefix(app) + naming.DatabaseBucket + "/" + MarkerKey)
-	return Document{
+	d := Document{
 		Version: version,
 		Statement: []Statement{
 			{
@@ -70,6 +75,20 @@ func App(app string) Document {
 			},
 		},
 	}
+	if _, _, isEnv := naming.SplitEnvironment(app); !isEnv {
+		envs := naming.BucketPrefix(app) + "*--*"
+		d.Statement = append(d.Statement, Statement{
+			Sid:    "KeepOffEnvironments",
+			Effect: "Deny",
+			Action: []string{
+				"s3:ListBucket", "s3:GetBucketLocation", "s3:ListBucketMultipartUploads",
+				"s3:GetObject", "s3:PutObject", "s3:DeleteObject",
+				"s3:AbortMultipartUpload", "s3:ListMultipartUploadParts",
+			},
+			Resource: []string{arn(envs), arn(envs + "/*")},
+		})
+	}
+	return d
 }
 
 // PublicRead is the bucket policy of a public bucket: anyone may get its

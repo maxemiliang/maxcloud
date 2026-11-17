@@ -14,6 +14,9 @@ func TestApp(t *testing.T) {
 		`"arn:aws:s3:::mc-shop--*/*"`,
 		`"Effect":"Deny"`,
 		`"arn:aws:s3:::mc-shop--db/maxcloud.json"`,
+		`"Sid":"KeepOffEnvironments"`,
+		`"arn:aws:s3:::mc-shop--*--*"`,
+		`"arn:aws:s3:::mc-shop--*--*/*"`,
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("App policy lacks %s:\n%s", want, got)
@@ -30,6 +33,20 @@ func TestApp(t *testing.T) {
 	}
 	if dec, err := url.QueryUnescape(d.Encoded()); err != nil || dec != got {
 		t.Errorf("Encoded doesn't decode back to the JSON: %v", err)
+	}
+}
+
+// An environment's policy covers its own buckets only, and has nothing to
+// take back.
+func TestAppEnvironment(t *testing.T) {
+	got := App("shop--staging").JSON()
+	for _, want := range []string{`"arn:aws:s3:::mc-shop--staging--*"`, `"arn:aws:s3:::mc-shop--staging--db/maxcloud.json"`} {
+		if !strings.Contains(got, want) {
+			t.Errorf("policy lacks %s:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "KeepOffEnvironments") {
+		t.Errorf("an environment's policy denies environments:\n%s", got)
 	}
 }
 

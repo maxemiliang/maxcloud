@@ -41,6 +41,9 @@ spec:
             # /.well-known/maxcloud.json, with MAXCLOUD_API_SERVER set
             - name: discovery
               containerPort: 8082
+            # the API gateway, with MAXCLOUD_GATEWAY_URL set
+            - name: gateway
+              containerPort: 8083
           livenessProbe:
             httpGet:
               path: /healthz

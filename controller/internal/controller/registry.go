@@ -67,6 +67,11 @@ func isMcloudEntry(o client.Object) bool {
 	return isAppEntry(o) && o.GetLabels()[ManagedByLabel] == mcloudManaged
 }
 
+// isCopied: an entry the registry's bucket keeps a copy of, for a rebuild:
+// mcloud's, and apps' declared environments. Not previews: they're
+// short-lived, and a rebuild may as well lose them.
+func isCopied(o client.Object) bool { return isMcloudEntry(o) || isEnvironmentEntry(o) }
+
 func backupKey(name string) string { return registryPrefix + name + ".yaml" }
 
 func (r *RegistryBackup) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -97,10 +102,11 @@ func (r *RegistryBackup) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 		controllerutil.RemoveFinalizer(u, RegistryFinalizer)
 		return ctrl.Result{}, r.Update(ctx, u)
 	}
-	// The finalizer, and for an entry mcloud made, its registration ID
+	// The finalizer, and for an entry mcloud made (or an app's environment
+	// or preview, which this controller made), its registration ID
 	// (Registrations): one from git declares its own there.
 	changed := controllerutil.AddFinalizer(u, RegistryFinalizer)
-	if isMcloudEntry(u) && u.GetAnnotations()[RegistrationAnnotation] == "" {
+	if (isMcloudEntry(u) || isChildEntry(u)) && u.GetAnnotations()[RegistrationAnnotation] == "" {
 		annotations := u.GetAnnotations()
 		if annotations == nil {
 			annotations = map[string]string{}
@@ -115,8 +121,8 @@ func (r *RegistryBackup) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 			return ctrl.Result{}, err
 		}
 	}
-	if !isMcloudEntry(u) {
-		return ctrl.Result{}, nil // git keeps this one
+	if !isCopied(u) {
+		return ctrl.Result{}, nil // git keeps this one; a preview isn't kept
 	}
 	data, err := backupOf(u)
 	if err != nil {
@@ -183,7 +189,7 @@ func (r *RegistryBackup) Restore(ctx context.Context) error {
 		if err := yaml.Unmarshal(data, &u.Object); err != nil {
 			return fmt.Errorf("copy %s: %w", k, err)
 		}
-		if u.GetName() != name || u.GetNamespace() != RegistryNamespace || !isMcloudEntry(u) {
+		if u.GetName() != name || u.GetNamespace() != RegistryNamespace || !isCopied(u) {
 			return fmt.Errorf("copy %s isn't an mcloud registry entry for %s", k, name)
 		}
 		u.SetGroupVersionKind(providerGVK)

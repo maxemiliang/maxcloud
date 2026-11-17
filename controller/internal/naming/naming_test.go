@@ -14,7 +14,10 @@ func TestBucket(t *testing.T) {
 		{app: "shop-x", name: "a-b-1", want: "mc-shop-x--a-b-1"},
 		{app: "shop", name: "db", want: "mc-shop--db"},
 		{app: "shop", name: "a--b", wantErr: true},
-		{app: "shop--x", name: "uploads", wantErr: true},
+		{app: "shop--x", name: "uploads", want: "mc-shop--x--uploads"},
+		{app: "shop--x--y", name: "uploads", wantErr: true},
+		{app: "shop---x", name: "uploads", wantErr: true},
+		{app: "shop--", name: "uploads", wantErr: true},
 		{app: "shop", name: "Uploads", wantErr: true},
 		{app: "shop", name: "-uploads", wantErr: true},
 		{app: "shop", name: "uploads-", wantErr: true},
@@ -39,7 +42,7 @@ func TestBucket(t *testing.T) {
 
 // The point of "--": one app's prefix never matches another app's buckets.
 func TestPrefixesDontOverlap(t *testing.T) {
-	apps := []string{"shop", "shop-x", "shop-x-y", "s", "sh"}
+	apps := []string{"shop", "shop-x", "shop-x-y", "s", "sh", "shop--staging", "shop--staging-2", "shop-x--staging"}
 	for _, a := range apps {
 		for _, b := range apps {
 			if a == b {
@@ -48,6 +51,11 @@ func TestPrefixesDontOverlap(t *testing.T) {
 			bucket, err := Bucket(b, "uploads")
 			if err != nil {
 				t.Fatal(err)
+			}
+			// An app's prefix covers its environments' buckets (its
+			// policy denies them again); nothing else.
+			if app, _, _ := SplitEnvironment(b); app == a {
+				continue
 			}
 			if strings.HasPrefix(bucket, BucketPrefix(a)) {
 				t.Errorf("app %s's prefix %s matches app %s's bucket %s", a, BucketPrefix(a), b, bucket)

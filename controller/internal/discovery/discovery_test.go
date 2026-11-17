@@ -104,3 +104,18 @@ func TestNoCA(t *testing.T) {
 		t.Error("served only by the leader")
 	}
 }
+
+// The apps API is named in the document and served elsewhere (the gateway):
+// this server answers its one path and nothing else.
+func TestAPIInDocument(t *testing.T) {
+	s := &Server{Reader: newClient(t, caMap(pem)), Namespace: "maxcloud-system",
+		Document: Document{APIServer: "https://k8s.example:6443", API: &API{Apps: "https://gateway.example/api/v1/apps/", Features: []string{"logs"}}}}
+	if w := get(s, "/api/v1/apps/shop/logs"); w.Code != http.StatusNotFound {
+		t.Errorf("the apps API's path on the discovery server: %d, want 404", w.Code)
+	}
+	var doc Document
+	json.Unmarshal(get(s, Path).Body.Bytes(), &doc)
+	if doc.API == nil || doc.API.Apps != "https://gateway.example/api/v1/apps/" || len(doc.API.Features) != 1 {
+		t.Errorf("api in the document: %+v", doc.API)
+	}
+}

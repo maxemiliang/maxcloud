@@ -11,7 +11,8 @@ Cloudflare gives a Worker its R2 bucket and D1 database:
 Around those it also routes apps' custom domains, keeps copies of the app
 registry and of apps' secrets in a bucket, gives apps credentials for the
 image registry, writes the registry's access rules, syncs GitOps apps'
-`maxcloud.yaml`, and serves a discovery document for logging in.
+`maxcloud.yaml`, makes apps' environments and previews, and serves a
+discovery document for logging in.
 
 It's a separate Go module, so mcloud and the SDKs don't pull in Kubernetes
 and AWS libraries.
@@ -175,6 +176,73 @@ Blocked condition instead.
 `kubectl get maxcloud -A` shows the phase (Creating, Restoring, Ready,
 Blocked) and the backup generation.
 
+### Environments and previews
+
+An app's environments (`environments:` in its `maxcloud.yaml`) and
+previews are apps of their own: a registry entry `<app>--<env>` each, which
+the registry turns into a namespace, quota, buckets and database like any
+app's. The controller makes those entries; nobody else may (admission). It
+reads the app's entry, where app sync and `mcloud deploy` keep:
+
+| Key | |
+| --- | --- |
+| `environments` | JSON, `{"staging":{"branch":"staging","cpu":"100m"}}`: per environment, the entry keys that differ from the app's (`branch`, `cpu`, `memory`, `pods`, `buckets`, `db`, `dbSize`, `dbInstances`, `domains`). `{}`: none. No key at all: the environments stay as they are (an mcloud older than environments rewrites entries without it) |
+| `previews` | `true`: the app has previews |
+| `previewTTL`, `previewMax`, `previewDB` | how long one lives after its last deploy (`72h`), how many at once (`2`), an empty database in each |
+
+An environment's entry gets the app's repo, owners and deploy mode, its
+own branch (default: its name) and manifests `deploy/env/<env>`, the app's
+quota, buckets and database settings unless it declares its own, and no
+domains unless it declares some. A copy of it goes to the registry's
+bucket like mcloud's entries do, so a rebuild brings it back as the same
+registration (the controller takes the copy's ID when it makes the entry
+again).
+
+A preview is a `Preview` in the app's namespace:
+
+```yaml
+apiVersion: maxcloud.gronblom.dev/v1alpha1
+kind: Preview
+metadata: {name: pr-42, namespace: shop}   # at most 12 characters
+spec:
+  pullRequest: 42                    # 0: a working tree's (mcloud preview deploy)
+  revision: 1f2e3d...                # the pull request's head the controller last saw
+  expiresAt: "2026-11-20T12:00:00Z"
+```
+
+- **Pull requests:** with `previews` on, the registry makes a Flux Operator
+  input provider `<app>--pull-requests` (type `GitHubPullRequest`, label
+  `preview`). The controller keeps one Preview `pr-<n>` per pull request it
+  lists, moves `expiresAt` on with every new head commit, and deletes it when
+  the pull request is no longer listed. It reads only the provider the
+  registry makes for the app's own repo, and changes nothing while the
+  provider isn't Ready. The preview's entry deploys the branch
+  `maxcloud/preview/<n>`, which the deploy workflow writes.
+- **Working trees:** the app's owners make one with `mcloud preview deploy`
+  (RBAC `maxcloud-app-developer`); the entry is `deploy: direct`.
+- Each active preview's entry gets the preview quota
+  (`MAXCLOUD_PREVIEW_QUOTA`, default 100m CPU, 512Mi, 10 pods, a 1Gi
+  database), the app's bucket names (empty buckets of its own), a database
+  with `previewDB`, the app's owners, and `reclaim: Delete`: its buckets
+  and backups go with it.
+- **Expiry:** past `expiresAt`, a working tree's Preview is deleted; a pull
+  request's stays, phase `Expired`, until its next push. Either way the
+  entry goes.
+- **Limits:** the oldest previews get environments, up to `previewMax` per
+  app and `MAXCLOUD_PREVIEWS_MAX` on the platform; the rest wait (`Waiting`,
+  reason `OverLimit`). A Preview named like a declared environment waits
+  (`NameTaken`); with previews off they all wait (`PreviewsOff`) and pull
+  requests' are deleted.
+
+It writes the entries as the user `maxcloud:environments` (impersonated),
+so the developer ceiling applies to each; the cluster gives that user a
+Role in `flux-system`. Why it can't give its own namespace's code anything
+of the app's: the app's own S3 policy denies its environments' buckets
+(`mc-<app>--*--*`), and an environment reads the app's images but pushes
+none. When it can't make what the app declares (a bad name, more than
+`MAXCLOUD_ENVIRONMENTS_MAX`, admission said no), the app's entry gets the
+annotation `maxcloud.gronblom.dev/environments-error` and a Warning event.
+
 ### The app registry's copy
 
 mcloud registers apps in the cluster (ResourceSetInputProviders in
@@ -311,6 +379,7 @@ the cluster's repo owns), plus one rule per app in the app registry:
 | `<app>:pull` (the app's pull Secret) | yes | |
 | `<app>:push` (mcloud, direct deploys) | yes | yes |
 | `github:<repo>` (GitHub Actions in the entry's repo; not for direct-deploy apps) | yes | yes |
+| `<app>--<env>:pull` (each of its environments and previews) | yes | |
 
 into the ConfigMap `zot-config`, which zot runs with. `<app>` is the
 entry's `name` value, else the entry's name; every entry labelled
@@ -335,7 +404,7 @@ generates in `flux-system`, named like the entry and labelled
 `/maxcloud.yaml`). When its revision changes, the controller downloads
 the artifact from Flux's
 source-controller, checks its digest, and writes the file's quota, buckets,
-database and domains into the app's entry. The rest of the entry (repo, path,
+database, domains, environments and previews into the app's entry. The rest of the entry (repo, path,
 deploy mode) stays what mcloud registered. A file whose `app` names a
 different app is refused, and so is one with values the registry can't
 render (one ResourceSet renders every app, so a bad entry would stop them
@@ -353,11 +422,14 @@ so the cluster's limits on what a developer may ask for apply: a
 `maxcloud.yaml` asking for more is refused, and the entry gets the reason
 in the annotation `maxcloud.gronblom.dev/sync-error` and a Warning event.
 `maxcloud.gronblom.dev/synced-revision` is the last revision handled.
-Entries from git (`platform/`) are left alone.
+Entries from git (`platform/`) are left alone, and so are environments'
+entries: an environment's settings come from the app's file on the app's
+branch, never from the environment's own branch.
 
 `maxcloud.gronblom.dev/synced-fields` lists the entry's keys the file
 declares, sorted: from `deploy`, `cpu`, `memory`, `pods`, `buckets`, `db`,
-`dbSize`, `dbInstances` and `domains`. `quota: {cpu: 1}` declares `cpu`;
+`dbSize`, `dbInstances`, `domains`, `environments` and the four preview
+keys (`previews:` in any form declares all four). `quota: {cpu: 1}` declares `cpu`;
 `buckets: [...]` (an empty list too) declares `buckets`; `db` in any form
 (`true`, `false` or a map) declares all three database keys, since the file
 then owns the database setting. `deploy:` is declared but not applied here:
@@ -376,6 +448,7 @@ controller serves `GET` (and `HEAD`) `/.well-known/maxcloud.json` on `:8082`
 ```json
 {
   "apiServer": "https://xyz.k8s.upcloud.com:6443",
+  "gateway": "https://maxcloud-api.example.com",
   "certificateAuthorityData": "<base64 of the CA's PEM>",
   "oidc": {"issuer": "https://...", "clientID": "..."},
   "imageRegistry": "registry.gronblom.dev",
@@ -388,11 +461,83 @@ URL), by every replica. The CA is `ca.crt` from the ConfigMap
 `kube-root-ca.crt` in the controller's namespace, read again every 5
 minutes. `oidc` comes from `MAXCLOUD_OIDC_ISSUER` and
 `MAXCLOUD_OIDC_CLIENT_ID` (left out without an issuer), `imageRegistry`
-from `MAXCLOUD_IMAGE_REGISTRY`, and `mcloud.minVersion` from
-`MAXCLOUD_MIN_MCLOUD_VERSION` (left out if unset). Clients may cache it
+from `MAXCLOUD_IMAGE_REGISTRY`, `mcloud.minVersion` from
+`MAXCLOUD_MIN_MCLOUD_VERSION` and `gateway` from `MAXCLOUD_GATEWAY_URL`
+(each left out if unset). Clients may cache it
 for 5 minutes (`Cache-Control: max-age=300`). If the CA can't be read and
 none was read before, it answers 503. The public route to it lives in the
 cluster's repo.
+
+### The API gateway
+
+An API server that only takes connections from listed addresses keeps
+developers out as well: everything mcloud does is a Kubernetes API call.
+With `MAXCLOUD_GATEWAY_URL` set (the gateway's public URL, which also goes
+into the discovery document as `gateway`), the controller serves the API
+server on `:8083` (`MAXCLOUD_GATEWAY_ADDR`), the Service
+`maxcloud-controller`'s port `gateway`, to people who are logged in:
+
+- A request needs `Authorization: Bearer <ID token>`. The gateway reads
+  the token's claims, unverified: the issuer has to be
+  `MAXCLOUD_OIDC_ISSUER`, the audience `MAXCLOUD_OIDC_CLIENT_ID`, and it
+  mustn't have expired. Anything else (no token, a ServiceAccount's, a
+  scanner's guess) gets a 401 without the API server hearing of it.
+- A token that passes is put to the API server once, as its bearer: a
+  SelfSubjectReview. The API server verifies it the way it verifies any
+  request, and says who it is; the username has to start with
+  `MAXCLOUD_GATEWAY_USER_PREFIX` (default `authelia:`), so only people get
+  through. The controller needs no RBAC for this.
+- The answer is remembered by the token's hash: yes until the token
+  expires, at most 5 minutes; no for 30 seconds. Tokens it hasn't seen are
+  checked at most 5 a second (20 at once); past that it answers 429.
+- Then it proxies: the request goes to the API server as it came, token
+  included, minus any `X-Remote-*` header. The gateway adds no credentials
+  of its own, so RBAC, admission and the audit log see the caller. Watches
+  and log streams are flushed as they come, and `exec` and `port-forward`
+  upgrades are carried through.
+
+`maxcloud_gateway_requests_total{outcome}` counts `proxied`,
+`unauthenticated`, `throttled` and `unavailable` (the API server couldn't
+be asked). Every replica serves it. The public route lives in the
+cluster's repo, and can't go through a proxy that doesn't carry SPDY
+upgrades or cuts quiet streams. `mcloud login` uses the gateway when it
+can't reach `apiServer` itself.
+
+### The apps API
+
+On the gateway, `/api/v1/apps/<app>/` (not a path the API server has) is
+answered by the controller itself instead of being passed on. It gives an
+app's owners what the platform's monitoring knows about their app (mcloud's `logs --since`,
+`metrics`, `alerts` and `status`), without letting them query Loki or
+Prometheus themselves. All `GET`, JSON, `Cache-Control: no-store`:
+
+| Path | Needs | Answers |
+| --- | --- | --- |
+| `logs?since=&until=&limit=&pod=&container=&all=` | `MAXCLOUD_LOKI_URL` | the newest lines in the range (default the last hour, at most 30 days and 5000 lines), oldest first |
+| `metrics?window=1h` | `MAXCLOUD_PROMETHEUS_URL` | per Knative service requests, 5xx, p95 latency and pods over the window (5m to 15d); per KEDA trigger its backlog; running and failed Jobs |
+| `alerts` | `MAXCLOUD_PROMETHEUS_URL` | the pending and firing alerts about the app from PrometheusRules in `MAXCLOUD_ALERT_RULE_NAMESPACES` (default `monitoring`) |
+
+A request gets this far only with a login that passed the gateway's check,
+so made-up tokens never reach the API server and the token doesn't pass
+through a proxy. The handler then asks the API server who the token is (a
+TokenReview). The user must
+then be allowed `get pods/log` (logs) or `list pods` (metrics, alerts) in
+the namespace `<app>` (a SubjectAccessReview), which an app's owners and
+admins are, and the namespace must be an app's
+(`run.gronblom.dev/tenant: "true"`). Answers to both reviews are reused
+for a minute. Then the controller builds the query itself, with
+`namespace="<app>"` in every selector: a client chooses the time range, a
+pod-name regex and a container, never the query. Four queries run at a
+time; more wait. Errors are `{"error": "..."}` with 400, 401, 403, 404 or
+502.
+
+Alerts from the app's own PrometheusRules aren't included: Prometheus
+doesn't keep their queries to the app's metrics. The discovery document
+lists what's on (`"api": {"apps": "https://<gateway>/api/v1/apps/",
+"features": ["logs", "metrics", "alerts"]}`), so mcloud knows whether and
+where to ask. Both need the gateway (`MAXCLOUD_GATEWAY_URL`). The token and permission checks
+are `internal/caller`; the routes `internal/appapi`. Why it's built this
+way: the cluster repo's `docs/kb/monitoring/apps-observability-api.md`.
 
 ## Running it
 
@@ -437,6 +582,12 @@ one part:
 | `MAXCLOUD_API_SERVER` | unset: off | the API server's external URL: the [discovery document](#the-discovery-document) |
 | `MAXCLOUD_DISCOVERY_ADDR` | `:8082` | where that's served |
 | `MAXCLOUD_OIDC_ISSUER`, `MAXCLOUD_OIDC_CLIENT_ID`, `MAXCLOUD_MIN_MCLOUD_VERSION` | unset | in the discovery document |
+| `MAXCLOUD_LOKI_URL` | unset: off | Loki's URL: apps' logs in the [apps API](#the-apps-api) |
+| `MAXCLOUD_PROMETHEUS_URL` | unset: off | Prometheus's URL: apps' metrics and alerts in the apps API |
+| `MAXCLOUD_ALERT_RULE_NAMESPACES` | `monitoring` | comma-separated: whose PrometheusRules' alerts the apps API shows |
+| `MAXCLOUD_ENVIRONMENTS_MAX` | `3` | [environments](#environments-and-previews) per app |
+| `MAXCLOUD_PREVIEWS_MAX` | `6` | active previews on the whole platform |
+| `MAXCLOUD_PREVIEW_QUOTA` | `100m,512Mi,10,1Gi` | each preview's CPU, memory, pods and database size |
 
 The Deployment sets `POD_NAMESPACE` (default `maxcloud-system`): the
 controller's namespace, where the public buckets' route objects go and the

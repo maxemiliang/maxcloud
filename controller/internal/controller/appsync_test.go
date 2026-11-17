@@ -370,3 +370,80 @@ func TestAppSyncNeverTouchesOwnersOrRegistration(t *testing.T) {
 		t.Errorf("synced fields = %s", f)
 	}
 }
+
+func TestAppSyncEnvironmentsAndPreviews(t *testing.T) {
+	e := newSyncEnv(t, mcloudLabels, map[string]string{"maxcloud.yaml": `app: shop
+buckets: [uploads]
+environments:
+  staging:
+    quota: {cpu: 100m}
+    db: {size: 1Gi}
+    env: {LOG_LEVEL: debug}
+  qa:
+    branch: release/qa
+    buckets: []
+    db: false
+previews: {ttl: 48h, db: true}
+`})
+	if err := e.reconcile(); err != nil {
+		t.Fatal(err)
+	}
+	u := e.entry()
+	if msg := u.GetAnnotations()[SyncErrorAnnotation]; msg != "" {
+		t.Fatal(msg)
+	}
+	v := values(u)
+	want := `{"qa":{"branch":"release/qa","buckets":"","db":"false"},"staging":{"cpu":"100m","db":"true","dbSize":"1Gi"}}`
+	if v["environments"] != want {
+		t.Errorf("environments = %v\nwant %s", v["environments"], want)
+	}
+	for k, want := range map[string]string{"previews": "true", "previewTTL": "48h", "previewDB": "true"} {
+		if v[k] != want {
+			t.Errorf("%s = %v, want %s", k, v[k], want)
+		}
+	}
+	if _, ok := v["previewMax"]; ok {
+		t.Errorf("previewMax = %v, want none (the default)", v["previewMax"])
+	}
+	if got := u.GetAnnotations()[SyncedFieldsAnnotation]; got != "buckets,environments,previewDB,previewMax,previewTTL,previews" {
+		t.Errorf("synced fields = %q", got)
+	}
+}
+
+func TestAppSyncRefusesBadEnvironments(t *testing.T) {
+	for _, file := range []string{
+		"app: shop\nenvironments: {pr-1: {}}\n",
+		"app: shop\nenvironments: {Staging: {}}\n",
+		"app: shop\nenvironments: {waytoolongname: {}}\n",
+		"app: shop\nenvironments: {staging: {branch: 'a..b'}}\n",
+		"app: shop\nenvironments: {staging: {quota: {cpu: '0'}}}\n",
+		"app: shop\nenvironments: {staging: {buckets: [db]}}\n",
+		"app: shop\nprevious: 1\npreviews: {ttl: 30m}\n",
+		"app: shop\npreviews: {max: 12}\n",
+	} {
+		e := newSyncEnv(t, mcloudLabels, map[string]string{"maxcloud.yaml": file})
+		if err := e.reconcile(); err != nil {
+			t.Fatal(err)
+		}
+		u := e.entry()
+		if u.GetAnnotations()[SyncErrorAnnotation] == "" {
+			t.Errorf("%q: synced, want refused", file)
+		}
+		if _, ok := values(u)["environments"]; ok {
+			t.Errorf("%q: environments written", file)
+		}
+	}
+}
+
+// An environment's own entry isn't mcloud's: its branch's maxcloud.yaml
+// doesn't touch it (the app's does, through the app's entry).
+func TestAppSyncLeavesEnvironmentsAlone(t *testing.T) {
+	e := newSyncEnv(t, map[string]string{appLabel: "true", EnvironmentOfLabel: "x", EnvironmentKindLabel: KindEnvironment, ManagedByLabel: controllerManaged},
+		map[string]string{"maxcloud.yaml": "app: shop\nquota: {cpu: 900m}\n"})
+	if err := e.reconcile(); err != nil {
+		t.Fatal(err)
+	}
+	if v := values(e.entry()); v["cpu"] != "200m" {
+		t.Errorf("cpu = %v", v["cpu"])
+	}
+}
