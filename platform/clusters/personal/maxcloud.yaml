@@ -21,6 +21,9 @@
 # From controller/v0.13.0: registration IDs (a re-registered app name gets
 # none of the old app's buckets or database until an admin adopts them)
 # and the owners field (docs/kb/data/maxcloud-app-owners-and-registrations.md).
+# From controller/v0.14.0: the API gateway (maxcloud-api.gronblom.dev, port
+# 8083) with the apps API behind it (logs, metrics, alerts for mcloud and
+# the console), and environments and previews (the Preview CRD).
 apiVersion: source.toolkit.fluxcd.io/v1
 kind: GitRepository
 metadata:
@@ -30,7 +33,7 @@ spec:
   interval: 1h
   url: https://github.com/maxemiliang/maxcloud.git
   ref:
-    tag: controller/v0.13.0
+    tag: controller/v0.14.0
   ignore: |
     /*
     !/controller/config/
