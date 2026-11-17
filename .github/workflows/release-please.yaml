@@ -10,7 +10,8 @@
 #
 # Merging that PR tags each part (v0.12.0, controller/v0.11.0,
 # functions/v0.5.0, functions-js/v0.5.0, nuxt-js/v0.1.0), makes their GitHub
-# releases, and runs the jobs below. Tags made with GITHUB_TOKEN don't start
+# releases (mcloud's as a draft, which its job below publishes with the
+# binaries), and runs the jobs below. Tags made with GITHUB_TOKEN don't start
 # other workflows, so this one calls the release workflows itself, in
 # order: the SDK on npm before @max-cloud/nuxt (which depends on it) and
 # before mcloud (whose new apps get the newest SDK). The Go SDK's release
