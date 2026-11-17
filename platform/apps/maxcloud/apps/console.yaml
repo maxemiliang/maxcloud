@@ -1,0 +1,29 @@
+# The web console (https://console.makiya.dev): a read-only view of the
+# apps a developer can see, kept in this repo (console/, manifests in
+# apps/console). An app like any other: its own namespace, the quota, Pod
+# Security `restricted`, scale to zero. It reads the cluster with each
+# visitor's own login and has no rights of its own
+# (docs/kb/ops/web-console.md).
+# No owners: an admin's app.
+apiVersion: fluxcd.controlplane.io/v1
+kind: ResourceSetInputProvider
+metadata:
+  name: console
+  namespace: flux-system
+  labels:
+    run.gronblom.dev/app: "true"
+  annotations:
+    # Its registration ID, declared here as for every entry kept in git
+    # (run-demo.yaml says why). Never change it.
+    maxcloud.gronblom.dev/registration: "a5bc065f9dbcc47a1b21a8c07f44bc24"
+spec:
+  type: Static
+  defaultValues:
+    name: console
+    path: platform/apps/console
+    # The service stays private (no <service>--console.makiya.dev): this is
+    # its only hostname, so the login's redirect URI and the session cookie
+    # have one origin. Allowed in infrastructure/configs/run/domains.yaml.
+    # Not proxied: the console's pages and its session cookie stay between
+    # the browser and the cluster.
+    domains: "console.makiya.dev:web"

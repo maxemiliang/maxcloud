@@ -15,5 +15,11 @@ resources:
   # private/secrets/maxcloud-system/controller-credentials.sops.yaml.
   # Reading apps' maxcloud.yaml from Flux: network access and RBAC.
   - app-sync.yaml
+  # Apps' environments and previews: the registry entries the controller
+  # writes for them, as maxcloud:environments.
+  - environments.yaml
   # https://maxcloud.gronblom.dev/.well-known/maxcloud.json, for mcloud login.
   - discovery.yaml
+  # https://maxcloud-api.gronblom.dev, the API server for people who aren't
+  # on its allowlist. Needs a controller release with the gateway.
+  - gateway.yaml

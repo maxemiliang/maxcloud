@@ -76,4 +76,5 @@ any app's revision to whoever names it
 rewrite the Host to another app's (`tenant-routing.yaml`). The L7 rule on
 Traefik's in-cluster entrypoint: `private/docs/kb/networking/traefik-ingress-host-rules.md`.
 
-See also: [admin-role-aggregates-controller-crds](../ops/admin-role-aggregates-controller-crds.md).
+See also: [admin-role-aggregates-controller-crds](../ops/admin-role-aggregates-controller-crds.md),
+[apps-observability-api](../monitoring/apps-observability-api.md) (how app owners read their logs and metrics instead).

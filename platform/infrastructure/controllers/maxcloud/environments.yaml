@@ -1,0 +1,30 @@
+# Apps' environments and previews (<app>--<env>): the maxcloud controller
+# writes their registry entries as the user maxcloud:environments
+# (impersonated), so the developer ceiling in
+# infrastructure/configs/run/registry-admission.yaml applies to each one.
+# RBAC can't narrow this to some names; admission does
+# (maxcloud-registry-environments: that user writes environments' entries
+# only). Why: docs/kb/build-deploy/maxcloud-environments-and-previews.md.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: maxcloud-environments
+  namespace: flux-system
+rules:
+  - apiGroups: [fluxcd.controlplane.io]
+    resources: [resourcesetinputproviders]
+    verbs: [get, create, update, delete]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: maxcloud-environments
+  namespace: flux-system
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: maxcloud-environments
+subjects:
+  - apiGroup: rbac.authorization.k8s.io
+    kind: User
+    name: maxcloud:environments

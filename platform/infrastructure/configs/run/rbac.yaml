@@ -29,7 +29,7 @@ rules:
   # The app's buckets, database and custom hostnames (maxcloud controller):
   # readable, to see their names and status. Only the registry creates them.
   - apiGroups: [maxcloud.gronblom.dev]
-    resources: [buckets, databases, domains]
+    resources: [buckets, databases, domains, previews]
     verbs: [get, list, watch]
   # Branches of the app's database are the app's own to make and delete
   # (mcloud db branch): throwaway copies, inside the app's quota.

@@ -1,0 +1,88 @@
+# The console's server: a Nuxt app that holds the login session and reads
+# the Kubernetes API as whoever is logged in. Private (no expose label):
+# the registry's Domain puts it on https://console.makiya.dev and nowhere
+# else.
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: web
+  namespace: console
+spec:
+  template:
+    metadata:
+      annotations:
+        # One instance at most: a login's refresh token works once, and the
+        # console keeps "this one is being refreshed" in memory so that a
+        # page's requests don't each use it (docs/kb/ops/web-console.md).
+        # Scales to zero when idle (the default).
+        autoscaling.knative.dev/max-scale: "1"
+    spec:
+      priorityClassName: tenant
+      # No ServiceAccount token in the pod at all. The console calls the API
+      # server with the visitor's own ID token and nothing else, so a bug in
+      # it can't show anyone more than their login allows.
+      automountServiceAccountToken: false
+      containers:
+        # Built by .github/workflows/console-image.yaml from console/; the
+        # tag is console/package.json's version. Public on GHCR: the cluster
+        # pulls it without credentials.
+        - image: ghcr.io/maxemiliang/maxcloud-console:0.1.0
+          ports:
+            - containerPort: 8080
+          env:
+            # The console's own origin: the login's redirect URI
+            # (https://console.makiya.dev/auth/callback, one of the client's
+            # redirect_uris in infrastructure/controllers/authelia) and the
+            # only origin its login and logout forms are accepted from.
+            - name: CONSOLE_ORIGIN
+              value: https://console.makiya.dev
+            # Authelia and the apps API at their public hostnames: apps' pods
+            # can't connect to platform pods
+            # (docs/kb/networking/tenant-egress-deny.md).
+            - name: CONSOLE_OIDC_ISSUER
+              value: https://auth.lab.gronblom.dev
+            - name: CONSOLE_OIDC_CLIENT_ID
+              value: kubernetes
+            - name: CONSOLE_APPS_API
+              value: https://maxcloud-api.gronblom.dev/api/v1/apps/
+            # The API server, in-cluster, trusted by the cluster's CA below.
+            - name: CONSOLE_KUBE_URL
+              value: https://kubernetes.default.svc
+            - name: CONSOLE_KUBE_CA_FILE
+              value: /etc/kube-ca/ca.crt
+            # The cookie-sealing key: `mcloud secrets set CONSOLE_SESSION_KEY
+            # --app console` (the platform README's procedure). Without it
+            # the pod doesn't start, and the server wouldn't either.
+            - name: CONSOLE_SESSION_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: app-secrets
+                  key: CONSOLE_SESSION_KEY
+          # No periodSeconds: docs/kb/knative/readiness-probe-period.md.
+          readinessProbe:
+            httpGet:
+              path: /healthz
+          resources:
+            requests:
+              cpu: 20m
+              memory: 96Mi
+            limits:
+              memory: 256Mi
+          securityContext:
+            # The image's own user, said again so `restricted` doesn't
+            # depend on the image. Knative adds the rest (runAsNonRoot,
+            # seccomp, no capabilities).
+            runAsUser: 65532
+            runAsGroup: 65532
+            readOnlyRootFilesystem: true
+          volumeMounts:
+            - name: kube-ca
+              mountPath: /etc/kube-ca
+              readOnly: true
+      volumes:
+        # The cluster's CA, which every namespace has as a ConfigMap: what
+        # the ServiceAccount token volume would have brought, without the
+        # token.
+        - name: kube-ca
+          configMap:
+            name: kube-root-ca.crt

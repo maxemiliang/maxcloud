@@ -1,0 +1,32 @@
+# The API gateway: https://maxcloud-api.gronblom.dev is the cluster's API
+# server for people whose address isn't in admin_cidrs (infra/cluster), so a
+# developer needs a login and nothing else. The maxcloud controller serves
+# it (MAXCLOUD_GATEWAY_URL in config.yaml, controller/v0.14.0+): it passes a
+# request on to the API server, with the caller's own token, only when that
+# token is a person's login the API server accepts. mcloud login picks it
+# when the API server can't be reached directly (the discovery document
+# names it). Why, and what it does and doesn't protect:
+# docs/kb/ops/api-gateway.md.
+#
+# The same host and check serve the apps API (/api/v1/apps/: apps' logs,
+# metrics and alerts for their owners), which the controller answers itself.
+#
+# DNS-only, not through Cloudflare's proxy: exec and port-forward upgrade
+# the connection to SPDY, which Cloudflare doesn't carry, and it cuts
+# streams (watches, logs -f) that are quiet for 100 seconds.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: maxcloud-gateway
+  namespace: maxcloud-system
+spec:
+  parentRefs:
+    - name: public
+      namespace: traefik
+      sectionName: https-public
+  hostnames:
+    - maxcloud-api.gronblom.dev
+  rules:
+    - backendRefs:
+        - name: maxcloud-controller
+          port: 8083

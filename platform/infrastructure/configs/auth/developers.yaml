@@ -25,7 +25,7 @@ rules:
     resources: [events]
     verbs: [get, list, watch]
   - apiGroups: [maxcloud.gronblom.dev]
-    resources: [buckets, databases, databasebranches]
+    resources: [buckets, databases, databasebranches, previews]
     verbs: [get, list, watch]
   - apiGroups: [serving.knative.dev]
     resources: [services, revisions, routes, configurations]
@@ -79,8 +79,10 @@ subjects:
     name: authelia:maxcloud-developers
 ---
 # What `admin` doesn't include in an app's namespace: restoring and
-# recovering its database (mcloud db restore/recover annotate the Database).
-# Bound per app to its owners by the registry.
+# recovering its database (mcloud db restore/recover annotate the Database),
+# and making and removing its previews (mcloud preview). Bound per app to
+# its owners by the registry; not part of `admin`, so the app's own
+# manifests (applied as its admin reconciler) can't make previews.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
@@ -89,3 +91,6 @@ rules:
   - apiGroups: [maxcloud.gronblom.dev]
     resources: [databases]
     verbs: [get, list, watch, patch]
+  - apiGroups: [maxcloud.gronblom.dev]
+    resources: [previews]
+    verbs: [get, list, watch, create, update, patch, delete]

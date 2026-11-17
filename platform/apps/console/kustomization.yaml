@@ -1,0 +1,11 @@
+# The web console, https://console.makiya.dev (the maxcloud repo's console/;
+# docs/console.md there, docs/kb/ops/web-console.md here).
+#
+# Registered in apps/maxcloud/apps/console.yaml, which gives it its
+# namespace and guardrails and applies this directory into it as the app's
+# own reconciler, exactly like an app from another repo. Not part of the
+# `apps` Kustomization itself.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - service.yaml

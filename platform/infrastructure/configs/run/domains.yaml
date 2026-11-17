@@ -48,3 +48,7 @@ data:
   run-demo: run-demo.lab.gronblom.dev
   # noccooo (github.com/maxemiliang/noccooo)
   noccooo: noccooo.makiya.dev
+  # The web console (apps/console, apps/maxcloud/apps/console.yaml). On
+  # makiya.dev, not lab.gronblom.dev: the console must never see Authelia's
+  # session cookie, only the login it gets through OpenID Connect.
+  console: console.makiya.dev

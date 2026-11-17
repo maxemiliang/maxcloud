@@ -26,6 +26,13 @@
 # controller's app sync included, since it copies maxcloud.yaml as written.
 # Bucket names: the controller's naming.Bucket (controller/internal/naming).
 # Owners: Authelia usernames, the same rule as mcloud's ParseOwners.
+#
+# An app's environments and previews are entries named <app>--<env>,
+# labelled run.gronblom.dev/environment-of: <app> and
+# run.gronblom.dev/environment: <env>: the name must be exactly that, the
+# app part an app name and the env part a short one (at most 12, the whole
+# at most 40: it's in every hostname, <service>--<app>--<env>.makiya.dev).
+# Who may write them: maxcloud-registry-environments below.
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicy
 metadata:
@@ -71,24 +78,51 @@ spec:
         .split(',').map(o, o.trim()).filter(o, o != '')
     - name: str
       expression: >-
-        ['cpu', 'memory', 'pods', 'dbSize', 'dbInstances', 'db', 'deploy']
+        ['cpu', 'memory', 'pods', 'dbSize', 'dbInstances', 'db', 'deploy',
+         'previews', 'previewDB', 'previewTTL', 'previewMax', 'reclaim']
         .filter(k, k in variables.values)
         .map(k, [k, string(variables.values[k])])
+    # An environment's or preview's entry: its app and its own name.
+    - name: envOf
+      expression: "object.metadata.labels[?'run.gronblom.dev/environment-of'].orValue('')"
+    - name: env
+      expression: "object.metadata.labels[?'run.gronblom.dev/environment'].orValue('')"
+    # The app part of the name: the whole name, or what's before "--".
+    - name: app
+      expression: "variables.envOf != '' ? variables.envOf : variables.name"
   validations:
     - expression: "variables.name == object.metadata.name"
       messageExpression: "'the entry is ' + object.metadata.name + ' but its name input is ' + variables.name + ': they must be the same (the name becomes the namespace)'"
       reason: Invalid
-    - expression: "variables.name.matches('^[a-z]([a-z0-9]|-[a-z0-9])*$') && size(variables.name) <= 30"
-      message: "app name: lowercase letters, digits and single dashes, starting with a letter, at most 30 characters"
+    - expression: >-
+        variables.envOf == '' ?
+          variables.name.matches('^[a-z]([a-z0-9]|-[a-z0-9])*$') && size(variables.name) <= 30 && variables.env == '' :
+          variables.envOf.matches('^[a-z]([a-z0-9]|-[a-z0-9])*$') && size(variables.envOf) <= 30 &&
+          variables.env.matches('^[a-z]([a-z0-9]|-[a-z0-9])*$') && size(variables.env) <= 12 &&
+          variables.name == variables.envOf + '--' + variables.env && size(variables.name) <= 40
+      message: >-
+        app name: lowercase letters, digits and single dashes, starting with a letter, at most 30 characters;
+        an environment's: <app>--<env> with its labels, the environment at most 12 characters, the whole at most 40
       reason: Invalid
     - expression: >-
-        !(variables.name in ['default', 'flux-system', 'traefik', 'knative-serving', 'knative-operator',
+        !(variables.app in ['default', 'flux-system', 'traefik', 'knative-serving', 'knative-operator',
         'keda', 'monitoring', 'cnpg-system', 'cert-manager', 'external-dns', 'authelia', 'kured',
         'maxcloud-system', 'registry', 'hello', 'sandbox', 'agent-sandbox-system',
         'auth', 'grafana']) &&
-        !['kube-', 'flux-', 'cilium', 'upcloud', 'sandbox-', 'sbx-'].exists(p, variables.name.startsWith(p))
+        !['kube-', 'flux-', 'cilium', 'upcloud', 'sandbox-', 'sbx-'].exists(p, variables.app.startsWith(p))
       message: "app name: reserved for the platform"
       reason: Forbidden
+    # Environments are one level deep, and only an environment's entry may
+    # delete its data with it.
+    - expression: >-
+        variables.envOf == '' ? !('reclaim' in variables.values) :
+          !('environments' in variables.values) && !('previews' in variables.values)
+      message: "environments and previews: only on an app's own entry; reclaim: only on an environment's"
+      reason: Invalid
+    - expression: >-
+        !('environments' in variables.values) || size(string(variables.values['environments'])) <= 8192
+      message: "environments: at most 8192 characters"
+      reason: Invalid
     - expression: "variables.repo == '' || variables.repo.matches('^[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?/[A-Za-z0-9._-]+$')"
       message: "repo: <owner>/<repo>"
       reason: Invalid
@@ -121,9 +155,14 @@ spec:
             isQuantity(kv[1]) && quantity(kv[1]).isGreaterThan(quantity('0')) :
           kv[0] == 'pods' ? kv[1].matches('^[1-9][0-9]{0,3}$') :
           kv[0] == 'dbInstances' ? kv[1].matches('^[1-9]$') :
-          kv[0] == 'db' ? kv[1] in ['', 'true', 'false'] :
+          kv[0] in ['db', 'previews', 'previewDB'] ? kv[1] in ['', 'true', 'false'] :
+          kv[0] == 'previewTTL' ? kv[1].matches('^[1-9][0-9]{0,3}h$') :
+          kv[0] == 'previewMax' ? kv[1].matches('^[0-9]$') :
+          kv[0] == 'reclaim' ? kv[1] in ['Retain', 'Delete'] :
           kv[1] in ['', 'gitops', 'direct'])
-      message: "cpu, memory and dbSize: quantities above 0; pods and dbInstances: whole numbers from 1; db: true or false; deploy: gitops or direct"
+      message: >-
+        cpu, memory and dbSize: quantities above 0; pods and dbInstances: whole numbers from 1; db, previews and previewDB: true or false;
+        deploy: gitops or direct; previewTTL: whole hours (72h); previewMax: 0 to 9; reclaim: Retain or Delete
       reason: Invalid
     - expression: >-
         size(variables.owners) <= 20 &&
@@ -147,6 +186,9 @@ spec:
 # namespace with that quota, so "may register apps" mustn't mean "may take
 # the cluster". Admins (Authelia's admins group), Flux (entries from git)
 # and the maxcloud controller (restoring entries from its copy) are exempt.
+# The controller's environments (maxcloud:environments) aren't: each of an
+# app's environments and previews gets no more than a developer could ask
+# for.
 #
 # Nor may anyone else point an app at this repo: an entry without `repo`
 # deploys `path` from the homelab repo itself (run-demo does), and this repo
@@ -207,6 +249,15 @@ spec:
       reason: Forbidden
     - expression: "!('dbInstances' in variables.values) || int(string(variables.values['dbInstances'])) <= 2"
       message: "database: at most 2 instances"
+      reason: Forbidden
+    # Previews come and go by themselves: a few, for a few days.
+    - expression: "!('previewMax' in variables.values) || int(string(variables.values['previewMax'])) <= 3"
+      message: "previews: max at most 3 (ask an admin for more)"
+      reason: Forbidden
+    - expression: >-
+        !('previewTTL' in variables.values) ||
+        int(string(variables.values['previewTTL']).substring(0, size(string(variables.values['previewTTL'])) - 1)) <= 168
+      message: "previews: ttl at most 168h"
       reason: Forbidden
 ---
 apiVersion: admissionregistration.k8s.io/v1
@@ -317,6 +368,9 @@ spec:
 #   - the controller's app sync (maxcloud:app-sync, what an app repo's
 #     maxcloud.yaml writes) never changes owners: a push mustn't grant
 #     access.
+# The controller's environments (maxcloud:environments) are exempt: an
+# environment's owners are its app's, copied (maxcloud-registry-environments
+# keeps that user to environments' entries).
 # Taking the run.gronblom.dev/app label off an entry unregisters the app as
 # surely as deleting it, so an entry counts if it's an app's before or
 # after the change. No `not-finalizing` exemption here, unlike the policies
@@ -350,7 +404,7 @@ spec:
         !request.userInfo.groups.exists(g, g in ['authelia:admins', 'kubeadm:cluster-admins', 'system:masters']) &&
         !(request.userInfo.username in ['system:serviceaccount:flux-system:kustomize-controller',
         'system:serviceaccount:flux-system:flux-operator',
-        'system:serviceaccount:maxcloud-system:maxcloud-controller'])
+        'system:serviceaccount:maxcloud-system:maxcloud-controller', 'maxcloud:environments'])
   variables:
     # The requester's Authelia username ("" for anyone else).
     - name: me
@@ -413,7 +467,9 @@ spec:
 # an admin hands old data to a new entry with
 # maxcloud.gronblom.dev/adopt-registration=<old ID>, which only admins
 # (and git) may set or change. Flux Operator's and the controller's
-# finalizer updates keep the annotations, so they pass.
+# finalizer updates keep the annotations, so they pass. The controller's
+# environments (maxcloud:environments) give an environment made again
+# after a rebuild the ID its copy has, so it gets its data back.
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicy
 metadata:
@@ -433,7 +489,8 @@ spec:
         (request.operation == 'UPDATE' && has(oldObject.metadata.labels) &&
           oldObject.metadata.labels[?'run.gronblom.dev/app'].orValue('') == 'true')
     - name: not-controller
-      expression: "request.userInfo.username != 'system:serviceaccount:maxcloud-system:maxcloud-controller'"
+      expression: >-
+        !(request.userInfo.username in ['system:serviceaccount:maxcloud-system:maxcloud-controller', 'maxcloud:environments'])
   variables:
     - name: annotations
       expression: "has(object.metadata.annotations) ? object.metadata.annotations : {}"
@@ -465,6 +522,83 @@ metadata:
   name: maxcloud-registry-registration
 spec:
   policyName: maxcloud-registry-registration
+  validationActions: [Deny]
+  matchResources:
+    namespaceSelector:
+      matchLabels:
+        kubernetes.io/metadata.name: flux-system
+---
+# Who may write an app's environments' and previews' entries (<app>--<env>,
+# labelled run.gronblom.dev/environment-of) and the input providers that
+# list apps' pull requests (<app>--pull-requests, labelled
+# run.gronblom.dev/pull-requests-of): only the maxcloud controller, as
+# itself (IDs, finalizers, restoring copies) or as maxcloud:environments
+# (making them from the app's entry, with the app's owners), Flux Operator
+# (the providers, generated by the registry; finalizers), and admins.
+# Developers can write registry entries (RBAC), so without this one could
+# make shop--x, an entry that looks like shop's, reads shop's images and
+# has shop's hostnames' shape, or a provider that makes previews of
+# another app's pull requests.
+# And maxcloud:environments writes nothing else: not an app's own entry.
+# Why: docs/kb/build-deploy/maxcloud-environments-and-previews.md.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: maxcloud-registry-environments
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [fluxcd.controlplane.io]
+        apiVersions: ["*"]
+        operations: [CREATE, UPDATE, DELETE]
+        resources: [resourcesetinputproviders]
+  matchConditions:
+    - name: not-exempt
+      expression: >-
+        !request.userInfo.groups.exists(g, g in ['authelia:admins', 'kubeadm:cluster-admins', 'system:masters']) &&
+        !(request.userInfo.username in ['system:serviceaccount:maxcloud-system:maxcloud-controller'])
+  variables:
+    - name: objs
+      expression: >-
+        (request.operation != 'DELETE' ? [object] : []) + (request.operation != 'CREATE' ? [oldObject] : [])
+    # An environment's entry, before or after: its name has "--", or it
+    # has the label.
+    - name: isEnv
+      expression: >-
+        variables.objs.exists(o, o.metadata.name.contains('--') ||
+          (has(o.metadata.labels) && o.metadata.labels[?'run.gronblom.dev/environment-of'].orValue('') != ''))
+    - name: isPRs
+      expression: >-
+        variables.objs.exists(o, o.metadata.name.endsWith('--pull-requests') ||
+          (has(o.metadata.labels) && o.metadata.labels[?'run.gronblom.dev/pull-requests-of'].orValue('') != ''))
+    - name: envUser
+      expression: "request.userInfo.username == 'maxcloud:environments'"
+    - name: operator
+      expression: "request.userInfo.username == 'system:serviceaccount:flux-system:flux-operator'"
+  validations:
+    - expression: "!variables.isPRs || variables.operator"
+      message: "<app>--pull-requests: the app registry's (Flux Operator's) to write"
+      reason: Forbidden
+    - expression: >-
+        variables.isPRs || !variables.isEnv || variables.envUser ||
+        (variables.operator && request.operation == 'UPDATE' && object.spec == oldObject.spec)
+      message: "an app's environments and previews (<app>--<env>) are the maxcloud controller's to write: declare them in maxcloud.yaml (environments:, previews:)"
+      reason: Forbidden
+    - expression: >-
+        !variables.envUser ||
+        (variables.isEnv && !variables.isPRs && variables.objs.all(o,
+          o.metadata.name.contains('--') && has(o.metadata.labels) &&
+          o.metadata.labels[?'run.gronblom.dev/environment-of'].orValue('') != ''))
+      message: "maxcloud:environments writes environments' entries only"
+      reason: Forbidden
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: maxcloud-registry-environments
+spec:
+  policyName: maxcloud-registry-environments
   validationActions: [Deny]
   matchResources:
     namespaceSelector:

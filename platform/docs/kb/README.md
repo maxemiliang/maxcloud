@@ -58,6 +58,7 @@ Procedures live in [`../runbooks/`](../runbooks/) and the README, not here.
 - [Building with Paketo buildpacks: what apps need](build-deploy/buildpacks.md): TypeScript, Go, uid, which builder
 - [maxcloud runs its own registry (zot) instead of GHCR](build-deploy/own-image-registry.md): why, GHCR's limits, and how zot's OIDC logins behave
 - [maxcloud apps' secrets live in the cluster, not in git](build-deploy/maxcloud-secrets-in-cluster.md): why not SOPS, never deleted, migrate keeps Flux off
+- [maxcloud environments and previews are registry entries <app>--<env>, made only by the controller](build-deploy/maxcloud-environments-and-previews.md): naming, who can cause a preview, what it reaches, capacity, what was rejected
 - [mcloud build and dev, things that weren't obvious](build-deploy/mcloud-build-gotchas.md): Knative fieldRef, mise shims, buildx container builders, credential helpers
 - [App Kustomizations must not decrypt with the platform's age key](build-deploy/app-kustomizations-no-sops.md): a secretGenerator in an app repo would hand it any homelab secret
 
@@ -66,6 +67,7 @@ Procedures live in [`../runbooks/`](../runbooks/) and the README, not here.
 - [Grafana 13 needs a memory limit above 384Mi](monitoring/grafana-memory.md)
 - [kube_namespace_labels only has allow-listed labels](monitoring/dashboard-namespace-variable.md)
 - [FluxResourceNotReady re-fired while the failure never changed](monitoring/flux-alert-flapping.md): one-scrape `ready="Unknown"` blips reset the alert
+- [App owners read their logs, metrics and alerts through the maxcloud controller, not from Loki or Prometheus](monitoring/apps-observability-api.md): TokenReview, SubjectAccessReview, the namespace fixed by the server; why not services/proxy
 
 ## ops
 
@@ -82,7 +84,9 @@ Procedures live in [`../runbooks/`](../runbooks/) and the README, not here.
 - [Backups stay in one region for now; a copy to de-fra1 is the plan when needed](ops/off-region-backup-copy.md): deferred, with the plan and what it doesn't cover
 - [UpCloud sub-account usernames can't contain dashes; Object Storage users can](ops/upcloud-sub-account-names.md): `homelab_api`, `maxcloud_controller`
 - [The cluster's admin certificate is kubeadm:cluster-admins, not system:masters](ops/admin-certificate-not-system-masters.md): VAPs that exempt admins must name that group
+- [Developers reach the API server through a gateway in the maxcloud controller, not by getting their address allowlisted](ops/api-gateway.md): what it checks, what it doesn't protect, and why not a VPN or an open API server
 - [An admission policy's params are fetched before its matchConditions](ops/admission-policy-params-fail-closed.md): "no params found for policy binding", even for exempt users
+- [The web console reads the cluster with each visitor's own token, as mcloud's login client, and has no rights of its own](ops/web-console.md): why not a ServiceAccount, a SOPS secret or a function build; what a kind cluster confirmed and what only the live one can
 
 ## tooling
 
