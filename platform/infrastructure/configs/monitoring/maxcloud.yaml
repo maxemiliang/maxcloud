@@ -100,3 +100,18 @@ spec:
             description: >-
               The maxcloud-apps instance bills another €5/month at the next
               250 GB. kubectl get maxcloud -A shows which apps hold what.
+        # The API gateway checks at most 5 tokens a second that it hasn't
+        # seen before; past that it answers 429. People's logins are a
+        # handful an hour, so this is someone sending made-up tokens.
+        - alert: MaxcloudGatewayThrottled
+          expr: sum(increase(maxcloud_gateway_requests_total{outcome="throttled"}[15m])) > 0
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "The API gateway is turning away unknown tokens faster than it checks them"
+            description: >-
+              Someone is trying tokens against https://maxcloud-api.gronblom.dev.
+              They don't reach the API server (docs/kb/ops/api-gateway.md), but
+              new logins may get a 429 meanwhile. Traefik's access log has the
+              addresses.

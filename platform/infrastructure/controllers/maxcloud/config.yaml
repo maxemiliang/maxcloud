@@ -38,6 +38,30 @@ data:
   MAXCLOUD_API_SERVER: https://lb-0a04a7febf0a49d285ab1523a8c2691a-1.upcloudlb.com:7443
   MAXCLOUD_OIDC_ISSUER: https://auth.lab.gronblom.dev
   MAXCLOUD_OIDC_CLIENT_ID: kubernetes
+  # The API gateway (gateway.yaml): where people reach the API server when
+  # their address isn't in admin_cidrs. In the discovery document, so
+  # mcloud login finds it.
+  MAXCLOUD_GATEWAY_URL: https://maxcloud-api.gronblom.dev
+  # Apps' environments (maxcloud.yaml environments:) and previews: at most 3
+  # environments per app, 6 previews on the whole platform (each app also
+  # has its own previews.max, at most 3 without an admin), and what each
+  # preview gets: cpu,memory,pods,database size. Previews scale to zero;
+  # a preview's database doesn't, at 20m CPU requested
+  # (docs/kb/build-deploy/maxcloud-environments-and-previews.md).
+  MAXCLOUD_ENVIRONMENTS_MAX: "3"
+  MAXCLOUD_PREVIEWS_MAX: "6"
+  MAXCLOUD_PREVIEW_QUOTA: 100m,512Mi,10,1Gi
   # v0.14.0: keeps an entry's owners when it changes the entry (older
   # mcloud drops them, which admission only stops for developers).
   MAXCLOUD_MIN_MCLOUD_VERSION: v0.14.0
+  # Apps' logs, metrics and alerts for their owners (mcloud logs --since,
+  # mcloud metrics, mcloud alerts): the controller asks Loki and Prometheus
+  # on the caller's behalf, after checking the caller's token and rights in
+  # the app's namespace, with the namespace fixed by the controller. Served
+  # on the API gateway (gateway.yaml), at /api/v1/apps/, so only to logins
+  # that passed its check, and not through Cloudflare. Needs
+  # MAXCLOUD_GATEWAY_URL.
+  # Unset either to turn its part off. Why this way:
+  # docs/kb/monitoring/apps-observability-api.md.
+  MAXCLOUD_LOKI_URL: http://loki.monitoring.svc.cluster.local:3100
+  MAXCLOUD_PROMETHEUS_URL: http://kube-prometheus-stack-prometheus.monitoring.svc.cluster.local:9090

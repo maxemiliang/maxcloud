@@ -52,6 +52,26 @@
 #            owners changes them. Never synced from the app's maxcloud.yaml.
 #            None (run-demo): an admin's app, no developer bindings.
 #
+#   environments  JSON, written from maxcloud.yaml's environments: (by the
+#            maxcloud controller's app sync or mcloud deploy). Not rendered
+#            here: the controller turns each environment into an entry of
+#            its own, <name>--<env> (below).
+#   previews, previewTTL, previewMax, previewDB
+#            "true" turns on previews: a GitHubPullRequest input provider
+#            <name>--pull-requests (below) lists the repo's open pull
+#            requests labelled `preview`, and the controller makes a
+#            preview entry <name>--pr-<n> for each.
+#   reclaim  only on a preview's entry (the controller's): Delete, so its
+#            buckets and database backups go with it.
+#
+# An app's environments and previews (docs/kb/build-deploy/
+# maxcloud-environments-and-previews.md) are entries like any other, named
+# <app>--<env>, labelled run.gronblom.dev/environment-of: <app>. Only the
+# maxcloud controller writes them (registry-admission.yaml), with the
+# app's owners and repo, so everything below applies to each as to an app:
+# its own namespace, quota, buckets, database, secrets and hostnames
+# (<service>--<app>--<env>.makiya.dev).
+#
 # An entry's annotation maxcloud.gronblom.dev/registration is its
 # registration ID: the maxcloud controller gives mcloud's entries one, and
 # only the registration an app's buckets and database backups belong to
@@ -345,6 +365,31 @@ spec:
         # get its plaintext as a Secret in the app's namespace. Apps keep
         # secrets in the cluster instead (mcloud secrets, app-secrets).
 
+    # The app's open pull requests labelled `preview`, for its previews
+    # (the maxcloud controller reads status.exportedInputs and makes a
+    # Preview per pull request). Only with previews on, for a GitOps app
+    # with a repo. Flux's GitHub App reads them: it needs "Pull requests:
+    # read" on the repo. Only Flux Operator and admins may write one of
+    # these (registry-admission.yaml, maxcloud-registry-environments).
+    - apiVersion: fluxcd.controlplane.io/v1
+      kind: ResourceSetInputProvider
+      metadata:
+        name: << inputs.name >>--pull-requests
+        namespace: flux-system
+        labels:
+          run.gronblom.dev/pull-requests-of: << inputs.name >>
+        annotations:
+          fluxcd.controlplane.io/reconcile: << if and (eq (get inputs "previews" | default "") "true") (get inputs "repo") (ne (get inputs "deploy" | default "gitops") "direct") >>enabled<< else >>disabled<< end >>
+          fluxcd.controlplane.io/reconcileEvery: "5m"
+      spec:
+        type: GitHubPullRequest
+        url: << printf "https://github.com/%s" (get inputs "repo") | quote >>
+        secretRef:
+          name: flux-system
+        filter:
+          labels: ["preview"]
+          limit: 20
+
   # One Bucket per entry in `buckets` (a loop needs a template, not a list
   # of objects), the Database if `db` is on, one Domain per entry in
   # `domains`, and the owners' RoleBindings. The maxcloud controller does
@@ -361,6 +406,9 @@ spec:
       namespace: << inputs.name >>
     spec:
       public: << has "public" (rest $parts) >>
+      << if get inputs "reclaim" >>
+      reclaimPolicy: << get inputs "reclaim" | quote >>
+      << end >>
     << end >>
     << end >>
     << if eq (get inputs "db" | default "") "true" >>
@@ -373,6 +421,9 @@ spec:
     spec:
       instances: << get inputs "dbInstances" | default "1" >>
       size: << get inputs "dbSize" | default "1Gi" | quote >>
+      << if get inputs "reclaim" >>
+      reclaimPolicy: << get inputs "reclaim" | quote >>
+      << end >>
     << end >>
     << range $entry := splitList "," (get inputs "domains" | default "") >>
     << $parts := splitList ":" (trim $entry) >>

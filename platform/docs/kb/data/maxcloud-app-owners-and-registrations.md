@@ -4,7 +4,7 @@ kind: decision
 area: data
 tags: [maxcloud, rbac, admission, authelia, buckets, cnpg, security]
 learned: 2026-11-07
-updated: 2026-11-07
+updated: 2026-11-17
 where:
   - apps/maxcloud/resourceset.yaml
   - infrastructure/configs/run/registry-admission.yaml
@@ -83,4 +83,6 @@ maxcloud registry (zot keeps `registry.gronblom.dev/<name>/*` after an
 app is deleted) need the same protection.
 
 See also: [The admin certificate isn't system:masters](../ops/admin-certificate-not-system-masters.md),
-[maxcloud database recovery](maxcloud-database-recovery.md).
+[maxcloud database recovery](maxcloud-database-recovery.md),
+[environments and previews](../build-deploy/maxcloud-environments-and-previews.md) (an app's
+environments are entries of their own, with the app's owners).

@@ -133,6 +133,10 @@ identity_providers:
         pkce_challenge_method: 'S256'
         redirect_uris:
           - 'http://127.0.0.1:18000/callback'
+          # The web console (apps/console): its server logs people in with
+          # the authorization code flow and PKCE, and reads the cluster with
+          # the ID token it gets, so it needs this client's tokens.
+          - 'https://console.makiya.dev/auth/callback'
         scopes: ['openid', 'profile', 'email', 'groups', 'offline_access']
         response_types: ['code']
         grant_types:

@@ -23,6 +23,18 @@
       "policies": [
         {
           "repositories": [
+            "*/*--preview"
+          ],
+          "deleteReferrers": true,
+          "deleteUntagged": true,
+          "keepTags": [
+            {
+              "pushedWithin": "336h"
+            }
+          ]
+        },
+        {
+          "repositories": [
             "**"
           ],
           "deleteReferrers": true,
