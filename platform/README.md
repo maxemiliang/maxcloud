@@ -53,7 +53,9 @@ schemas, OpenTofu stacks and lock files, the knowledge base). CI runs it on
 every pull request.
 
 Dependency updates come from Renovate ([`renovate.json`](../renovate.json)) as
-weekly PRs. Nothing is merged automatically, because merging to main deploys.
+one weekly PR. Only a new controller release (at once) and Knative minors (one
+at a time) get PRs of their own. Nothing is merged automatically, because
+merging to main deploys.
 Renovate is self-hosted: it runs in this repo's GitHub Actions
 ([`renovate.yaml`](../.github/workflows/renovate.yaml)) as our own GitHub App.
 

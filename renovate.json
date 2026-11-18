@@ -40,30 +40,18 @@
       "matchStrings": ["// renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)\\s+const \\w+ = \"(?<currentValue>[^\"]+)\""]
     }
   ],
+  "separateMajorMinor": false,
   "packageRules": [
     {
-      "matchManagers": ["github-actions"],
-      "groupName": "GitHub Actions"
-    },
-    {
-      "description": "The Paketo builder is released every few days; one PR a month is plenty.",
-      "matchPackageNames": ["paketobuildpacks/ubuntu-noble-builder"],
-      "schedule": ["* 0-8 1-7 * 1"]
+      "description": "Every update in one weekly PR: one review, one CI run, one deploy. The rules further down take back the updates that must not wait for it or be merged with others.",
+      "matchPackageNames": ["*"],
+      "groupName": "all dependencies",
+      "groupSlug": "all"
     },
     {
       "description": "Providers and modules come from the OpenTofu registry, like `tofu init` (and the lock files) use.",
       "matchDatasources": ["terraform-provider", "terraform-module"],
       "registryUrls": ["https://registry.opentofu.org"]
-    },
-    {
-      "description": "One PR for the UpCloud provider across all four stacks.",
-      "matchDatasources": ["terraform-provider"],
-      "groupName": "OpenTofu providers"
-    },
-    {
-      "description": "Local tooling and CI actions deploy nothing: one PR each.",
-      "matchManagers": ["mise"],
-      "groupName": "mise tools"
     },
     {
       "description": "kubectl must stay within one minor version of the cluster; minor bumps wait for a cluster upgrade.",
@@ -73,23 +61,21 @@
       "dependencyDashboardApproval": true
     },
     {
-      "description": "The agent-sandbox chart (its repo at a tag) and the controller image it installs are one version: one PR for both.",
-      "matchPackageNames": ["kubernetes-sigs/agent-sandbox"],
-      "groupName": "agent-sandbox"
-    },
-    {
       "description": "The cluster's maxcloud controller (platform/clusters/personal/maxcloud.yaml) follows this repo's own controller/v* tags. The regex keeps Renovate off mcloud's v* tags, which it would otherwise read as newer versions of the same thing. Our own release: a PR as soon as there is one, no waiting period. release-please.yaml starts Renovate once the release's image is pushed.",
       "matchManagers": ["flux"],
       "matchFileNames": ["platform/clusters/personal/maxcloud.yaml"],
       "versioning": "regex:^controller/v(?<major>\\d+)\\.(?<minor>\\d+)\\.(?<patch>\\d+)$",
+      "groupName": null,
       "minimumReleaseAge": null,
       "schedule": ["at any time"],
       "commitMessageTopic": "the cluster's maxcloud controller",
       "labels": ["dependencies", "controller"]
     },
     {
-      "description": "Knative supports upgrading one minor version at a time: one PR per minor, merged in order.",
+      "description": "Knative supports upgrading one minor version at a time: one PR per minor, merged in order, outside the weekly PR.",
       "matchPackageNames": ["knative-operator"],
+      "groupName": null,
+      "separateMajorMinor": true,
       "separateMultipleMinor": true
     }
   ]
