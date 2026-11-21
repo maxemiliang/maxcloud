@@ -20,6 +20,10 @@ metadata:
   namespace: run-demo
 spec:
   instances: 1
+  # A single instance's PDB allows 0 disruptions and blocks every drain
+  # (kured reboots, node group replacement). The controller turns it off
+  # for its own single-instance databases too.
+  enablePDB: false
   priorityClassName: tenant
   storage:
     size: 1Gi
