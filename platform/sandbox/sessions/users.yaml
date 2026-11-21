@@ -53,7 +53,8 @@ spec:
           pod-security.kubernetes.io/enforce: restricted
           run.gronblom.dev/sandbox: "true"
 
-    # The sandbox node group is one 2-core, 4 GB node (infra/cluster/nodes.tf)
+    # The sandbox node group is one 2-core, 4 GB node when it's on
+    # (infra/cluster/nodes.tf; off by default)
     # and a session requests 250m and 512Mi, so four fit in all. A claim
     # over the limit says ReconcilerError, and its Sandbox has a
     # SandboxPodCreateFailed event ("exceeded quota: sessions").

@@ -75,6 +75,7 @@ Procedures live in [`../runbooks/`](../runbooks/) and the README, not here.
 - [The built-in admin role lets an app drive controllers that are cluster-admin](ops/admin-role-aggregates-controller-crds.md): Flux objects and ClusterIssuer certificates in app namespaces
 - [Everything must fit on one node while the other drains](ops/drain-cpu-budget.md): the CPU budget
 - [Node autoscaling, when we add it, is a tainted burst node group for app pods](ops/node-autoscaling-burst-pool.md): the plan, on hold, and UpCloud's autoscaler traps
+- [The default nodes are 8 GB and the sandbox node is off unless sessions are wanted, to keep the bill near €51](ops/node-plans-and-cost.md): what was cut, what wasn't, and when to go back
 - [gVisor installs and runs on a UKS node; Kata can't (no nested virtualisation)](ops/sandbox-gvisor-on-uks.md): the sandbox spike's node facts and timings
 - [Agent sessions run under gVisor through agent-sandbox, one sandbox per user, and reach the internet but not the cluster](ops/agent-sessions-sandbox.md): why each piece, and what was turned down
 - [The sandbox image carries what a session can't install itself, modelled on boat.dev's, at about 2.2 GB](ops/sandbox-image-toolset.md): what's in it, what was left out and why

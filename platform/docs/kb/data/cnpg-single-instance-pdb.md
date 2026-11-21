@@ -33,3 +33,5 @@ on another node and its disk follows it, with a short outage.
 ```fish
 kubectl get pdb -A | awk 'NR==1 || $5 == "0"'
 ```
+
+See also: [node-plans-and-cost](../ops/node-plans-and-cost.md).

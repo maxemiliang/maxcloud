@@ -4,7 +4,7 @@ kind: decision
 area: ops
 tags: [capacity, autoscaling, cluster-autoscaler, upcloud, node-group, cost, kured]
 learned: 2026-11-04
-updated: 2026-11-05
+updated: 2026-11-21
 where:
   - infra/cluster/nodes.tf
   - infrastructure/configs/run/priorityclass.yaml
@@ -14,7 +14,9 @@ where:
 # Node autoscaling, when we add it, is a tainted burst node group for app pods
 
 **Decision:** not yet. As of 2026-11-04 the cluster stays at 2×
-STARTER-2xCPU-16GB with no autoscaler. When we add autoscaling, it scales a
+STARTER-2xCPU-16GB with no autoscaler (2× 8 GB since 2026-11-21:
+[node-plans-and-cost](node-plans-and-cost.md); the prices below are for
+16 GB). When we add autoscaling, it scales a
 separate `burst` node group that only app pods use. `default` stays fixed at
 2 nodes.
 

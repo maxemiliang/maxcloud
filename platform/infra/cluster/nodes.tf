@@ -5,15 +5,16 @@ resource "upcloud_kubernetes_node_group" "default" {
   # replacement group can exist next to the old one; see create_before_destroy.
   name_prefix = "default"
 
-  # 2 vCPU / 16 GB / 50 GB standard disk, ~€24/mo each. With two nodes, one node
+  # 2 vCPU / 8 GB / 40 GB standard disk, ~€18/mo each. With two nodes, one node
   # must be able to run everything while the other is drained (kured reboots,
   # node group replacement), so usable capacity is one node's allocatable memory
-  # (~15 GiB).
+  # (~7.6 GiB). CPU requests run out first anyway. Back from 16 GB on
+  # 2026-11-21 to save €12/month: docs/kb/ops/node-plans-and-cost.md.
   #
   # Fixed size, no autoscaler. The plan for one (a separate tainted burst
   # group for app pods; this group stays at 2) and its traps:
   # docs/kb/ops/node-autoscaling-burst-pool.md.
-  plan       = "STARTER-2xCPU-16GB"
+  plan       = "STARTER-2xCPU-8GB"
   node_count = 2
 
   # Best effort: put the two nodes on different physical hosts, so one host
@@ -39,7 +40,14 @@ resource "upcloud_kubernetes_node_group" "default" {
 # on the nodes that run Flux and the platform). Nothing schedules here
 # unless it tolerates the taint, which the `gvisor` RuntimeClass adds for the
 # pods that use it. What runs on it: docs/runbooks/sandbox-sessions.md.
+#
+# The whole group exists only while var.sandbox_nodes is 1: sessions are
+# rare, and billing is hourly. Not node_count = 0, which UpCloud's API
+# never gets (docs/kb/ops/node-plans-and-cost.md). Sessions stay Pending
+# until a node is Ready; docs/runbooks/sandbox-sessions.md, "Turning the
+# node on and off".
 resource "upcloud_kubernetes_node_group" "sandbox" {
+  count   = var.sandbox_nodes
   cluster = upcloud_kubernetes_cluster.this.id
 
   name_prefix = "sandbox"
@@ -69,4 +77,10 @@ resource "upcloud_kubernetes_node_group" "sandbox" {
     # Once a cluster autoscaler resizes this group, add
     # `ignore_changes = [node_count]` here.
   }
+}
+
+# The sandbox group became optional (count) on 2026-11-21.
+moved {
+  from = upcloud_kubernetes_node_group.sandbox
+  to   = upcloud_kubernetes_node_group.sandbox[0]
 }
