@@ -8,11 +8,11 @@
   "labels": ["dependencies"],
   "flux": {
     "description": "HelmRelease chart versions, OCIRepository and GitRepository tags.",
-    "managerFilePatterns": ["/^platform/(clusters|infrastructure|sandbox|apps)/.+\\.ya?ml$/"]
+    "managerFilePatterns": ["/^platform/(clusters|infrastructure|sandbox|apps|claude-history)/.+\\.ya?ml$/"]
   },
   "kubernetes": {
     "description": "Container images in plain manifests (Authelia, hello).",
-    "managerFilePatterns": ["/^platform/(clusters|infrastructure|sandbox|apps)/.+\\.ya?ml$/"]
+    "managerFilePatterns": ["/^platform/(clusters|infrastructure|sandbox|apps|claude-history)/.+\\.ya?ml$/"]
   },
   "customManagers": [
     {
@@ -70,6 +70,11 @@
       "schedule": ["at any time"],
       "commitMessageTopic": "the cluster's maxcloud controller",
       "labels": ["dependencies", "controller"]
+    },
+    {
+      "description": "claude-history's ClickHouse stays on the 26.8 LTS line; moving to the next LTS is a decision, not a weekly update.",
+      "matchPackageNames": ["clickhouse/clickhouse-server"],
+      "allowedVersions": "/^26\\.8\\./"
     },
     {
       "description": "Knative supports upgrading one minor version at a time: one PR per minor, merged in order, outside the weekly PR.",

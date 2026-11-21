@@ -1,0 +1,27 @@
+# Claude Code's transcripts in ClickHouse: claude-history/. README, "Claude
+# Code history".
+#
+# A Kustomization of its own that nothing depends on, like the sandbox's:
+# if ClickHouse doesn't come up (its OpenBao path not written yet, a schema.sql
+# that fails), it shows here as not ready without holding back
+# infra-configs and apps. After infra-configs: it needs the Gateway and the
+# ServiceMonitor CRD.
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: claude-history
+  namespace: flux-system
+spec:
+  # Applied as kustomize-controller (cluster-admin); see flux-instance.yaml.
+  serviceAccountName: kustomize-controller
+  dependsOn:
+    - name: infra-configs
+  interval: 1h
+  retryInterval: 2m
+  timeout: 10m
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  path: ./platform/claude-history
+  prune: true
+  wait: true

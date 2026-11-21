@@ -14,7 +14,7 @@ cd "$(dirname "$0")/.."
 # are skipped: none are in git (External Secrets Operator makes them).
 # apps/run-demo and apps/console are applied by their own Kustomizations
 # (registered in apps/maxcloud), not as part of `apps`.
-for dir in clusters/personal infrastructure/controllers infrastructure/configs secrets-store secrets sandbox/controllers sandbox/sessions apps apps/run-demo apps/console; do
+for dir in clusters/personal infrastructure/controllers infrastructure/configs secrets-store secrets sandbox/controllers sandbox/sessions claude-history apps apps/run-demo apps/console; do
   echo "--- kustomize build $dir"
   kustomize build "$dir" | kubeconform -summary -strict -ignore-missing-schemas -skip Secret \
     -schema-location default \

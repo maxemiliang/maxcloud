@@ -1,0 +1,98 @@
+<!--
+  Who may do what in claude-history's ClickHouse. The only place access is
+  defined: server.xml turns off users and grants created with SQL.
+
+  Two users:
+  - ingest: Vector on the laptops, from the internet. Inserts only.
+  - default: the admin, from the pod's localhost only. Reading the data is
+    the admin's: there's no read-only user for Grafana on purpose, because
+    every Authelia user (maxcloud developers too) can view Grafana, and
+    Grafana OSS can't keep a datasource from its Viewers.
+
+  The ingest password is a SHA-256 hash here, from the Secret
+  clickhouse-users (OpenBao platform/claude-history/clickhouse-users,
+  through ESO: platform/secrets/claude-history.yaml; written by
+  platform/scripts/claude-history-secrets.sh). The plain password is only
+  on the laptops (platform/claude-history/laptop).
+-->
+<clickhouse>
+    <profiles>
+        <!--
+          Small insert blocks, for every user. Each block is parsed into the
+          materialized columns (schema.sql) at once; with the defaults (a
+          million rows, 256 MB) a restore from the bucket needed more than the
+          1.2 GiB the server may use; with these, the whole bucket went in at
+          ~480 MiB, and Vector's batches take ~150 MiB.
+        -->
+        <default>
+            <max_insert_block_size>10000</max_insert_block_size>
+            <min_insert_block_size_rows>10000</min_insert_block_size_rows>
+            <min_insert_block_size_bytes>33554432</min_insert_block_size_bytes>
+        </default>
+        <!-- Vector's inserts. -->
+        <ingest>
+            <profile>default</profile>
+            <max_memory_usage>268435456</max_memory_usage>
+            <max_execution_time>60</max_execution_time>
+            <!-- Vector already sends batches. With async inserts (the
+                 default) ClickHouse would gather them into larger flushes,
+                 which need more memory than one batch. -->
+            <async_insert>0</async_insert>
+            <!-- Fields ClickHouse doesn't know are dropped instead of failing
+                 the whole batch. -->
+            <input_format_skip_unknown_fields>1</input_format_skip_unknown_fields>
+            <constraints>
+                <max_memory_usage><max>268435456</max></max_memory_usage>
+                <max_execution_time><max>60</max></max_execution_time>
+            </constraints>
+        </ingest>
+    </profiles>
+
+    <users>
+        <!--
+          The admin. No password, but only from inside the pod (127.0.0.1 or
+          ::1): `kubectl exec ... clickhouse-client`, or `kubectl
+          port-forward`, whose connections also arrive on the pod's
+          localhost. So who may administer it is who may exec or
+          port-forward in the claude-history namespace: the cluster's
+          admins, through their cluster login. A password would only live in
+          a Secret those same people can read. The image's entrypoint also
+          runs schema.sql as this user.
+        -->
+        <default>
+            <networks replace="replace">
+                <ip>::1</ip>
+                <ip>127.0.0.1</ip>
+            </networks>
+        </default>
+
+        <!-- The laptop's Vector, over https://claude-history.gronblom.dev:
+             inserts into claude.events and nothing else. -->
+        <ingest>
+            <password_sha256_hex from_env="CLICKHOUSE_INGEST_PASSWORD_SHA256"/>
+            <networks>
+                <ip>::/0</ip>
+            </networks>
+            <profile>ingest</profile>
+            <quota>ingest</quota>
+            <grants>
+                <query>GRANT INSERT ON claude.events</query>
+            </grants>
+        </ingest>
+    </users>
+
+    <quotas>
+        <!-- Far above what the laptops send (a batch every few seconds
+             while a session runs; a first backfill of ~400 MB), low enough
+             that a leaked password can't fill the disk quickly. Over it,
+             inserts fail and Vector keeps retrying from its disk buffer. -->
+        <ingest>
+            <interval>
+                <duration>3600</duration>
+                <queries>5000</queries>
+                <errors>500</errors>
+                <written_bytes>4294967296</written_bytes>
+            </interval>
+        </ingest>
+    </quotas>
+</clickhouse>
