@@ -50,6 +50,7 @@ Procedures live in [`../runbooks/`](../runbooks/) and the README, not here.
 - [How maxcloud databases come back after losing their Cluster or namespace](data/maxcloud-database-recovery.md): measured restore times, and why their disks are deleted
 - [maxcloud apps have owners, and their data belongs to one registration](data/maxcloud-app-owners-and-registrations.md): per-app owner bindings, admission, registration IDs, adopting old data
 - [Block storage: MaxIOPS for databases, Standard for the rest](data/block-storage-tiers.md): which class for which PVC, and why the classes sit with the controllers
+- [A single-instance CNPG cluster's PDB blocks every node drain](data/cnpg-single-instance-pdb.md): `ALLOWED DISRUPTIONS 0`, and `enablePDB: false`
 
 ## build-deploy
 
