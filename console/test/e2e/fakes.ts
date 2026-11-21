@@ -250,6 +250,25 @@ export async function startConsole(env: Record<string, string>, port: number): P
   }
 }
 
+/**
+ * Starts the built server on a free port, with the env envFor gives for its
+ * origin. A port from freePort is only free at that moment: something can
+ * take it before the console listens, and then it exits with EADDRINUSE and
+ * this tries another one. Start the fakes first, so they're not what takes it.
+ */
+export async function startConsoleOnFreePort(envFor: (origin: string) => Record<string, string>): Promise<{ server: Console, env: Record<string, string> }> {
+  for (let attempt = 1; ; attempt++) {
+    const port = await freePort()
+    const env = envFor(`http://127.0.0.1:${port}`)
+    try {
+      return { server: await startConsole(env, port), env }
+    }
+    catch (e) {
+      if (attempt >= 5 || !String(e).includes('EADDRINUSE')) throw e
+    }
+  }
+}
+
 /** Runs the built server until it exits by itself; its exit code and output. */
 export function runConsole(env: Record<string, string>): Promise<{ code: number | null, output: string }> {
   return new Promise((resolve) => {

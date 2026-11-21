@@ -7,7 +7,7 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { isAllowed } from '../../server/lib/kube'
-import { Browser, fakeAppsApi, fakeIdp, fakeKube, freePort, runConsole, startConsole, type Console, type FakeAppsApi, type FakeIdp, type FakeKube } from './fakes'
+import { Browser, fakeAppsApi, fakeIdp, fakeKube, runConsole, startConsoleOnFreePort, type Console, type FakeAppsApi, type FakeIdp, type FakeKube } from './fakes'
 
 const built = existsSync(join(dirname(fileURLToPath(import.meta.url)), '../../.output/server/index.mjs'))
 const KEY = randomBytes(32).toString('base64')
@@ -22,19 +22,22 @@ const cookieAttrs = (res: Response, name: string) => res.headers.getSetCookie().
 
 beforeAll(async () => {
   if (!built) throw new Error('no build: run `npm run build` before `npm run test:e2e`')
-  const port = await freePort()
-  const origin = `http://127.0.0.1:${port}`
+  // The fakes first, then the console's port: the IdP asks for its redirect
+  // URI only when someone logs in.
+  let origin = ''
   idp = await fakeIdp('kubernetes', () => [`${origin}/auth/callback`])
   kube = await fakeKube(() => idp)
   api = await fakeAppsApi()
-  env = {
-    CONSOLE_ORIGIN: origin,
-    CONSOLE_SESSION_KEY: KEY,
-    CONSOLE_OIDC_ISSUER: idp.url,
-    CONSOLE_KUBE_URL: kube.url,
-    CONSOLE_APPS_API: `${api.url}/api/v1/apps/`,
-  }
-  server = await startConsole(env, port)
+  ;({ server, env } = await startConsoleOnFreePort((o) => {
+    origin = o
+    return {
+      CONSOLE_ORIGIN: o,
+      CONSOLE_SESSION_KEY: KEY,
+      CONSOLE_OIDC_ISSUER: idp.url,
+      CONSOLE_KUBE_URL: kube.url,
+      CONSOLE_APPS_API: `${api.url}/api/v1/apps/`,
+    }
+  }))
 })
 
 afterAll(async () => {
@@ -484,9 +487,8 @@ describe('the session', () => {
 
 describe('over https', () => {
   it('uses __Host- cookies marked Secure, and HSTS', async () => {
-    const port = await freePort()
     const origin = 'https://console.example.com'
-    const https = await startConsole({ ...env, CONSOLE_ORIGIN: origin }, port)
+    const { server: https } = await startConsoleOnFreePort(() => ({ ...env, CONSOLE_ORIGIN: origin }))
     try {
       const res = await fetch(`${https.url}/auth/login`, { method: 'POST', headers: { 'origin': origin, 'content-type': 'application/x-www-form-urlencoded' }, body: 'next=/', redirect: 'manual' })
       expect(res.status).toBe(303)
@@ -525,8 +527,7 @@ describe('starting', () => {
   })
 
   it('stops cleanly when told to', async () => {
-    const port = await freePort()
-    const c = await startConsole({ CONSOLE_MOCK: '1' }, port)
+    const { server: c } = await startConsoleOnFreePort(() => ({ CONSOLE_MOCK: '1' }))
     expect(c.output()).toContain('mock mode')
     expect(await c.stop()).toBe(0)
   })
