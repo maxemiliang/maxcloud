@@ -42,3 +42,14 @@ variable "admin_cidrs" {
     error_message = "admin_cidrs must be non-empty valid CIDRs, and not 0.0.0.0/0."
   }
 }
+
+variable "sandbox_nodes" {
+  description = "1 while agent sessions are wanted: the sandbox node group exists with one node. 0 (the default) deletes the group. `tofu apply -var sandbox_nodes=1` turns it on; the next apply without it turns it off again."
+  type        = number
+  default     = 0
+
+  validation {
+    condition     = contains([0, 1], var.sandbox_nodes)
+    error_message = "sandbox_nodes must be 0 or 1."
+  }
+}

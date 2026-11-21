@@ -4,7 +4,7 @@ kind: fact
 area: ops
 tags: [capacity, cpu, drain, kured]
 learned: 2026-11-04
-updated: 2026-11-05
+updated: 2026-11-21
 where:
   - infra/cluster/nodes.tf
   - clusters/personal/flux-system/flux-instance.yaml
@@ -12,8 +12,10 @@ where:
 
 # Everything must fit on one node while the other drains
 
-- Two nodes, STARTER-2xCPU-16GB, about 15.5 GiB allocatable each. Memory
-  is plentiful; CPU requests are the limit.
+- Two nodes, STARTER-2xCPU-8GB, about 7.6 GiB allocatable each (16 GB
+  from 2026-11-01 to 2026-11-21; see
+  [node-plans-and-cost](node-plans-and-cost.md)). CPU requests run out
+  first; memory has less headroom than it did, so check both.
 - During a drain (kured reboots 01:00-04:00 UTC, node upgrades) one node
   holds everything. Requested on one node: about 1.74 of 2.0 cores
   (2026-11-04, with the first apps), then about 1.44 after Flux's

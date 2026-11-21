@@ -11,9 +11,10 @@ Commands are fish, run from `platform/`, as an admin.
 ## What's there
 
 - **The `sandbox` node group** (`infra/cluster/nodes.tf`, applied with
-  tofu, not by Flux): one tainted node, labelled `pool=sandbox`. Without a
-  Ready node there, the installer has nothing to run on and sessions stay
-  Pending.
+  tofu, not by Flux): one tainted node, labelled `pool=sandbox`. The group
+  doesn't exist by default. Without a Ready node there, the installer has
+  nothing to run on and sessions stay Pending. See "Turning the node on
+  and off".
 - **`sandbox-controllers`** (Flux Kustomization, `sandbox/controllers`):
   the gVisor installer DaemonSet on the `sandbox` node group, the `gvisor`
   RuntimeClass, and the agent-sandbox controller.
@@ -101,6 +102,26 @@ The last line must say `remote port forwarding failed`; `-R` working
 would mean the session's sshd didn't get mcloud's settings. Stop the
 `ssh -f` afterwards.
 
+## Turning the node on and off
+
+The `sandbox` node group exists only while `sandbox_nodes` is 1; with 0
+tofu deletes it. It's billed by the hour while it runs, about €12 a month
+if left on.
+
+```fish
+tofu -chdir=infra/cluster apply -var sandbox_nodes=1   # on
+tofu -chdir=infra/cluster apply                         # off again
+```
+
+- The group and its node take a few minutes to come up. The gVisor installer runs on it
+  within seconds of it being Ready, and the first session on it pulls the
+  2.2 GB image again.
+- A session started while there's no node waits (`waiting for a sandbox
+  node: ...`) and starts by itself once the node is up.
+- **Any `tofu apply` in `infra/cluster` without the variable turns the
+  node off**, and running sessions end with it. Pass
+  `-var sandbox_nodes=1` while sessions are wanted.
+
 ## Let a user run more sessions
 
 Two by default, and the node holds four in all. Only an admin may set it:
@@ -165,7 +186,8 @@ mcloud says most of these itself; this is what's underneath.
   already, everyone's counted. mcloud waits half a minute for room, then
   removes the session it made.
 - **The pod is `Pending` otherwise:** no sandbox node is Ready (`kubectl
-  describe pod`).
+  describe pod`). The node group is off by default; see "Turning the node
+  on and off".
 - **`mcloud sandbox pull` says the directory isn't a git repository:** the
   session wasn't started `--from` one; `--dir` names the repository in it.
 - **Claude Code says `Failed to authenticate. API Error: 401`:** the user's

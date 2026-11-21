@@ -772,17 +772,21 @@ applies its manifests itself.
 
 ## Costs and capacity
 
-About €75/month: 2× ~€24 nodes (STARTER-2xCPU-16GB), ~€12 for the sandbox
-node (STARTER-2xCPU-4GB; an estimate, check it in the Hub), 2× €5 object storage
+About €51/month: 2× ~€18 nodes (STARTER-2xCPU-8GB), 2× €5 object storage
 (`homelab`, and `maxcloud-apps` for apps' buckets and backups), and ~€5
 for 21 GiB of MaxIOPS block storage (Prometheus 10, Loki 5, Postgres 2×2,
 Alertmanager 1, Authelia 1). The control plane (`dev-md`), NAT gateway and load
-balancer (essentials) are free.
+balancer (essentials) are free. The sandbox node (STARTER-2xCPU-4GB, ~€12 a
+month if left on; an estimate) is off unless turned on for agent sessions,
+and billed by the hour while it runs
+([node-plans-and-cost](docs/kb/ops/node-plans-and-cost.md)).
 
 During a reboot or node replacement, one node runs everything, so the usable
-capacity is one node's allocatable memory (~15 GiB). Measured 2026-11-01 on the
-8 GB nodes: about 5.5 GiB in use when one node runs everything. Check
-`kubectl top nodes` before adding a big workload.
+capacity is one node's allocatable memory (~7.6 GiB). Measured 2026-11-01 on the
+8 GB nodes: about 5.5 GiB in use when one node runs everything; on
+2026-11-21 the pods alone used about 4.9 GiB counted that way. Check `kubectl top nodes`
+before adding a big workload; if memory gets tight, the 16 GB plan is €6 a
+node more.
 
 On one node, the tighter limit is CPU *requests*, not memory: 2 cores
 allocatable. Measured 2026-11-04 with both nodes' pods counted on one node:

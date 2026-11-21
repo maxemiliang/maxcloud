@@ -76,7 +76,8 @@ and in `/work` otherwise.
 
 You can have two sessions running at a time; an admin can raise that. The
 sandbox node holds four in all, everyone's counted: when it's full, `start`
-says so and gives up.
+says so and gives up. The node may be off to save money; then `start` says
+it's waiting for a sandbox node, and an admin turns it on.
 
 ### What a task may do
 
