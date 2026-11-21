@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.18.0](https://github.com/maxemiliang/maxcloud/compare/v0.17.0...v0.18.0) (2026-11-21)
+
+
+### Features
+
+* **platform:** the cluster costs about €51 a month instead of €75 ([f2e16cb](https://github.com/maxemiliang/maxcloud/commit/f2e16cbc9ffd1883d51b4bf4cb89c89fb1ea249c))
+
 ## [0.17.0](https://github.com/maxemiliang/maxcloud/compare/v0.16.0...v0.17.0) (2026-11-17)
 
 
