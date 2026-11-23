@@ -1,0 +1,61 @@
+# Who may talk to OpenBao: ESO, the maxcloud controller, the config Job and
+# Prometheus. Admins come in through `kubectl port-forward`, which arrives
+# from the node and isn't affected. Tenant pods are already kept out by
+# infrastructure/configs/run/tenant-egress.yaml.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: openbao
+  namespace: openbao
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: openbao
+      component: server
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: external-secrets
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: maxcloud-system
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: maxcloud-controller
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: openbao-config
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+      ports:
+        - port: 8200
+---
+# Its database: OpenBao, the CNPG operator, the instance's own replication
+# and backups, and Prometheus.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: openbao-db
+  namespace: openbao
+spec:
+  podSelector:
+    matchLabels:
+      cnpg.io/cluster: openbao-db
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: openbao
+        - podSelector:
+            matchLabels:
+              cnpg.io/cluster: openbao-db
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: cnpg-system
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring

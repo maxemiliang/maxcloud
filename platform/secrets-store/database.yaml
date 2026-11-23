@@ -1,0 +1,117 @@
+# OpenBao's storage: a one-instance Postgres, backed up to
+# s3://pg-backups/openbao/ like any CloudNativePG cluster (daily base backup,
+# WAL every 5 min at the latest, 30 days kept). OpenBao encrypts everything
+# it writes with its root key (unsealed by the static seal key), so the
+# database and its backups only ever hold ciphertext.
+#
+# The S3 key is the Secret openbao-backup-s3, made by infra/flux from
+# infra/storage's openbao-backups user, which may only touch
+# pg-backups/openbao/. It can't come from OpenBao, which needs this
+# database to start.
+#
+# Rebuilding the cluster: once the first backup exists, switch `bootstrap`
+# below to the commented-out `recovery` (and `externalClusters`), with a new
+# serverName for the plugin so the restored cluster doesn't archive over
+# the backups it restores from. A new cluster then comes back with every
+# secret instead of an empty OpenBao. See the README's "Secrets" section.
+apiVersion: barmancloud.cnpg.io/v1
+kind: ObjectStore
+metadata:
+  name: openbao-backups
+  namespace: openbao
+spec:
+  retentionPolicy: 30d
+  configuration:
+    destinationPath: s3://pg-backups/openbao/
+    endpointURL: https://q6c58.upcloudobjects.com
+    s3Credentials:
+      accessKeyId:
+        name: openbao-backup-s3
+        key: AWS_ACCESS_KEY_ID
+      secretAccessKey:
+        name: openbao-backup-s3
+        key: AWS_SECRET_ACCESS_KEY
+      region:
+        name: openbao-backup-s3
+        key: AWS_REGION
+    wal:
+      compression: zstd
+    data:
+      compression: gzip
+  instanceSidecarConfiguration:
+    # UpCloud's S3 rejects the newer default checksums
+    # (docs/kb/data/upcloud-s3-checksums.md).
+    env:
+      - name: AWS_REQUEST_CHECKSUM_CALCULATION
+        value: when_required
+      - name: AWS_RESPONSE_CHECKSUM_VALIDATION
+        value: when_required
+    resources:
+      requests:
+        cpu: 10m
+        memory: 48Mi
+      limits:
+        memory: 256Mi
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: openbao-db
+  namespace: openbao
+spec:
+  instances: 1
+  # A single instance's PDB blocks every drain
+  # (docs/kb/data/cnpg-single-instance-pdb.md).
+  enablePDB: false
+  # On the default, Retain class: the data is worth keeping
+  # (docs/kb/data/block-storage-tiers.md).
+  storage:
+    size: 1Gi
+  resources:
+    requests:
+      cpu: 20m
+      memory: 128Mi
+    limits:
+      memory: 512Mi
+  postgresql:
+    parameters:
+      shared_buffers: 64MB
+      max_wal_size: 512MB
+      archive_timeout: 5min
+  plugins:
+    - name: barman-cloud.cloudnative-pg.io
+      isWALArchiver: true
+      parameters:
+        barmanObjectName: openbao-backups
+        serverName: openbao-db
+  bootstrap:
+    initdb:
+      database: openbao
+      owner: openbao
+  # bootstrap:
+  #   recovery:
+  #     source: origin
+  #     database: openbao
+  #     owner: openbao
+  # externalClusters:
+  #   - name: origin
+  #     plugin:
+  #       name: barman-cloud.cloudnative-pg.io
+  #       parameters:
+  #         barmanObjectName: openbao-backups
+  #         serverName: openbao-db
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: ScheduledBackup
+metadata:
+  name: openbao-db-daily
+  namespace: openbao
+spec:
+  cluster:
+    name: openbao-db
+  # Same time as the other clusters (homelab.cnpg CNPGBackupTooOld).
+  schedule: "0 0 5 * * *"
+  backupOwnerReference: self
+  method: plugin
+  pluginConfiguration:
+    name: barman-cloud.cloudnative-pg.io

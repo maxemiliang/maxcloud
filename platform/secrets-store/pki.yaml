@@ -1,0 +1,89 @@
+# OpenBao's TLS: a private CA of its own, made by cert-manager.
+#
+#   Issuer openbao-selfsigned (cert-manager ns)
+#     -> Certificate openbao-ca: the CA, Secret openbao-ca in cert-manager
+#   ClusterIssuer openbao-ca (signs with that Secret)
+#     -> Certificate openbao-tls: OpenBao's serving certificate (openbao ns)
+#   Bundle openbao-ca (trust-manager)
+#     -> ConfigMap openbao-ca (key ca.crt) in every namespace, which the
+#        SecretStores check OpenBao against.
+#
+# The CA lives in cert-manager because that is trust-manager's trust
+# namespace and a ClusterIssuer's Secret namespace. Tenants can't use the
+# ClusterIssuer: infrastructure/configs/run/tenant-kinds.yaml refuses their
+# Certificates that name any ClusterIssuer.
+#
+# The CA's key is kept on renewal (rotationPolicy: Never), so renewing it
+# doesn't invalidate the serving certificate or the ConfigMaps in between.
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: openbao-selfsigned
+  namespace: cert-manager
+spec:
+  selfSigned: {}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: openbao-ca
+  namespace: cert-manager
+spec:
+  isCA: true
+  commonName: openbao-ca
+  secretName: openbao-ca
+  duration: 87600h # 10 years
+  renewBefore: 720h
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+    rotationPolicy: Never
+  issuerRef:
+    kind: Issuer
+    name: openbao-selfsigned
+---
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: openbao-ca
+spec:
+  ca:
+    secretName: openbao-ca
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: openbao-tls
+  namespace: openbao
+spec:
+  secretName: openbao-tls
+  duration: 2160h # 90 days
+  renewBefore: 360h
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+    rotationPolicy: Always
+  dnsNames:
+    - openbao
+    - openbao.openbao
+    - openbao.openbao.svc
+    - openbao.openbao.svc.cluster.local
+  # The chart's probes and `bao` inside the pod use 127.0.0.1.
+  ipAddresses:
+    - 127.0.0.1
+  issuerRef:
+    kind: ClusterIssuer
+    name: openbao-ca
+---
+apiVersion: trust.cert-manager.io/v1alpha1
+kind: Bundle
+metadata:
+  name: openbao-ca
+spec:
+  sources:
+    - secret:
+        name: openbao-ca
+        key: tls.crt
+  target:
+    configMap:
+      key: ca.crt

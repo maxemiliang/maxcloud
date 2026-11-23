@@ -6,6 +6,7 @@ resources:
   - knative.yaml
   - keda.yaml
   - maxcloud.yaml
+  - openbao.yaml
 configMapGenerator:
   # Grafana's dashboard sidecar loads every ConfigMap labelled
   # grafana_dashboard=1, from any namespace.

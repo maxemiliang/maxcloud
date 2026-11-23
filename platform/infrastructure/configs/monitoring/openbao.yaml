@@ -1,0 +1,101 @@
+# OpenBao (platform/secrets-store) and External Secrets Operator. Its
+# database's backups are covered by the homelab.cnpg alerts like any
+# CloudNativePG cluster.
+#
+# While OpenBao is down or sealed, Secrets that exist stay as they are and
+# pods keep running; what stops is changes (mcloud secrets, a rotated
+# platform key) and new namespaces' Secrets. Hence warning, not critical.
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: openbao
+  namespace: monitoring
+spec:
+  namespaceSelector:
+    matchNames: [openbao]
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: openbao
+      component: server
+  podMetricsEndpoints:
+    - port: https
+      scheme: https
+      path: /v1/sys/metrics
+      params:
+        format: [prometheus]
+      interval: 60s
+      tlsConfig:
+        # trust-manager's copy of OpenBao's CA, in this namespace too.
+        ca:
+          configMap:
+            name: openbao-ca
+            key: ca.crt
+        serverName: openbao.openbao.svc
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: external-secrets
+  namespace: monitoring
+spec:
+  namespaceSelector:
+    matchNames: [external-secrets]
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: external-secrets
+  podMetricsEndpoints:
+    - port: metrics
+      interval: 60s
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: openbao
+  namespace: monitoring
+spec:
+  groups:
+    - name: homelab.secrets
+      rules:
+        - alert: OpenBaoDown
+          expr: absent(up{namespace="openbao", pod=~"openbao-.*"} == 1)
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "OpenBao is down: secrets can't be changed or synced"
+            description: >-
+              Check: kubectl -n openbao get pods,cluster; kubectl -n openbao logs
+              openbao-0. It needs its database (openbao-db) and the seal key
+              (Secret openbao-seal); README, Secrets.
+        - alert: OpenBaoSealed
+          expr: max(vault_core_unsealed{cluster!=""}) == 0
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "OpenBao is running but sealed"
+            description: >-
+              The static seal key in Secret openbao/openbao-seal doesn't open
+              the stored root key (changed or rotated without previous_key?).
+              Check: kubectl -n openbao logs openbao-0 | grep -i seal
+        - alert: ExternalSecretNotSynced
+          expr: max by (namespace, name) (externalsecret_status_condition{condition="Ready", status="False"}) == 1
+          for: 30m
+          labels:
+            severity: warning
+          annotations:
+            summary: "ExternalSecret {{ $labels.namespace }}/{{ $labels.name }} hasn't synced for 30 minutes"
+            description: >-
+              Its Secret keeps its last values. Check: kubectl -n {{ $labels.namespace }}
+              describe externalsecret {{ $labels.name }} (the path missing in
+              OpenBao, or the SecretStore not ready).
+        - alert: SecretStoreNotReady
+          expr: max by (namespace, name) (secretstore_status_condition{condition="Ready", status="False"}) == 1
+          for: 30m
+          labels:
+            severity: warning
+          annotations:
+            summary: "SecretStore {{ $labels.namespace }}/{{ $labels.name }} can't log in to OpenBao"
+            description: >-
+              Check: kubectl -n {{ $labels.namespace }} describe secretstore {{ $labels.name }}
+              (ServiceAccount eso-reader, ConfigMap openbao-ca, OpenBao's role reader).

@@ -1,0 +1,85 @@
+# External Secrets Operator: turns values in OpenBao into ordinary Secrets.
+# Every namespace that needs secrets has a ServiceAccount `eso-reader`, a
+# SecretStore `openbao` that logs in as it, and ExternalSecrets naming the
+# Secrets to make. OpenBao lets each namespace read only kv/<namespace>/
+# (secrets-store/config/ns-reader.hcl). Design:
+# private/docs/research/secrets-openbao-eso.md.
+#
+# Cut down on purpose:
+# - No cluster-scoped kinds (ClusterSecretStore, ClusterExternalSecret,
+#   ClusterGenerator, ClusterPushSecret) and no PushSecret: neither their
+#   CRDs nor their reconcilers. A cluster-wide store would be readable from
+#   any namespace whose ExternalSecret names it, the ClusterIssuer hole
+#   again (docs/kb/ops/admin-role-aggregates-controller-crds.md).
+# - Nothing aggregated into the built-in view/edit/admin roles. App owners
+#   are `admin` in their namespace; with the ESO kinds in `admin` they could
+#   write a SecretStore with the webhook provider, and the controller would
+#   fetch any URL from this namespace, past the tenant egress deny. The
+#   platform writes every ExternalSecret and SecretStore (git and the maxcloud
+#   ResourceSet), so nobody else needs to.
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: HelmRepository
+metadata:
+  name: external-secrets
+  namespace: external-secrets
+spec:
+  interval: 12h
+  url: https://charts.external-secrets.io
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: external-secrets
+  namespace: external-secrets
+spec:
+  interval: 1h
+  serviceAccountName: flux-helm # infrastructure/controllers/flux-helm.yaml
+  chart:
+    spec:
+      chart: external-secrets
+      version: "2.15.0"
+      sourceRef:
+        kind: HelmRepository
+        name: external-secrets
+  install:
+    remediation:
+      retries: 3
+  upgrade:
+    remediation:
+      retries: 3
+  values:
+    crds:
+      createClusterExternalSecret: false
+      createClusterSecretStore: false
+      createClusterGenerator: false
+      createClusterPushSecret: false
+      createPushSecret: false
+    processClusterExternalSecret: false
+    processClusterStore: false
+    processClusterGenerator: false
+    processClusterPushSecret: false
+    processPushSecret: false
+    rbac:
+      aggregateToView: false
+      aggregateToEdit: false
+      aggregateToAdmin: false
+    resources:
+      requests:
+        cpu: 10m
+        memory: 64Mi
+      limits:
+        memory: 256Mi
+    webhook:
+      resources:
+        requests:
+          cpu: 10m
+          memory: 32Mi
+        limits:
+          memory: 128Mi
+    certController:
+      resources:
+        requests:
+          cpu: 10m
+          memory: 32Mi
+        limits:
+          memory: 128Mi

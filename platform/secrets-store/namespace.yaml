@@ -1,0 +1,9 @@
+# Also created by infra/flux (tofu), before Flux runs, because the
+# bootstrap Secrets openbao-seal and openbao-backup-s3 live in it. Flux
+# adopts it from here.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: openbao
+  labels:
+    pod-security.kubernetes.io/enforce: restricted

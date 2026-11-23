@@ -1,0 +1,22 @@
+# helm-controller installs the OpenBao chart as this ServiceAccount (see
+# infrastructure/controllers/flux-helm.yaml for why). The chart makes a
+# ClusterRoleBinding to system:auth-delegator, so this needs cluster-admin
+# like the others. It lives here rather than in flux-helm.yaml so this
+# Kustomization doesn't wait for infra-controllers to make it.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: flux-helm
+  namespace: openbao
+automountServiceAccountToken: false
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: flux-helm-openbao
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cluster-admin
+subjects:
+  - {kind: ServiceAccount, name: flux-helm, namespace: openbao}

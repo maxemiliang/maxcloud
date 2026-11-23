@@ -62,6 +62,9 @@ Procedures live in [`../runbooks/`](../runbooks/) and the README, not here.
 - [maxcloud environments and previews are registry entries <app>--<env>, made only by the controller](build-deploy/maxcloud-environments-and-previews.md): naming, who can cause a preview, what it reaches, capacity, what was rejected
 - [mcloud build and dev, things that weren't obvious](build-deploy/mcloud-build-gotchas.md): Knative fieldRef, mise shims, buildx container builders, credential helpers
 - [App Kustomizations must not decrypt with the platform's age key](build-deploy/app-kustomizations-no-sops.md): a secretGenerator in an app repo would hand it any homelab secret
+- [Every secret lives in OpenBao; External Secrets Operator makes the Secrets](build-deploy/openbao-secrets.md): why not SOPS, how each namespace sees only its own path, what tenants can't touch
+- [OpenBao self-init can't enable an audit device, and a failed self-init needs empty storage](build-deploy/openbao-self-init-and-audit.md): "invalid request", no root token, no recovery keys
+- [ESO taking over existing Secrets keeps Flux's labels, and Retain never empties a Secret](build-deploy/eso-takeover-of-existing-secrets.md): prune during the switch, missing paths, force-sync
 
 ## monitoring
 
