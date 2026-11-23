@@ -33,12 +33,6 @@ variable "github_app_private_key_path" {
   default     = "~/.config/homelab/flux-github-app.pem"
 }
 
-variable "age_key_path" {
-  description = "Path to the age private key used by SOPS. Becomes the sops-age Secret."
-  type        = string
-  default     = "~/.config/sops/age/keys.txt"
-}
-
 variable "openbao_seal_key_path" {
   description = "Path to OpenBao's static seal key (32 random bytes: openssl rand -out <path> 32). Becomes the Secret openbao/openbao-seal."
   type        = string
