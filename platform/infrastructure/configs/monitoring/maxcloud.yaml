@@ -39,7 +39,11 @@ spec:
             description: >-
               Check: kubectl get maxcloud -A (the READY column, then the Ready
               condition of the ones that aren't), and
-              kubectl -n maxcloud-system logs deploy/maxcloud-controller --tail=50
+              kubectl -n maxcloud-system logs deploy/maxcloud-controller --tail=50.
+              During or just after a node group replacement or Kubernetes
+              upgrade, this is expected (CNPG webhook timeouts while its
+              operator moves) and clears about 15 minutes after the last error:
+              docs/kb/monitoring/reconcile-errors-during-node-replacement.md
         - alert: MaxcloudControllerDown
           expr: absent(up{namespace="maxcloud-system", pod=~"maxcloud-controller-.*"} == 1)
           for: 15m

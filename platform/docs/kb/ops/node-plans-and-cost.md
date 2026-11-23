@@ -35,7 +35,9 @@ where:
 - The plan change replaces `default` under `create_before_destroy`: the
   new group comes up before the old one is deleted. The old group's last node
   hung on `run-demo`'s single-instance database
-  ([cnpg-single-instance-pdb](../data/cnpg-single-instance-pdb.md)).
+  ([cnpg-single-instance-pdb](../data/cnpg-single-instance-pdb.md)), and
+  `MaxcloudReconcileErrors` fired while pods moved
+  ([reconcile-errors-during-node-replacement](../monitoring/reconcile-errors-during-node-replacement.md)).
 
 **Gotcha: a node group can't be scaled to 0.** The provider (v5.48.0)
 accepts `node_count = 0`, but the PATCH it sends is `{}`: UpCloud's Go

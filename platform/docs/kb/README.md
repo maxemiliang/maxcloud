@@ -68,6 +68,7 @@ Procedures live in [`../runbooks/`](../runbooks/) and the README, not here.
 - [Grafana 13 needs a memory limit above 384Mi](monitoring/grafana-memory.md)
 - [kube_namespace_labels only has allow-listed labels](monitoring/dashboard-namespace-variable.md)
 - [FluxResourceNotReady re-fired while the failure never changed](monitoring/flux-alert-flapping.md): one-scrape `ready="Unknown"` blips reset the alert
+- [MaxcloudReconcileErrors fires during a node group replacement and clears by itself](monitoring/reconcile-errors-during-node-replacement.md): CNPG webhook timeouts while its operator moves
 - [App owners read their logs, metrics and alerts through the maxcloud controller, not from Loki or Prometheus](monitoring/apps-observability-api.md): TokenReview, SubjectAccessReview, the namespace fixed by the server; why not services/proxy
 
 ## ops
