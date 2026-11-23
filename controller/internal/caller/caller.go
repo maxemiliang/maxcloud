@@ -36,9 +36,10 @@ type User struct {
 }
 
 // Permission is one thing to check, as kubectl auth can-i would:
-// verb, resource (with subresource) and namespace.
+// verb, resource (with subresource), optionally one object's name, and
+// namespace.
 type Permission struct {
-	Verb, Group, Resource, Subresource, Namespace string
+	Verb, Group, Resource, Subresource, Name, Namespace string
 }
 
 func (p Permission) String() string {
@@ -48,6 +49,9 @@ func (p Permission) String() string {
 	}
 	if p.Group != "" {
 		r += "." + p.Group
+	}
+	if p.Name != "" {
+		r += " " + p.Name
 	}
 	return fmt.Sprintf("%s %s in namespace %s", p.Verb, r, p.Namespace)
 }
@@ -155,7 +159,7 @@ func (r *Reviewer) Allowed(ctx context.Context, u *User, p Permission) (bool, er
 	sar := &authzv1.SubjectAccessReview{Spec: authzv1.SubjectAccessReviewSpec{
 		User: u.Name, UID: u.UID, Groups: u.Groups, Extra: u.Extra,
 		ResourceAttributes: &authzv1.ResourceAttributes{
-			Namespace: p.Namespace, Verb: p.Verb, Group: p.Group, Resource: p.Resource, Subresource: p.Subresource,
+			Namespace: p.Namespace, Verb: p.Verb, Group: p.Group, Resource: p.Resource, Subresource: p.Subresource, Name: p.Name,
 		},
 	}}
 	if err := r.Client.Create(ctx, sar); err != nil {

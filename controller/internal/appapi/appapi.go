@@ -1,6 +1,8 @@
 // Package appapi lets an app's owners read what the platform knows about
 // their app and nothing else: its logs from Loki, its request and queue
-// metrics from Prometheus, and the platform's alerts about it. Loki and
+// metrics from Prometheus, and the platform's alerts about it. It also
+// lets them change the app's secrets, which are kept in OpenBao
+// (secrets.go). Loki and
 // Prometheus aren't multi-tenant, and app pods can't reach them, so the
 // controller asks them on the caller's behalf, with the app's namespace
 // fixed by the server:
@@ -9,17 +11,21 @@
 //     the API server accepts (a TokenReview, package caller);
 //  2. that user must have a permission in the app's namespace that only
 //     its owners and admins have (a SubjectAccessReview): get pods/log for
-//     logs, list pods for metrics and alerts;
+//     logs, list pods for metrics and alerts, get (to list) or update (to
+//     change) the Secret app-secrets for secrets;
 //  3. the namespace must be an app's (run.gronblom.dev/tenant);
 //  4. every query is built here, with namespace="<app>" in each selector.
 //     The client picks a time range and filters within the app, never the
 //     query.
 //
-// Routes, all GET, JSON:
+// Routes, JSON:
 //
-//	/api/v1/apps/{app}/logs     ?since=1h&until=...&limit=1000&pod=<regex>&container=<name>&all=true
-//	/api/v1/apps/{app}/metrics  ?window=1h
-//	/api/v1/apps/{app}/alerts
+//	GET    /api/v1/apps/{app}/logs     ?since=1h&until=...&limit=1000&pod=<regex>&container=<name>&all=true
+//	GET    /api/v1/apps/{app}/metrics  ?window=1h
+//	GET    /api/v1/apps/{app}/alerts
+//	GET    /api/v1/apps/{app}/secrets
+//	PUT    /api/v1/apps/{app}/secrets/{name}
+//	DELETE /api/v1/apps/{app}/secrets/{name}
 package appapi
 
 import (
@@ -57,7 +63,8 @@ const (
 )
 
 // Handler serves the routes. Logs need Loki; metrics and alerts need
-// Prometheus. A route whose backend isn't configured answers 404.
+// Prometheus; secrets need OpenBao. A route whose backend isn't
+// configured answers 404.
 type Handler struct {
 	Reviewer *caller.Reviewer
 	// Reader reads namespaces and PrometheusRules (uncached: the manager's
@@ -76,6 +83,14 @@ type Handler struct {
 	// MaxConcurrent queries to Loki and Prometheus at once (default 4);
 	// more wait for a slot.
 	MaxConcurrent int
+	// Secrets is OpenBao's KV, where apps' secrets are (secrets.go). Nil
+	// turns the secrets routes off.
+	Secrets SecretStore
+	// Writer annotates ExternalSecrets, so ESO syncs a change right away.
+	Writer client.Writer
+	// SyncTimeout is how long a change waits for the Secret to have it
+	// (default 30s); SyncPoll how often it looks (default 500ms).
+	SyncTimeout, SyncPoll time.Duration
 
 	mux   *http.ServeMux
 	slots chan struct{}
@@ -90,6 +105,9 @@ func (h *Handler) Features() []string {
 	}
 	if h.Prometheus != "" {
 		f = append(f, FeatureMetrics, FeatureAlerts)
+	}
+	if h.Secrets != nil {
+		f = append(f, FeatureSecrets)
 	}
 	return f
 }
@@ -118,6 +136,11 @@ func (h *Handler) init() {
 	if h.Prometheus != "" {
 		h.mux.HandleFunc("GET "+Prefix+"{app}/metrics", h.metrics)
 		h.mux.HandleFunc("GET "+Prefix+"{app}/alerts", h.alerts)
+	}
+	if h.Secrets != nil {
+		h.mux.HandleFunc("GET "+Prefix+"{app}/secrets", h.listSecrets)
+		h.mux.HandleFunc("PUT "+Prefix+"{app}/secrets/{name}", h.putSecret)
+		h.mux.HandleFunc("DELETE "+Prefix+"{app}/secrets/{name}", h.deleteSecret)
 	}
 }
 
@@ -169,7 +192,8 @@ func (h *Handler) fail(w http.ResponseWriter, r *http.Request, err error) {
 }
 
 // authorize checks the caller and returns the app (its namespace).
-func (h *Handler) authorize(r *http.Request, verb, resource, subresource string) (string, error) {
+// p's Namespace is set to the app's.
+func (h *Handler) authorize(r *http.Request, p caller.Permission) (string, error) {
 	app := r.PathValue("app")
 	if len(app) > 63 || !appNameRe.MatchString(app) {
 		return "", errorf(http.StatusBadRequest, "%q isn't an app name", app)
@@ -182,7 +206,7 @@ func (h *Handler) authorize(r *http.Request, verb, resource, subresource string)
 	if err != nil {
 		return "", err
 	}
-	p := caller.Permission{Verb: verb, Resource: resource, Subresource: subresource, Namespace: app}
+	p.Namespace = app
 	ok, err := h.Reviewer.Allowed(ctx, u, p)
 	if err != nil {
 		return "", err

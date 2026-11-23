@@ -17,7 +17,12 @@
 //	MAXCLOUD_DOMAINS_GATEWAY     namespace/gateway apps' custom domains attach to (default traefik/public)
 //	MAXCLOUD_DOMAINS_ALLOWLIST   ConfigMap in POD_NAMESPACE: the hostnames each app may have (default maxcloud-domains)
 //	MAXCLOUD_REGISTRY_BUCKET     where the app registry's in-cluster entries are copied (default maxcloud-registry)
-//	MAXCLOUD_SECRETS_AGE_KEY     age identity (AGE-SECRET-KEY-1...): turns on the apps' secrets backup (off if unset)
+//	MAXCLOUD_SECRETS_AGE_KEY     age identity (AGE-SECRET-KEY-1...): turns on the apps' secrets backup (off if unset, or with OpenBao)
+//	MAXCLOUD_OPENBAO_ADDR        OpenBao's URL (https://openbao.openbao.svc:8200): apps' secrets live there, and the apps API serves them (off if unset)
+//	MAXCLOUD_OPENBAO_CACERT      file with the CA certificate OpenBao's TLS certificate is signed by (default: the system's CAs)
+//	MAXCLOUD_OPENBAO_ROLE        Kubernetes auth role to log in as (default controller)
+//	MAXCLOUD_OPENBAO_AUTH_MOUNT  the Kubernetes auth method's mount (default kubernetes)
+//	MAXCLOUD_OPENBAO_KV_MOUNT    the KV v2 mount apps' secrets are in, at <namespace>/app-secrets (default apps)
 //	MAXCLOUD_IMAGE_REGISTRY      the maxcloud registry's host: apps get pull credentials for it (off if unset)
 //	MAXCLOUD_API_SERVER          the API server's external URL: turns on the discovery document (off if unset)
 //	MAXCLOUD_DISCOVERY_ADDR      where that's served (default :8082)
@@ -29,6 +34,7 @@
 //	MAXCLOUD_GATEWAY_USER_PREFIX what the API server puts before a person's username (default authelia:)
 //	MAXCLOUD_LOKI_URL            Loki's base URL: turns on apps' logs (/api/v1/apps/ on the API gateway, so it needs MAXCLOUD_GATEWAY_URL)
 //	MAXCLOUD_PROMETHEUS_URL      Prometheus's base URL: turns on apps' metrics and alerts (likewise)
+//	                             (apps' secrets in the apps API likewise need MAXCLOUD_GATEWAY_URL)
 //	MAXCLOUD_ALERT_RULE_NAMESPACES  namespaces whose PrometheusRules' alerts apps see (default monitoring)
 //	AWS_ACCESS_KEY_ID            the controller's own S3 user
 //	AWS_SECRET_ACCESS_KEY
@@ -65,6 +71,7 @@ import (
 	"github.com/maxemiliang/maxcloud/controller/internal/discovery"
 	"github.com/maxemiliang/maxcloud/controller/internal/gateway"
 	"github.com/maxemiliang/maxcloud/controller/internal/objectstorage"
+	"github.com/maxemiliang/maxcloud/controller/internal/openbao"
 )
 
 // Version is set at build time.
@@ -78,6 +85,8 @@ type config struct {
 	domainsGateway, domainsAllowlist                                   string
 	registryBucket                                                     string
 	secretsKey                                                         *age.X25519Identity
+	openbaoAddr, openbaoCACert, openbaoRole, openbaoAuthMount          string
+	openbaoKVMount                                                     string
 	apiServer, discoveryAddr, oidcIssuer, oidcClientID, minMcloud      string
 	gatewayURL, gatewayAddr, gatewayUserPrefix                         string
 	imageRegistry, zotNamespace                                        string
@@ -112,6 +121,20 @@ func configFromEnv() (config, error) {
 			return c, errors.New("MAXCLOUD_SECRETS_AGE_KEY: not an age X25519 identity (AGE-SECRET-KEY-1...)")
 		}
 		c.secretsKey = id
+	}
+	c.openbaoAddr = strings.TrimRight(os.Getenv("MAXCLOUD_OPENBAO_ADDR"), "/")
+	c.openbaoCACert = os.Getenv("MAXCLOUD_OPENBAO_CACERT")
+	for _, v := range []struct {
+		dst       *string
+		name, def string
+	}{
+		{&c.openbaoRole, "MAXCLOUD_OPENBAO_ROLE", "controller"},
+		{&c.openbaoAuthMount, "MAXCLOUD_OPENBAO_AUTH_MOUNT", "kubernetes"},
+		{&c.openbaoKVMount, "MAXCLOUD_OPENBAO_KV_MOUNT", "apps"},
+	} {
+		if *v.dst = strings.Trim(os.Getenv(v.name), "/"); *v.dst == "" {
+			*v.dst = v.def
+		}
 	}
 	c.apiServer = strings.TrimRight(os.Getenv("MAXCLOUD_API_SERVER"), "/")
 	if c.discoveryAddr = os.Getenv("MAXCLOUD_DISCOVERY_ADDR"); c.discoveryAddr == "" {
@@ -349,17 +372,34 @@ func run(metricsAddr, probeAddr string, leaderElect bool) error {
 		return fmt.Errorf("domain controller: %w", err)
 	}
 
-	// Apps' secrets live only in the cluster: an encrypted copy of each goes
-	// to the registry's bucket, restored after the registry's entries.
+	// Apps' secrets. With OpenBao they live there, and External Secrets
+	// Operator makes each app's Secret app-secrets from them; the controller
+	// copies over the Secrets of apps that OpenBao has nothing for yet.
+	// Without it they live only in the cluster: an encrypted copy of each
+	// goes to the registry's bucket, restored after the registry's entries.
+	var bao *openbao.Client
 	var secrets *controller.SecretBackup
-	if cfg.secretsKey != nil {
+	switch {
+	case cfg.openbaoAddr != "":
+		bao, err = openbao.New(cfg.openbaoAddr, cfg.openbaoCACert)
+		if err != nil {
+			return fmt.Errorf("MAXCLOUD_OPENBAO_CACERT: %w", err)
+		}
+		bao.Role, bao.AuthMount, bao.KVMount = cfg.openbaoRole, cfg.openbaoAuthMount, cfg.openbaoKVMount
+		if err := (&controller.SecretImport{
+			Client: mgr.GetClient(), APIReader: mgr.GetAPIReader(), KV: bao,
+		}).SetupWithManager(mgr); err != nil {
+			return fmt.Errorf("app secrets import: %w", err)
+		}
+		ctrl.Log.WithName("setup").Info("apps' secrets are in OpenBao; the age copies aren't made or restored", "openbao", cfg.openbaoAddr)
+	case cfg.secretsKey != nil:
 		secrets = &controller.SecretBackup{
 			Client: mgr.GetClient(), Storage: storage, Objects: s3c, Bucket: cfg.registryBucket, Identity: cfg.secretsKey,
 		}
 		if err := secrets.SetupWithManager(mgr); err != nil {
 			return fmt.Errorf("app secrets backup: %w", err)
 		}
-	} else {
+	default:
 		ctrl.Log.WithName("setup").Info("MAXCLOUD_SECRETS_AGE_KEY unset: apps' secrets aren't backed up")
 	}
 	// Their plain variables (mcloud env set) too, as JSON: no key needed.
@@ -367,28 +407,36 @@ func run(metricsAddr, probeAddr string, leaderElect bool) error {
 	if err := env.SetupWithManager(mgr); err != nil {
 		return fmt.Errorf("app env backup: %w", err)
 	}
-	if err := (&controller.RegistryBackup{
+	registry := &controller.RegistryBackup{
 		Client: mgr.GetClient(), Storage: storage, Objects: s3c, Bucket: cfg.registryBucket, Secrets: secrets, Env: env,
-	}).SetupWithManager(mgr); err != nil {
+	}
+	if bao != nil {
+		registry.OpenBao = bao
+	}
+	if err := registry.SetupWithManager(mgr); err != nil {
 		return fmt.Errorf("registry backup: %w", err)
 	}
 
-	// Apps' logs, metrics and alerts, for their owners: served on the API
-	// gateway, so a request gets here only with a login that passed its
-	// check; the handler then asks who it is and what they may do in the
-	// app's namespace (TokenReview, SubjectAccessReview), and fixes the
-	// namespace in every query itself.
+	// Apps' logs, metrics, alerts and secrets, for their owners: served on
+	// the API gateway, so a request gets here only with a login that passed
+	// its check; the handler then asks who it is and what they may do in
+	// the app's namespace (TokenReview, SubjectAccessReview), and fixes the
+	// namespace in every query and OpenBao path itself.
 	var appsAPI *appapi.Handler
 	switch {
-	case cfg.lokiURL == "" && cfg.prometheusURL == "":
+	case cfg.lokiURL == "" && cfg.prometheusURL == "" && bao == nil:
 	case cfg.gatewayURL == "":
-		ctrl.Log.WithName("setup").Info("MAXCLOUD_LOKI_URL/MAXCLOUD_PROMETHEUS_URL need MAXCLOUD_GATEWAY_URL (the API gateway they're served on): apps' logs, metrics and alerts are off")
+		ctrl.Log.WithName("setup").Info("MAXCLOUD_LOKI_URL/MAXCLOUD_PROMETHEUS_URL/MAXCLOUD_OPENBAO_ADDR need MAXCLOUD_GATEWAY_URL (the API gateway the apps API is served on): apps' logs, metrics, alerts and secrets aren't served")
 	default:
 		appsAPI = &appapi.Handler{
 			Reviewer: &caller.Reviewer{Client: mgr.GetClient()},
 			Reader:   mgr.GetAPIReader(),
+			Writer:   mgr.GetClient(),
 			Loki:     cfg.lokiURL, Prometheus: cfg.prometheusURL,
 			RuleNamespaces: cfg.alertRuleNamespaces,
+		}
+		if bao != nil {
+			appsAPI.Secrets = bao
 		}
 		appsAPI.Init()
 	}
@@ -402,8 +450,8 @@ func run(metricsAddr, probeAddr string, leaderElect bool) error {
 		if cfg.minMcloud != "" {
 			doc.Mcloud = &discovery.Mcloud{MinVersion: cfg.minMcloud}
 		}
-		// Apps' logs, metrics and alerts are served on the API gateway;
-		// the document says where.
+		// Apps' logs, metrics, alerts and secrets are served on the API
+		// gateway; the document says where.
 		if appsAPI != nil {
 			doc.API = &discovery.API{Apps: cfg.gatewayURL + appapi.Prefix, Features: appsAPI.Features()}
 		}

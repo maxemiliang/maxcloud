@@ -9,6 +9,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/maxemiliang/maxcloud/controller/internal/caller"
 )
 
 // The window metrics are summed over: from 5 minutes to the 15 days
@@ -126,7 +128,7 @@ func (h *Handler) query(ctx context.Context, q string, at time.Time) ([]sample, 
 }
 
 func (h *Handler) metrics(w http.ResponseWriter, r *http.Request) {
-	app, err := h.authorize(r, "list", "pods", "")
+	app, err := h.authorize(r, caller.Permission{Verb: "list", Resource: "pods"})
 	if err != nil {
 		h.fail(w, r, err)
 		return
