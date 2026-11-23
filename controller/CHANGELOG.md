@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.15.0](https://github.com/maxemiliang/maxcloud/compare/controller/v0.14.0...controller/v0.15.0) (2026-11-23)
+
+
+### Features
+
+* **controller:** apps' secrets in OpenBao, written through the apps API ([540f95e](https://github.com/maxemiliang/maxcloud/commit/540f95ef8f9fb2db0916de4ba34b2d07195216ec))
+
 ## [0.14.0](https://github.com/maxemiliang/maxcloud/compare/controller/v0.13.0...controller/v0.14.0) (2026-11-17)
 
 
