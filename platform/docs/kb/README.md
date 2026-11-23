@@ -58,7 +58,7 @@ Procedures live in [`../runbooks/`](../runbooks/) and the README, not here.
 - [kustomize edit rewrites lists unindented](build-deploy/kustomize-edit-unindented-lists.md): "did not find expected key"
 - [Building with Paketo buildpacks: what apps need](build-deploy/buildpacks.md): TypeScript, Go, uid, which builder
 - [maxcloud runs its own registry (zot) instead of GHCR](build-deploy/own-image-registry.md): why, GHCR's limits, and how zot's OIDC logins behave
-- [maxcloud apps' secrets live in the cluster, not in git](build-deploy/maxcloud-secrets-in-cluster.md): why not SOPS, never deleted, migrate keeps Flux off
+- [maxcloud apps' secrets live in the cluster, not in git](build-deploy/maxcloud-secrets-in-cluster.md): why not SOPS; since 2026-11 in OpenBao, not the controller's copies
 - [maxcloud environments and previews are registry entries <app>--<env>, made only by the controller](build-deploy/maxcloud-environments-and-previews.md): naming, who can cause a preview, what it reaches, capacity, what was rejected
 - [mcloud build and dev, things that weren't obvious](build-deploy/mcloud-build-gotchas.md): Knative fieldRef, mise shims, buildx container builders, credential helpers
 - [App Kustomizations must not decrypt with the platform's age key](build-deploy/app-kustomizations-no-sops.md): a secretGenerator in an app repo would hand it any homelab secret

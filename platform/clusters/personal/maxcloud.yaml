@@ -24,6 +24,9 @@
 # From controller/v0.14.0: the API gateway (maxcloud-api.gronblom.dev, port
 # 8083) with the apps API behind it (logs, metrics, alerts for mcloud and
 # the console), and environments and previews (the Preview CRD).
+# From controller/v0.15.0: apps' secrets in OpenBao (MAXCLOUD_OPENBAO_ADDR in
+# infrastructure/controllers/maxcloud/config.yaml), written through the apps
+# API; the Deployment mounts trust-manager's ConfigMap openbao-ca.
 apiVersion: source.toolkit.fluxcd.io/v1
 kind: GitRepository
 metadata:
@@ -33,7 +36,7 @@ spec:
   interval: 1h
   url: https://github.com/maxemiliang/maxcloud.git
   ref:
-    tag: controller/v0.14.0
+    tag: controller/v0.15.0
   ignore: |
     /*
     !/controller/config/

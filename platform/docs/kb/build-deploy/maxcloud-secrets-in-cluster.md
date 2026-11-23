@@ -4,13 +4,22 @@ kind: decision
 area: build-deploy
 tags: [maxcloud, secrets, sops, age, mcloud]
 learned: 2026-11-06
-updated: 2026-11-08
+updated: 2026-11-22
 where:
   - infrastructure/controllers/maxcloud/kustomization.yaml
   - infrastructure/controllers/maxcloud/config.yaml
 ---
 
 # maxcloud apps' secrets live in the cluster, not in git
+
+**Since 2026-11-22** apps' secrets are in OpenBao at
+`apps/<namespace>/app-secrets`. `mcloud secrets` writes them through the
+API gateway, and ESO makes the Secret `app-secrets`
+([openbao-secrets](openbao-secrets.md)). With `MAXCLOUD_OPENBAO_ADDR` set,
+the controller makes no age copies and restores nothing; it copies each
+existing `app-secrets` into OpenBao once. What follows is the earlier
+design, which still applies to a controller without OpenBao, and why SOPS
+in app repos was dropped.
 
 **Decision (2026-11-06):** `mcloud secrets set` writes the Secret
 `app-secrets` in the app's namespace, for GitOps and direct apps alike.
