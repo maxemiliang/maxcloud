@@ -38,3 +38,15 @@ variable "age_key_path" {
   type        = string
   default     = "~/.config/sops/age/keys.txt"
 }
+
+variable "openbao_seal_key_path" {
+  description = "Path to OpenBao's static seal key (32 random bytes: openssl rand -out <path> 32). Becomes the Secret openbao/openbao-seal."
+  type        = string
+  default     = "~/.config/openbao/seal.key"
+}
+
+variable "openbao_seal_key_revision" {
+  description = "Bump to push a changed seal key file to the cluster (the Secret is write-only, so tofu can't see the change). Rotating the key also needs OpenBao's previous_key; see the README's Secrets section."
+  type        = number
+  default     = 1
+}

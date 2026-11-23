@@ -28,3 +28,12 @@ output "loki_secret_access_key" {
   value     = upcloud_managed_object_storage_user_access_key.loki.secret_access_key
   sensitive = true
 }
+
+output "openbao_backup_access_key_id" {
+  value = upcloud_managed_object_storage_user_access_key.openbao_backups.access_key_id
+}
+
+output "openbao_backup_secret_access_key" {
+  value     = upcloud_managed_object_storage_user_access_key.openbao_backups.secret_access_key
+  sensitive = true
+}
