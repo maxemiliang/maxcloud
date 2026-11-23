@@ -63,10 +63,6 @@ spec:
   # Ready only when everything it applied is healthy (Deployments rolled out,
   # HelmReleases installed), not just "kubectl apply succeeded".
   wait: true
-  decryption:
-    provider: sops
-    secretRef:
-      name: sops-age
 ---
 apiVersion: kustomize.toolkit.fluxcd.io/v1
 kind: Kustomization
@@ -96,7 +92,3 @@ spec:
     - apiVersion: operator.knative.dev/v1beta1
       kind: KnativeServing
       current: "status.conditions.exists(e, e.type == 'Ready' && e.status == 'True')"
-  decryption:
-    provider: sops
-    secretRef:
-      name: sops-age

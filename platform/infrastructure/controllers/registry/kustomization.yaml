@@ -6,7 +6,7 @@ resources:
   - namespace.yaml
   # AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY of the S3 user zot (tofu:
   # infra/storage); the README's "The image registry" writes it.
-  # Secret zot-s3: private/secrets/registry/zot-s3.sops.yaml.
+  # Secret zot-s3: from OpenBao, platform/registry/zot-s3 (secrets/registry.yaml).
   - deployment.yaml
   # zot reads the cluster's token signing keys (apps' pull tokens).
   - issuer-discovery.yaml

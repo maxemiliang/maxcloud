@@ -91,7 +91,7 @@ spec:
             summary: "The maxcloud controller's UpCloud token expires in {{ $value | humanizeDuration }}"
             description: >-
               Make a new token for the maxcloud_controller sub-account and
-              re-create infrastructure/controllers/maxcloud/controller-credentials.sops.yaml
+              write it to OpenBao (platform/maxcloud-system/maxcloud-controller)
               (homelab README, Procedures: "Renew the maxcloud controller's UpCloud token").
         # The instance is billed per started 250 GB.
         - alert: MaxcloudStorageNearNextStep

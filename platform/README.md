@@ -12,7 +12,7 @@ infra/
   bootstrap/    # one-off: object storage for state + restricted API sub-account (local state)
   cluster/      # network, NAT gateway, router, UKS cluster, node groups (s3 backend, encrypted state)
   cluster-auth/ # the API server's OIDC login through Authelia (scripts/cluster-auth.sh applies it)
-  flux/         # Flux Operator + FluxInstance + SOPS age key
+  flux/         # Flux Operator + FluxInstance, and OpenBao's bootstrap Secrets (seal key, backup S3 key)
   storage/      # backup and log buckets + their S3 users, and the maxcloud-apps instance; outlives the cluster (s3 backend, encrypted state)
 clusters/
   personal/     # Flux entry point: Kustomizations for infrastructure, apps, the maxcloud controller and the sandbox
@@ -26,6 +26,8 @@ sandbox/
 apps/
   <app>/        # in-repo apps (hello) and the platform's own apps' manifests (run-demo, console)
   maxcloud/     # app registry for the run platform: the ResourceSet, and entries kept in git (run-demo, console)
+secrets-store/  # OpenBao (where every secret lives), its database, PKI and config
+secrets/        # the platform's Secrets: one ExternalSecret each, values in OpenBao
 templates/
   run-app/      # starting point for an app repo on the run platform
 scripts/        # validate.sh, kb-check.sh, secret generators, developer.sh (who can log in), cluster-auth.sh, CRD schemas, the Cloudflare IP updater
@@ -35,10 +37,10 @@ docs/
 ```
 
 The platform lives in the maxcloud repo next to the code it runs. Its
-secrets and the write-ups of open security issues are in a private repo,
-checked out (optionally) as the `private/` submodule at the repo root:
-`private/secrets/` (what the `secrets` Flux Kustomization applies) and
-`private/docs/` (research reports and the kb entries that stay private).
+secrets live in OpenBao, never in git (see Secrets). The write-ups of open
+security issues are in a private repo, checked out (optionally) as the
+`private/` submodule at the repo root: `private/docs/` (research reports and
+the kb entries that stay private).
 
 ## Tooling
 
@@ -63,17 +65,48 @@ Renovate is self-hosted: it runs in this repo's GitHub Actions
 
 - Local credentials go in `.env` (gitignored, template in `.env.example`) or the
   system keyring (`upctl account login`).
-- Kubernetes Secrets are SOPS-encrypted with age, and live only in the
-  private repo (`private/secrets/<namespace>/*.sops.yaml`, listed in
-  `private/secrets/kustomization.yaml`). Never in this repo, which is public.
-  Rules are in [`.sops.yaml`](../.sops.yaml) (and the private repo's own copy).
-  To check it out once per clone:
-  `git submodule update --init --checkout private && git -C private switch main`.
-  Flux doesn't use the submodule: it reads the private repo's `main`
-  directly (`clusters/personal/secrets.yaml`), so the submodule's pinned
-  commit doesn't matter and `git status` ignores it.
-- The age private key lives at `~/.config/sops/age/keys.txt`, with a backup in a
-  password manager. It is never committed.
+- Every Kubernetes Secret the platform and its apps use comes from
+  **OpenBao** (`secrets-store/`, namespace `openbao`) through **External
+  Secrets Operator** (`infrastructure/controllers/external-secrets`): an
+  ExternalSecret names each Secret and where its values are. The values
+  live only in OpenBao, never in git:
+  - `platform/<namespace>/<secret>`: the platform's (Cloudflare tokens,
+    Authelia, Grafana, S3 keys, the maxcloud controller's credentials). The
+    ExternalSecrets are in `secrets/`. Admins only.
+  - `apps/<namespace>/app-secrets`: apps' (`mcloud secrets`), written by
+    the maxcloud controller for an app's owners; the ExternalSecret comes
+    from the registry (`apps/maxcloud/resourceset.yaml`).
+
+  Each namespace reads only its own path: its SecretStore logs in as its
+  own ServiceAccount `eso-reader`, and OpenBao's policy is keyed on the
+  namespace in that token. Why and how:
+  [openbao-secrets](docs/kb/build-deploy/openbao-secrets.md).
+- **Read or change a platform secret** with `scripts/bao.sh`, which runs
+  `bao` inside the OpenBao pod, logged in with your Authelia login (group
+  `admins`). Values go in on stdin, never on the command line:
+
+  ```fish
+  scripts/bao.sh kv get -mount=platform monitoring/grafana-oidc
+  printf %s $token | scripts/bao.sh kv patch -mount=platform external-dns/cloudflare-api-token api-token=-
+  kubectl -n external-dns annotate externalsecret cloudflare-api-token force-sync=(date +%s) --overwrite
+  ```
+
+  ESO updates the Secret within the hour by itself, or at once with
+  `force-sync`; what reads it at start needs a restart. A new platform
+  secret is `kv put` plus an ExternalSecret in `secrets/<namespace>.yaml`.
+  `scripts/bao.sh --break-glass` logs in with a ServiceAccount token
+  instead (cluster admins only), for when Authelia is down or not set up
+  yet: OpenBao has no recovery keys, so that's the way in.
+- **OpenBao's own two Secrets** can't come from OpenBao. `infra/flux` writes
+  them (`openbao.tf`): `openbao-seal`, the static seal key from
+  `~/.config/openbao/seal.key` (32 random bytes, `openssl rand -out <path>
+  32`), and `openbao-backup-s3`, the key its database backs up with. The
+  seal key is the one secret that matters: OpenBao's data and its backups
+  are encrypted with it. Keep it in the password manager. It is never
+  committed.
+- OpenBao's storage is the CloudNativePG cluster `openbao-db`, backed up to
+  `s3://pg-backups/openbao/` daily plus WAL. Building, rebuilding and
+  repairing it: [the runbook](docs/runbooks/openbao.md).
 
 ### Break-glass inventory
 
@@ -82,7 +115,7 @@ What must survive losing this laptop. Values live in the password manager, never
 | Secret | Where it's used | If lost |
 |---|---|---|
 | `TF_VAR_state_passphrase` | All tofu state (bootstrap, cluster, flux, storage) | State unreadable; rebuild with `tofu import` |
-| age private key | SOPS secrets in git, `sops-age` in the cluster | Every `*.sops.yaml` unreadable |
+| OpenBao seal key (`~/.config/openbao/seal.key`) | `openbao-seal` in the cluster; OpenBao's database and its backups | Every platform and app secret unreadable: set each one again |
 | `homelab_api` sub-account password | Minting API tokens | Reset it as the main account in the Hub |
 | UpCloud main account + 2FA recovery | Everything | Account recovery via UpCloud support |
 
@@ -92,10 +125,8 @@ Flux GitHub App private key (generate a new one in GitHub, then `tofu apply` in
 `infra/flux`) and the Renovate GitHub App private key (generate a new one, then
 `gh secret set RENOVATE_APP_PRIVATE_KEY`). Everything else (Cloudflare tokens,
 Telegram bot, Authelia, Grafana, S3 users for backups and logs, the maxcloud
-controller's token, S3 key and secrets backup key, the registry's S3 key) is
-in `*.sops.yaml` files, so the age key covers it. (Apps' own secrets live in
-their namespaces; the maxcloud controller keeps copies encrypted to its
-secrets backup key.) The `maxcloud_controller` sub-account's password is in
+controller's token and S3 key, the registry's S3 key, and apps' own secrets)
+is in OpenBao, whose backups the seal key opens. The `maxcloud_controller` sub-account's password is in
 the password manager. If it's lost, reset it as the main account; its
 cluster token expires after 364 days (`UPCLOUD_TOKEN_EXPIRES_AT` in its
 secret).
@@ -105,7 +136,7 @@ secret).
 | URL | What | Login |
 |---|---|---|
 | https://grafana.lab.gronblom.dev | Grafana: metrics (Prometheus), logs (Loki), dashboards | Authelia |
-| https://auth.lab.gronblom.dev | Authelia: SSO (OIDC), passkeys/TOTP | user in `authelia-users.sops.yaml` |
+| https://auth.lab.gronblom.dev | Authelia: SSO (OIDC), passkeys/TOTP | user in OpenBao, `platform/authelia/authelia-users` |
 | https://paja.lankkupelit.fi | Lankkupaja: run platform app `paja`, from its own repo (`deploy/maxcloud`) | the app's own |
 | https://hello.lab.gronblom.dev, https://hello.gronblom.dev | whoami test app | none |
 | https://hello--run-demo.makiya.dev | run platform smoke test: public Knative service (`apps/run-demo`) | none |
@@ -131,7 +162,7 @@ secret).
 1. Prereqs and repo skeleton
 2. `infra/bootstrap`: state bucket, restricted API sub-account
 3. `infra/cluster`: network, NAT, UKS, node group
-4. `infra/flux`: Flux Operator bootstrap, SOPS key
+4. `infra/flux`: Flux Operator bootstrap (OpenBao's seal key since 2026-11)
 5. Platform: Traefik, cert-manager, external-dns, hello
 6. kured
 7. CloudNativePG and backups (`infra/storage`)
@@ -146,6 +177,8 @@ secret).
     registry in the cluster, the maxcloud controller (buckets, databases,
     custom domains, secrets backups), its own image registry, and logins
     through Authelia.
+    (Since 2026-11 apps' secrets are in OpenBao instead of the controller's
+    backups; so are the platform's, which were SOPS files.)
 13. Security audit fixes (2026-11-06 to 2026-11-08): admission policies for
     what apps may make and route, an egress deny towards the platform, Flux
     in multitenant mode, app owners and registration IDs, and a Traefik L7
@@ -491,17 +524,15 @@ applies its manifests itself.
   [multitenant-lockdown](docs/kb/flux/multitenant-lockdown.md)).
 - **Write the image registry's S3 credentials** (after `tofu apply` in
   `infra/storage`, or after rotating the `zot` user's access key). In fish,
-  from `platform/`, with the `private/` submodule checked out; then commit
-  and push it in `private/`:
+  from `platform/`:
 
   ```fish
-  set out ../private/secrets/registry/zot-s3.sops.yaml
-  printf '%s\n' \
-    "AWS_ACCESS_KEY_ID="(tofu -chdir=infra/storage output -raw zot_access_key_id) \
-    "AWS_SECRET_ACCESS_KEY="(tofu -chdir=infra/storage output -raw zot_secret_access_key) \
-    | kubectl -n registry create secret generic zot-s3 \
-        --from-env-file=/dev/stdin --dry-run=client -o yaml \
-    | sops encrypt --filename-override $out > $out
+  begin
+    tofu -chdir=infra/storage output -json | yq -p json -o json \
+      '{"AWS_ACCESS_KEY_ID": .zot_access_key_id.value, "AWS_SECRET_ACCESS_KEY": .zot_secret_access_key.value}'
+  end | scripts/bao.sh kv put -mount=platform registry/zot-s3 -
+  kubectl -n registry annotate externalsecret zot-s3 force-sync=(date +%s) --overwrite
+  kubectl -n registry rollout restart deploy/zot
   ```
 - **Run an app on the run platform** with
   [mcloud](https://github.com/maxemiliang/maxcloud):
@@ -559,17 +590,17 @@ applies its manifests itself.
 - **Add a developer** (someone who may run apps on maxcloud, not the
   cluster). They need a username in Authelia and nothing else: no address
   in `admin_cidrs` (the API gateway), no kubeconfig to hand over (`mcloud
-  login` writes it). From `platform/`, with the `private/` submodule
-  checked out:
+  login` writes it). From `platform/`, logged in as an admin (`mcloud
+  login`):
 
   ```fish
   scripts/developer.sh add ann --name 'Ann Example' --email ann@example.com
   ```
 
-  It adds the user to `private/secrets/authelia/authelia-users.sops.yaml`
-  in the group `maxcloud-developers` and prints a first password, once
-  (`--hash` takes a hash the developer made themselves instead, `--admin`
-  makes an admin). Commit and push in `private/`, wait for Flux, then
+  It adds the user to Authelia's user file in OpenBao
+  (`platform/authelia/authelia-users`) in the group `maxcloud-developers`
+  and prints a first password, once (`--hash` takes a hash the developer
+  made themselves instead, `--admin` makes an admin). Then
   `kubectl -n authelia rollout restart deploy/authelia`: Authelia reads
   the file at start, and everyone logs in again. Send them the username
   and password and [Getting access](../docs/mcloud.md#getting-access).
@@ -582,51 +613,27 @@ applies its manifests itself.
   GitHub App, which `mcloud deploy` walks its owner through.
 - **Renew the maxcloud controller's UpCloud token** (alert
   `MaxcloudTokenExpiringSoon`; tokens last at most 365 days). In fish, from
-  `platform/` (the `private/` submodule checked out), with the `maxcloud_controller` sub-account's password from the
-  password manager:
+  `platform/`, logged in as an admin, with the `maxcloud_controller`
+  sub-account's password from the password manager:
 
   ```fish
   read -s -P 'maxcloud-controller password: ' -x SUB_PW
   set NAT_IP (tofu -chdir=infra/cluster output -raw nat_egress_ip)
-  set out ../private/secrets/maxcloud-system/controller-credentials.sops.yaml
-  set EXPIRES (date -u -d '+364 days' +%Y-%m-%dT%H:%M:%SZ)
-  set TOKEN (env UPCLOUD_USERNAME=maxcloud_controller UPCLOUD_PASSWORD=$SUB_PW \
+  set -x EXPIRES (date -u -d '+364 days' +%Y-%m-%dT%H:%M:%SZ)
+  set -x TOKEN (env UPCLOUD_USERNAME=maxcloud_controller UPCLOUD_PASSWORD=$SUB_PW \
     upctl account token create --name maxcloud-controller-cluster \
     --expires-at $EXPIRES --allow-ip-range $NAT_IP/32 -o json | jq -r .token)
-  # Keep the apps' secrets backup key (below) as it is.
-  set AGE_KEY (sops decrypt --extract '["data"]["MAXCLOUD_SECRETS_AGE_KEY"]' $out | base64 -d)
-  printf '%s\n' "UPCLOUD_TOKEN=$TOKEN" "UPCLOUD_TOKEN_EXPIRES_AT=$EXPIRES" \
-    "AWS_ACCESS_KEY_ID="(tofu -chdir=infra/storage output -raw maxcloud_controller_access_key_id) \
-    "AWS_SECRET_ACCESS_KEY="(tofu -chdir=infra/storage output -raw maxcloud_controller_secret_access_key) \
-    "MAXCLOUD_SECRETS_AGE_KEY=$AGE_KEY" \
-    | kubectl -n maxcloud-system create secret generic maxcloud-controller \
-        --from-env-file=/dev/stdin --dry-run=client -o yaml \
-    | sops encrypt --filename-override $out > $out
-  set -e TOKEN SUB_PW AGE_KEY
+  # patch: the S3 key and anything else in the secret stay as they are.
+  yq -n -o json '{"UPCLOUD_TOKEN": strenv(TOKEN), "UPCLOUD_TOKEN_EXPIRES_AT": strenv(EXPIRES)}' \
+    | scripts/bao.sh kv patch -mount=platform maxcloud-system/maxcloud-controller -
+  set -e TOKEN SUB_PW EXPIRES
+  kubectl -n maxcloud-system annotate externalsecret maxcloud-controller force-sync=(date +%s) --overwrite
   ```
 
-  Commit and push in `private/`; then restart the controller
+  Then restart the controller
   (`kubectl -n maxcloud-system rollout restart deploy/maxcloud-controller`)
   and delete the old token (`upctl account token list` /
   `upctl account token delete <id>`, as the sub-account).
-- **Give the maxcloud controller its secrets backup key** (once; apps'
-  secrets, `mcloud secrets set`, live in their namespaces, and the
-  controller keeps copies in the `maxcloud-registry` bucket encrypted to this
-  key, which it uses to put them back after a rebuild). In fish, from
-  `platform/` (the `private/` submodule checked out):
-
-  ```fish
-  set out ../private/secrets/maxcloud-system/controller-credentials.sops.yaml
-  set -x AGE_KEY (age-keygen 2>/dev/null | string match 'AGE-SECRET-KEY-*')
-  sops decrypt $out | yq '.data.MAXCLOUD_SECRETS_AGE_KEY = (strenv(AGE_KEY) | @base64)' \
-    | sops encrypt --filename-override $out > $out.new; and mv $out.new $out
-  set -e AGE_KEY
-  ```
-
-  Commit and push in `private/`; then restart the controller
-  (`kubectl -n maxcloud-system rollout restart deploy/maxcloud-controller`).
-  Losing the key loses only the copies: the controller makes new ones with a
-  new key.
 - **The web console** (`https://console.makiya.dev`,
   [the guide](../docs/console.md)): the platform's own app `console`, a
   registry entry in git (`apps/maxcloud/apps/console.yaml`) whose manifests
@@ -635,9 +642,9 @@ applies its manifests itself.
   ServiceAccount token and no rights
   ([web-console](docs/kb/ops/web-console.md)).
   - **Its cookie-sealing key** (once, after the first push has made the
-    namespace `console`; and again to log everyone out). It's an app secret,
-    not a SOPS file: the controller keeps a copy and puts it back after a
-    rebuild. In fish, logged in as an admin (`mcloud login`):
+    namespace `console`; and again to log everyone out). It's an app
+    secret, in OpenBao like any other app's. In fish, logged in as an
+    admin (`mcloud login`):
 
     ```fish
     openssl rand -base64 32 | mcloud secrets set CONSOLE_SESSION_KEY --app console
@@ -684,13 +691,15 @@ applies its manifests itself.
   certificate of its own first. Taking one off the list takes its route
   down within 5 minutes.
 - **Authelia credentials:** `scripts/authelia-secrets.sh` regenerates every
-  Authelia secret and the user. Afterwards, register passkeys/TOTP again; the
+  Authelia secret and the user, in OpenBao. On a new platform, before
+  anyone can log in, run it as `BAO_BREAK_GLASS=1 scripts/authelia-secrets.sh`. Afterwards, register passkeys/TOTP again; the
   one-time code is in
   `kubectl -n authelia exec deploy/authelia -- cat /data/notification.txt`.
 - **Grafana when Authelia is down:** set `auth.disable_login_form` and
   `auth.basic.enabled` back to their defaults in
   `infrastructure/controllers/monitoring/kube-prometheus-stack.yaml`, push, and
-  log in as `admin` (password in `grafana-admin.sops.yaml`).
+  log in as `admin` (password: `scripts/bao.sh --break-glass kv get
+  -mount=platform monitoring/grafana-admin`).
 - **A deploy is stuck:** `flux get all -A --status-selector ready=false`. A new
   commit interrupts a Kustomization that is waiting on health checks, so pushing
   a fix is enough.
