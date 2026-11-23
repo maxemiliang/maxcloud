@@ -1,11 +1,12 @@
 // Package appapi is mcloud's client for the platform's apps API: an app's
-// logs from Loki, its metrics from Prometheus, and the platform's alerts
-// about it. The maxcloud controller serves it next to the discovery
+// logs from Loki, its metrics from Prometheus, the platform's alerts
+// about it, and its secrets (kept in OpenBao). The maxcloud controller serves it next to the discovery
 // document (controller/internal/appapi), and answers only an app's owners
 // and admins: mcloud sends the same token its kubeconfig does.
 package appapi
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -23,6 +24,7 @@ const (
 	Logs    = "logs"
 	Metrics = "metrics"
 	Alerts  = "alerts"
+	Secrets = "secrets"
 )
 
 // ErrForbidden: the API refused (not one of the app's owners).
@@ -35,26 +37,53 @@ type Client struct {
 	HTTP *http.Client
 }
 
+// RequestError is the API refusing a request as asked (400, 404, 413):
+// Msg says why.
+type RequestError struct {
+	Status string
+	Msg    string
+}
+
+func (e *RequestError) Error() string { return e.Status + ": " + e.Msg }
+
 func (c *Client) get(ctx context.Context, app, what string, q url.Values, out any) error {
+	_, err := c.do(ctx, http.MethodGet, app, what, q, nil, out)
+	return err
+}
+
+// do sends a request about app and decodes a 200 or 202 answer into out;
+// it returns the status.
+func (c *Client) do(ctx context.Context, method, app, what string, q url.Values, in, out any) (int, error) {
 	u := strings.TrimRight(c.Base, "/") + "/" + url.PathEscape(app) + "/" + what
 	if len(q) > 0 {
 		u += "?" + q.Encode()
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	var reqBody io.Reader
+	if in != nil {
+		b, err := json.Marshal(in)
+		if err != nil {
+			return 0, err
+		}
+		reqBody = bytes.NewReader(b)
+	}
+	req, err := http.NewRequestWithContext(ctx, method, u, reqBody)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	req.Header.Set("Accept", "application/json")
+	if in != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
 	resp, err := c.HTTP.Do(req)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	defer resp.Body.Close()
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 64<<20))
 	if err != nil {
-		return err
+		return resp.StatusCode, err
 	}
-	if resp.StatusCode != http.StatusOK {
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusAccepted {
 		var e struct {
 			Error string `json:"error"`
 		}
@@ -66,13 +95,15 @@ func (c *Client) get(ctx context.Context, app, what string, q url.Values, out an
 		}
 		switch resp.StatusCode {
 		case http.StatusUnauthorized:
-			return fmt.Errorf("the platform didn't accept your login (%s): mcloud login, or a kubeconfig from it", e.Error)
+			return resp.StatusCode, fmt.Errorf("the platform didn't accept your login (%s): mcloud login, or a kubeconfig from it", e.Error)
 		case http.StatusForbidden:
-			return fmt.Errorf("%w: %s", ErrForbidden, e.Error)
+			return resp.StatusCode, fmt.Errorf("%w: %s", ErrForbidden, e.Error)
+		case http.StatusBadRequest, http.StatusNotFound, http.StatusRequestEntityTooLarge:
+			return resp.StatusCode, &RequestError{Status: resp.Status, Msg: e.Error}
 		}
-		return fmt.Errorf("%s: %s", resp.Status, e.Error)
+		return resp.StatusCode, fmt.Errorf("%s: %s", resp.Status, e.Error)
 	}
-	return json.Unmarshal(body, out)
+	return resp.StatusCode, json.Unmarshal(body, out)
 }
 
 // LogQuery picks lines: a range (Since before Until; zero Until is now),
@@ -199,4 +230,49 @@ type AlertsResponse struct {
 func (c *Client) Alerts(ctx context.Context, app string) (*AlertsResponse, error) {
 	var out AlertsResponse
 	return &out, c.get(ctx, app, "alerts", nil, &out)
+}
+
+// SecretsResponse lists an app's secrets, never their values. Version and
+// Updated are those of the one OpenBao secret that holds them all.
+type SecretsResponse struct {
+	App     string       `json:"app"`
+	Version int          `json:"version"`
+	Updated *time.Time   `json:"updated,omitempty"`
+	Secrets []SecretName `json:"secrets"`
+}
+
+// SecretName is one secret's name.
+type SecretName struct {
+	Name string `json:"name"`
+}
+
+// SecretChange is the answer to a change. Synced: the app's Secret
+// app-secrets has it already; if not, Message says why (the platform has
+// the change, and the Secret gets it on its next sync).
+type SecretChange struct {
+	App     string `json:"app"`
+	Name    string `json:"name"`
+	Version int    `json:"version"`
+	Synced  bool   `json:"synced"`
+	Message string `json:"message,omitempty"`
+}
+
+// ListSecrets lists an app's secrets.
+func (c *Client) ListSecrets(ctx context.Context, app string) (*SecretsResponse, error) {
+	var out SecretsResponse
+	return &out, c.get(ctx, app, "secrets", nil, &out)
+}
+
+// SetSecret sets one of an app's secrets.
+func (c *Client) SetSecret(ctx context.Context, app, name, value string) (*SecretChange, error) {
+	var out SecretChange
+	_, err := c.do(ctx, http.MethodPut, app, "secrets/"+url.PathEscape(name), nil, map[string]string{"value": value}, &out)
+	return &out, err
+}
+
+// UnsetSecret removes one of an app's secrets.
+func (c *Client) UnsetSecret(ctx context.Context, app, name string) (*SecretChange, error) {
+	var out SecretChange
+	_, err := c.do(ctx, http.MethodDelete, app, "secrets/"+url.PathEscape(name), nil, nil, &out)
+	return &out, err
 }

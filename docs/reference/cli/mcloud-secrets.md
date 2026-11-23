@@ -9,10 +9,15 @@ _Generated from the command's help in `internal/cli`._
 An app's secrets: environment variables for all its functions.
 
 Secrets reach every function of the app as environment variables (the
-SDKs' secret("NAME") reads one). They live in the Secret app-secrets in the
-app's namespace, for GitOps and direct apps alike: nothing to commit, no
-keys to hold. The maxcloud controller keeps an encrypted copy and puts it
-back after a cluster rebuild.
+SDKs' secret("NAME") reads one), from the Secret app-secrets in the app's
+namespace, for GitOps and direct apps alike: nothing to commit, no keys to
+hold.
+
+On a platform whose apps API offers secrets, they're kept in OpenBao, and
+mcloud changes them through the API (as you: the app's owners and admins
+may). External Secrets Operator copies them into the Secret, and mcloud
+waits for that. On older platforms mcloud edits the Secret itself, and
+the maxcloud controller keeps an encrypted copy of it.
 
 Setting or removing one restarts the app's HTTP and queue functions, so
 they have it right away (--no-restart: on their next start). Scheduled
