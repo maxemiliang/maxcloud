@@ -4,7 +4,7 @@ kind: gotcha
 area: build-deploy
 tags: [flux, sops, age, maxcloud, secrets, security]
 learned: 2026-11-07
-updated: 2026-11-07
+updated: 2026-11-22
 where:
   - apps/maxcloud/resourceset.yaml
 ---
@@ -28,5 +28,8 @@ multitenant mode stop it.
 cluster (`mcloud secrets`,
 [maxcloud-secrets-in-cluster](maxcloud-secrets-in-cluster.md)). If an app
 ever needs SOPS, it needs an age key of its own, never `sops-age`.
+Since 2026-11-22 there is no `sops-age` at all: the platform's secrets are
+in OpenBao too ([openbao-secrets](openbao-secrets.md)), and no Kustomization
+decrypts anything.
 
 See also: [admin-role-aggregates-controller-crds](../ops/admin-role-aggregates-controller-crds.md).
