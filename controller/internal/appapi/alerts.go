@@ -13,6 +13,8 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	"github.com/maxemiliang/maxcloud/controller/internal/caller"
 )
 
 // +kubebuilder:rbac:groups=monitoring.coreos.com,resources=prometheusrules,verbs=get;list
@@ -53,7 +55,7 @@ func belongsTo(labels map[string]string, app string) bool {
 }
 
 func (h *Handler) alerts(w http.ResponseWriter, r *http.Request) {
-	app, err := h.authorize(r, "list", "pods", "")
+	app, err := h.authorize(r, caller.Permission{Verb: "list", Resource: "pods"})
 	if err != nil {
 		h.fail(w, r, err)
 		return

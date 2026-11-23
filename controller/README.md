@@ -9,7 +9,8 @@ Cloudflare gives a Worker its R2 bucket and D1 database:
   itself when its cluster is gone.
 
 Around those it also routes apps' custom domains, keeps copies of the app
-registry and of apps' secrets in a bucket, gives apps credentials for the
+registry and of apps' secrets in a bucket (or moves apps' secrets to
+OpenBao), gives apps credentials for the
 image registry, writes the registry's access rules, syncs GitOps apps'
 `maxcloud.yaml`, makes apps' environments and previews, and serves a
 discovery document for logging in.
@@ -302,9 +303,59 @@ error, retried), rather than being overwritten.
 
 ### App secrets
 
-mcloud keeps an app's secrets in the Secret `app-secrets` in its namespace,
-labelled `app.kubernetes.io/managed-by: mcloud`. The cluster holds the only
-copy, so with `MAXCLOUD_SECRETS_AGE_KEY` set (an age identity,
+Apps' secrets (`mcloud secrets`) reach their functions from the Secret
+`app-secrets` in the app's namespace. Where they're kept depends on
+`MAXCLOUD_OPENBAO_ADDR`.
+
+#### In OpenBao
+
+With `MAXCLOUD_OPENBAO_ADDR` set, an app's secrets live in OpenBao, in the
+KV v2 mount `MAXCLOUD_OPENBAO_KV_MOUNT` (default `kv`) at
+`<namespace>/app-secrets`, one KV secret for all of a namespace's secrets.
+External Secrets Operator makes the Secret from it: the app registry's
+ResourceSet gives every app namespace a ServiceAccount `eso-reader`, a
+SecretStore `openbao` and an ExternalSecret `app-secrets` (in the cluster's
+repo). The controller logs in to OpenBao with its ServiceAccount token
+(Kubernetes auth at `MAXCLOUD_OPENBAO_AUTH_MOUNT`, role
+`MAXCLOUD_OPENBAO_ROLE`, defaults `kubernetes` and `controller`), trusting
+the CA in `MAXCLOUD_OPENBAO_CACERT`. It logs in again two thirds into the
+token's lease, and once more if OpenBao answers 403.
+
+- **Changes go through the [apps API](#the-apps-api)** (`secrets` routes),
+  as the controller, for whoever RBAC lets update the Secret
+  `app-secrets` in the namespace. After a write the controller sets the
+  annotation `force-sync` on the ExternalSecret to the time, and waits up
+  to 30 seconds for ESO to sync: `status.syncedResourceVersion` (which
+  ESO sets from the ExternalSecret's generation, labels and annotations
+  after a successful sync only) has to change and `Ready` be `True`.
+- **Moving apps over:** when it starts, when a namespace becomes an
+  app's, and when an mcloud-labelled `app-secrets` changes, the controller
+  copies a namespace's `app-secrets` into OpenBao if OpenBao has nothing
+  at that path yet. The write is a check-and-set that only creates
+  (`cas=0`), so it never overwrites what's in OpenBao. A namespace without
+  the Secret gets an empty KV secret: ESO syncs an empty one without an
+  error, where a missing one fails the ExternalSecret (`SecretSyncedError`).
+  It reads the Secret straight from the API server, so one without
+  mcloud's label is copied too. A value that isn't valid UTF-8 is left out
+  (KV values are JSON strings), with an error in the log. Namespaces whose
+  app has no registry entry, or whose entry is being deleted, are skipped.
+- **Deleting the app's registry entry** deletes its KV secret with every
+  version (`apps/metadata/<app>/app-secrets`), in the same finalizer as the
+  copies below, so an app made later under the same name starts without
+  secrets.
+- **The age copies are off:** the controller neither writes
+  `secrets/<app>.age` nor restores the Secret from it, since ESO owns the
+  Secret now and a restore would fight it. OpenBao's own database backups
+  keep the secrets through a rebuild.
+
+The ExternalSecret keeps the label `app.kubernetes.io/managed-by: mcloud`
+on the Secret, so the controller's cache still sees it.
+
+#### In the cluster, with an encrypted copy
+
+Without OpenBao, mcloud keeps an app's secrets in the Secret `app-secrets`
+in its namespace, labelled `app.kubernetes.io/managed-by: mcloud`. The
+cluster holds the only copy, so with `MAXCLOUD_SECRETS_AGE_KEY` set (an age identity,
 `AGE-SECRET-KEY-1...`), the controller keeps one in the registry's bucket
 too: `secrets/<app>.age`, the Secret's data as JSON (`{"KEY":"value"}`),
 encrypted to that key. It writes the copy when the
@@ -531,11 +582,30 @@ pod-name regex and a container, never the query. Four queries run at a
 time; more wait. Errors are `{"error": "..."}` with 400, 401, 403, 404 or
 502.
 
+With OpenBao (`MAXCLOUD_OPENBAO_ADDR`), three more routes change an
+app's [secrets](#in-openbao). They need `get` (to list) or `update` (to
+change) on the Secret `app-secrets` in the namespace, checked by name:
+
+| Route | Body | Answers |
+| --- | --- | --- |
+| `GET secrets` | | `{"app", "version", "updated", "secrets": [{"name"}]}`: names, the KV secret's version and when it was written, never values |
+| `PUT secrets/<NAME>` | `{"value": "..."}` | `{"app", "name", "version", "synced", "message"}` |
+| `DELETE secrets/<NAME>` | | the same, or 404 if there's no such secret |
+
+A name must be an environment variable's (`A-Z`, `0-9`, `_`, not starting
+with a digit) and not one the platform sets (`DATABASE_URL`,
+`FUNCTION_TARGET`, `PORT`, `AWS_*`, `MAXCLOUD_*`, `K_*`); `internal/envname`
+holds the rules, and mcloud has a copy. A change is a check-and-set write
+of the whole KV secret, read again if someone wrote in between. It answers
+200 with `synced: true` once the Secret has it, or 202 with `synced: false`
+and a `message` if ESO didn't sync within 30 seconds (or there's no
+ExternalSecret yet): OpenBao has the change either way.
+
 Alerts from the app's own PrometheusRules aren't included: Prometheus
 doesn't keep their queries to the app's metrics. The discovery document
 lists what's on (`"api": {"apps": "https://<gateway>/api/v1/apps/",
-"features": ["logs", "metrics", "alerts"]}`), so mcloud knows whether and
-where to ask. Both need the gateway (`MAXCLOUD_GATEWAY_URL`). The token and permission checks
+"features": ["logs", "metrics", "alerts", "secrets"]}`), so mcloud knows whether and
+where to ask. All need the gateway (`MAXCLOUD_GATEWAY_URL`). The token and permission checks
 are `internal/caller`; the routes `internal/appapi`. Why it's built this
 way: the cluster repo's `docs/kb/monitoring/apps-observability-api.md`.
 
@@ -554,7 +624,8 @@ document. The cluster provides the namespace `maxcloud-system` and, in it:
   - `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`: the controller's own S3
     user, with full access to that instance (bucket policies);
   - optionally `MAXCLOUD_SECRETS_AGE_KEY`, which turns on the
-    [app secrets' copies](#app-secrets).
+    [app secrets' copies](#in-the-cluster-with-an-encrypted-copy) when
+    OpenBao isn't on.
 - ConfigMap `maxcloud-controller`: `MAXCLOUD_OBJECT_STORAGE_ID` (the
   instance's UUID), `MAXCLOUD_S3_ENDPOINT` (must start with `https://`) and
   optionally `MAXCLOUD_S3_REGION` (default `europe-1`),
@@ -585,6 +656,11 @@ one part:
 | `MAXCLOUD_LOKI_URL` | unset: off | Loki's URL: apps' logs in the [apps API](#the-apps-api) |
 | `MAXCLOUD_PROMETHEUS_URL` | unset: off | Prometheus's URL: apps' metrics and alerts in the apps API |
 | `MAXCLOUD_ALERT_RULE_NAMESPACES` | `monitoring` | comma-separated: whose PrometheusRules' alerts the apps API shows |
+| `MAXCLOUD_OPENBAO_ADDR` | unset: off | OpenBao's URL (`https://openbao.openbao.svc:8200`): [apps' secrets in OpenBao](#in-openbao), and the apps API's `secrets` routes |
+| `MAXCLOUD_OPENBAO_CACERT` | the system's CAs | a file with the CA that signed OpenBao's certificate |
+| `MAXCLOUD_OPENBAO_ROLE` | `controller` | the Kubernetes auth role it logs in as |
+| `MAXCLOUD_OPENBAO_AUTH_MOUNT` | `kubernetes` | the Kubernetes auth method's mount |
+| `MAXCLOUD_OPENBAO_KV_MOUNT` | `kv` | the KV v2 mount apps' secrets are in |
 | `MAXCLOUD_ENVIRONMENTS_MAX` | `3` | [environments](#environments-and-previews) per app |
 | `MAXCLOUD_PREVIEWS_MAX` | `6` | active previews on the whole platform |
 | `MAXCLOUD_PREVIEW_QUOTA` | `100m,512Mi,10,1Gi` | each preview's CPU, memory, pods and database size |

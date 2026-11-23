@@ -67,3 +67,15 @@ spec:
             readOnlyRootFilesystem: true
             capabilities:
               drop: [ALL]
+          volumeMounts:
+            - name: openbao-ca
+              mountPath: /etc/openbao
+              readOnly: true
+      volumes:
+        # OpenBao's CA, for MAXCLOUD_OPENBAO_CACERT=/etc/openbao/ca.crt
+        # (trust-manager puts the ConfigMap in every namespace). Optional: a
+        # cluster without OpenBao starts the same.
+        - name: openbao-ca
+          configMap:
+            name: openbao-ca
+            optional: true

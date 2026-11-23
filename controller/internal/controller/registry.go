@@ -53,6 +53,9 @@ type RegistryBackup struct {
 	// each Restore of the entries.
 	Secrets *SecretBackup
 	Env     *EnvBackup
+	// OpenBao, if set, keeps apps' secrets: an app's KV secret goes with
+	// its entry too.
+	OpenBao SecretKV
 }
 
 // +kubebuilder:rbac:groups=fluxcd.controlplane.io,resources=resourcesetinputproviders,verbs=get;list;watch;create;update;patch
@@ -93,6 +96,11 @@ func (r *RegistryBackup) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 		// only mcloud's entries have a copy of the entry itself.
 		for _, k := range []string{secretsKey(u.GetName()), envKey(u.GetName()), backupKey(u.GetName())} {
 			if err := r.Objects.DeleteObject(ctx, r.Bucket, k); err != nil {
+				return ctrl.Result{}, err
+			}
+		}
+		if r.OpenBao != nil {
+			if err := r.OpenBao.DeleteMetadata(ctx, SecretKVPath(u.GetName())); err != nil {
 				return ctrl.Result{}, err
 			}
 		}

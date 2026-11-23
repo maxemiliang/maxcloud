@@ -7,6 +7,8 @@ import (
 	"sort"
 	"strconv"
 	"time"
+
+	"github.com/maxemiliang/maxcloud/controller/internal/caller"
 )
 
 // Limits on a logs request: Loki keeps 30 days, and answers at most 5000
@@ -56,7 +58,7 @@ func logQuery(app, podRe, container string, all bool) string {
 }
 
 func (h *Handler) logs(w http.ResponseWriter, r *http.Request) {
-	app, err := h.authorize(r, "get", "pods", "log")
+	app, err := h.authorize(r, caller.Permission{Verb: "get", Resource: "pods", Subresource: "log"})
 	if err != nil {
 		h.fail(w, r, err)
 		return
