@@ -193,7 +193,7 @@ spec:
           {{ end }}
       alertmanagerSpec:
         # Mounted at /etc/alertmanager/secrets/<name>/<key>, read by the
-        # *_file settings above. From alertmanager-notifiers.sops.yaml.
+        # *_file settings above. From OpenBao (secrets/monitoring.yaml).
         secrets:
           - alertmanager-notifiers
         # Keeps silences and notification state across restarts; otherwise a
@@ -215,7 +215,7 @@ spec:
 
     grafana:
       # Grafana always needs a local admin user; its password (from
-      # grafana-admin.sops.yaml) can't be used to log in while the password
+      # OpenBao, platform/monitoring/grafana-admin) can't be used to log in while the password
       # login is disabled below. Break-glass if Authelia is down: set
       # auth.disable_login_form and auth.basic.enabled back to their defaults
       # in git, push, log in as admin.

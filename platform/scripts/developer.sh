@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Adds, removes and lists the people who can log in (Authelia's user file),
-# in private/secrets/authelia/authelia-users.sops.yaml: the private repo's
-# submodule at the repo root. Commit and push there afterwards; Flux applies
-# it, and Authelia reads the file when it starts:
+# in OpenBao at platform/authelia/authelia-users (through scripts/bao.sh).
+# External Secrets Operator turns it into the Secret authelia-users, and
+# Authelia reads the file when it starts:
 #   kubectl -n authelia rollout restart deploy/authelia
 # (everyone logs in again; passkeys and TOTP are kept).
 #
@@ -23,12 +23,12 @@
 # takes a one-time code Authelia "sends by email": into a file, here. code
 # prints the latest one (it reads the running Authelia; nothing changes).
 #
-# Needs sops (with the platform's age key), yq, kubectl and base64; add and
-# passwd without --hash also docker (for the authelia CLI) and openssl.
+# Needs mcloud (logged in as an admin), yq and kubectl; add and passwd
+# without --hash also docker (for the authelia CLI) and openssl.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-users_file=../private/secrets/authelia/authelia-users.sops.yaml
+path=authelia/authelia-users
 key=users_database.yml
 image=$(sed -n 's/^ *image: *\(ghcr\.io\/authelia\/authelia:[^ ]*\).*/\1/p' infrastructure/controllers/authelia/deployment.yaml | head -n1)
 
@@ -45,19 +45,24 @@ tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 db=$tmp/$key
 
+# Reads the file and its version from OpenBao (the first user comes from
+# scripts/authelia-secrets.sh).
 load() {
-  [[ -f $users_file ]] || die "$users_file is missing: git submodule update --init --checkout private (the first user comes from scripts/authelia-secrets.sh)"
-  sops decrypt --extract "[\"data\"][\"$key\"]" "$users_file" | base64 -d >"$db"
-  yq -e '.users | type == "!!map"' "$db" >/dev/null || die "$users_file has no users"
+  scripts/bao.sh kv get -mount=platform -format=json "$path" >"$tmp/kv.json" </dev/null ||
+    die "can't read platform/$path from OpenBao"
+  version=$(yq -p json -r '.data.metadata.version' "$tmp/kv.json")
+  KEY=$key yq -p json -r '.data.data[strenv(KEY)]' "$tmp/kv.json" >"$db"
+  rm -f "$tmp/kv.json"
+  yq -e '.users | type == "!!map"' "$db" >/dev/null || die "platform/$path has no users"
 }
 
-# Writes the Secret again with kubectl (nothing is sent to the cluster) and
-# encrypts it with the rules in .sops.yaml, as authelia-secrets.sh does.
+# Writes it back, only if nobody changed it since load (check-and-set),
+# and has ESO update the Secret now.
 save() {
-  kubectl -n authelia create secret generic authelia-users --from-file="$key=$db" --dry-run=client -o yaml |
-    sops encrypt --filename-override "$users_file" >"$tmp/out"
-  mv "$tmp/out" "$users_file"
-  echo "wrote $users_file" >&2
+  scripts/bao.sh kv put -mount=platform -cas="$version" "$path" "$key=-" <"$db" >/dev/null ||
+    die "writing platform/$path failed (changed by someone else since? run it again)"
+  kubectl -n authelia annotate externalsecret authelia-users force-sync="$(date +%s)" --overwrite >/dev/null
+  echo "wrote platform/$path" >&2
 }
 
 exists() { USERNAME=$1 yq -e '.users | has(strenv(USERNAME))' "$db" >/dev/null 2>&1; }
@@ -94,7 +99,7 @@ password_hash() {
 after() {
   cat >&2 <<EOF
 Next:
-  1. Commit and push in private/, and wait for Flux (flux get kustomization secrets).
+  1. kubectl -n authelia get externalsecret authelia-users   (SecretSynced, a few seconds)
   2. kubectl -n authelia rollout restart deploy/authelia
 EOF
 }

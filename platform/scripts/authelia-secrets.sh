@@ -1,40 +1,37 @@
 #!/usr/bin/env bash
-# Generates Authelia's secrets and its one user, and writes them SOPS-encrypted:
-#   private/secrets/authelia/authelia-secrets.sops.yaml  random keys + OIDC signing key
-#   private/secrets/authelia/authelia-users.sops.yaml    the user (argon2id password hash)
-#   private/secrets/monitoring/grafana-oidc.sops.yaml    Grafana's OIDC client secret
-# private/ is the private repo's submodule at the repo root; commit and push
-# there afterwards.
+# Generates Authelia's secrets and its one user, and writes them to OpenBao
+# (through scripts/bao.sh), where External Secrets Operator makes the Secrets:
+#   platform/authelia/authelia-secrets   random keys + OIDC signing key
+#   platform/authelia/authelia-users     the user (argon2id password hash)
+#   platform/monitoring/grafana-oidc     Grafana's OIDC client secret
 # Nothing secret is printed. Prompts for the user's details and password.
-# Needs docker (for the authelia CLI), openssl, kubectl and sops.
+# Needs docker (for the authelia CLI), openssl, yq, kubectl and mcloud
+# (logged in as an admin).
 #
-# Re-running replaces all three files: every session is logged out, and the
+# Re-running replaces all three: every session is logged out, and the
 # registered passkeys/TOTP become unreadable (new storage encryption key), so
 # they have to be registered again.
+#
+# On a brand-new platform there is no admin login yet (Authelia needs these
+# secrets first): write them with `kubectl exec` into openbao-0 as described
+# in the README's Secrets section ("bootstrapping Authelia").
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
 image=ghcr.io/authelia/authelia:4.39.28
-authelia_dir=../private/secrets/authelia
-monitoring_dir=../private/secrets/monitoring
-[[ -d ../private/secrets ]] || {
-  echo "../private/secrets is missing: git submodule update --init --checkout private" >&2
-  exit 1
-}
 
 authelia() { docker run --rm "$image" authelia "$@"; }
 rand() { openssl rand -hex 32; }
 # Value after "<label>: " in the authelia CLI's output.
 field() { sed -n "s/^$1: //p"; }
 
-# Builds a Secret manifest with kubectl (nothing is sent to the cluster) and
-# encrypts it with the rules in .sops.yaml.
-encrypt_secret() {
-  local namespace=$1 name=$2 out=$3
-  shift 3
-  kubectl -n "$namespace" create secret generic "$name" "$@" --dry-run=client -o yaml |
-    sops encrypt --filename-override "$out" >"$out"
-  echo "wrote $out"
+# Writes a JSON object of plain values from stdin to platform/<path>, and
+# has ESO update the Secret now.
+put() {
+  local namespace=$1 name=$2
+  scripts/bao.sh kv put -mount=platform "$namespace/$name" - >/dev/null
+  kubectl -n "$namespace" annotate externalsecret "$name" force-sync="$(date +%s)" --overwrite >/dev/null 2>&1 || true
+  echo "wrote platform/$namespace/$name"
 }
 
 tmp=$(mktemp -d)
@@ -71,16 +68,18 @@ client_digest=$(field Digest <<<"$client")
 
 openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out "$tmp/oidc-jwks-key.pem" 2>/dev/null
 
-encrypt_secret authelia authelia-secrets "$authelia_dir/authelia-secrets.sops.yaml" \
-  --from-literal=session-secret="$(rand)" \
-  --from-literal=storage-encryption-key="$(rand)" \
-  --from-literal=reset-password-jwt-secret="$(rand)" \
-  --from-literal=oidc-hmac-secret="$(rand)" \
-  --from-literal=grafana-client-secret-digest="$client_digest" \
-  --from-file=oidc-jwks-key.pem="$tmp/oidc-jwks-key.pem"
+# Values reach yq through the environment, never a command line.
+SESSION=$(rand) STORAGE=$(rand) RESET=$(rand) HMAC=$(rand) DIGEST=$client_digest PEM=$tmp/oidc-jwks-key.pem \
+  yq -n -o json '{
+    "session-secret": strenv(SESSION),
+    "storage-encryption-key": strenv(STORAGE),
+    "reset-password-jwt-secret": strenv(RESET),
+    "oidc-hmac-secret": strenv(HMAC),
+    "grafana-client-secret-digest": strenv(DIGEST),
+    "oidc-jwks-key.pem": load_str(strenv(PEM))
+  }' | put authelia authelia-secrets
 
-encrypt_secret authelia authelia-users "$authelia_dir/authelia-users.sops.yaml" \
-  --from-file=users_database.yml="$tmp/users_database.yml"
+USERS=$tmp/users_database.yml yq -n -o json '{"users_database.yml": load_str(strenv(USERS))}' |
+  put authelia authelia-users
 
-encrypt_secret monitoring grafana-oidc "$monitoring_dir/grafana-oidc.sops.yaml" \
-  --from-literal=client-secret="$client_secret"
+SECRET=$client_secret yq -n -o json '{"client-secret": strenv(SECRET)}' | put monitoring grafana-oidc

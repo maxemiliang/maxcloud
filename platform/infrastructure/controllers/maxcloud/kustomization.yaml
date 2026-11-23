@@ -8,11 +8,10 @@ resources:
   - config.yaml
   # UPCLOUD_TOKEN (sub-account maxcloud_controller, scoped to the
   # maxcloud-apps instance, usable only from the NAT egress IP),
-  # UPCLOUD_TOKEN_EXPIRES_AT, the controller's S3 key, and the apps' secrets
-  # backup key (MAXCLOUD_SECRETS_AGE_KEY). To renew the token: README,
-  # Procedures, "Renew the maxcloud controller's UpCloud token".
-  # The Secret maxcloud-controller holds them, from the private repo:
-  # private/secrets/maxcloud-system/controller-credentials.sops.yaml.
+  # UPCLOUD_TOKEN_EXPIRES_AT and the controller's S3 key. To renew the
+  # token: README, Procedures, "Renew the maxcloud controller's UpCloud
+  # token". The Secret maxcloud-controller holds them, from OpenBao
+  # (platform/maxcloud-system/maxcloud-controller, secrets/maxcloud-system.yaml).
   # Reading apps' maxcloud.yaml from Flux: network access and RBAC.
   - app-sync.yaml
   # Apps' environments and previews: the registry entries the controller
