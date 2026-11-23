@@ -1,0 +1,24 @@
+# OpenBao and its database, PKI and config (Flux Kustomization
+# secrets-store, clusters/personal/secrets-store.yaml).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - namespace.yaml
+  - rbac.yaml
+  - pki.yaml
+  - database.yaml
+  - release.yaml
+  - config.yaml
+  - networkpolicy.yaml
+configMapGenerator:
+  - name: openbao-config
+    namespace: openbao
+    files:
+      - config/configure.sh
+      - config/ns-reader.hcl
+      - config/controller.hcl
+      - config/admin.hcl
+  - name: openbao-config-env
+    namespace: openbao
+    literals:
+      - OIDC_ISSUER=https://auth.lab.gronblom.dev

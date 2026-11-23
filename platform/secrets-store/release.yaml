@@ -1,0 +1,205 @@
+# OpenBao: where the platform's and apps' secrets live
+# (private/docs/research/secrets-openbao-eso.md). One replica on the
+# official chart. External Secrets Operator reads from it; nothing outside
+# the cluster can reach it (no Service other than ClusterIP, no route).
+#
+# - Storage: the CNPG cluster openbao-db (database.yaml).
+# - Unseal: the static seal, a 32-byte key in Secret openbao-seal, made by
+#   infra/flux from ~/.config/openbao/seal.key. Without that key the data is
+#   unreadable, backups included, so the file is also in the password
+#   manager.
+# - Setup: on first start (empty storage) the `initialize` blocks below turn
+#   on the audit log and Kubernetes auth, and give the config Job (config.yaml)
+#   a login; the Job does everything else from config/. The root token is
+#   revoked after self-init, and no recovery keys exist: an admin's way in
+#   is the oidc login (scripts/bao.sh).
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: HelmRepository
+metadata:
+  name: openbao
+  namespace: openbao
+spec:
+  interval: 12h
+  url: https://openbao.github.io/openbao-helm
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: openbao
+  namespace: openbao
+spec:
+  interval: 1h
+  serviceAccountName: flux-helm # rbac.yaml
+  chart:
+    spec:
+      chart: openbao
+      version: "0.30.8" # OpenBao 2.7.3
+      sourceRef:
+        kind: HelmRepository
+        name: openbao
+  install:
+    remediation:
+      retries: 3
+  upgrade:
+    remediation:
+      retries: 3
+  values:
+    global:
+      tlsDisable: false
+    injector:
+      enabled: false
+    ui:
+      enabled: false
+    server:
+      # The chart's default, OnDelete, never rolls the pod on an upgrade.
+      updateStrategyType: RollingUpdate
+      # Storage is Postgres, not a volume.
+      dataStorage:
+        enabled: false
+      resources:
+        requests:
+          cpu: 20m
+          memory: 96Mi
+        limits:
+          memory: 256Mi
+      statefulSet:
+        securityContext:
+          pod:
+            runAsNonRoot: true
+            runAsUser: 100
+            runAsGroup: 1000
+            fsGroup: 1000
+            seccompProfile:
+              type: RuntimeDefault
+          container:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+      extraEnvironmentVars:
+        # For `bao` inside the pod (probes, kubectl exec).
+        BAO_CACERT: /openbao/tls/ca.crt
+        # The database's TLS: CNPG's own CA, checked against the -rw
+        # Service's name.
+        PGSSLMODE: verify-full
+        PGSSLROOTCERT: /openbao/db-ca/ca.crt
+      extraSecretEnvironmentVars:
+        # postgresql://openbao:…@openbao-db-rw.openbao:5432/openbao
+        - envName: BAO_PG_CONNECTION_URL
+          secretName: openbao-db-app
+          secretKey: uri
+      volumes:
+        - name: seal
+          secret:
+            secretName: openbao-seal
+            defaultMode: 0400
+        - name: tls
+          secret:
+            secretName: openbao-tls
+            defaultMode: 0400
+        - name: db-ca
+          secret:
+            secretName: openbao-db-ca
+            items:
+              - key: ca.crt
+                path: ca.crt
+        # readOnlyRootFilesystem: the chart's start script writes the
+        # rendered config to /tmp.
+        - name: tmp
+          emptyDir:
+            medium: Memory
+            sizeLimit: 1Mi
+      volumeMounts:
+        - name: seal
+          mountPath: /openbao/seal
+          readOnly: true
+        - name: tls
+          mountPath: /openbao/tls
+          readOnly: true
+        - name: db-ca
+          mountPath: /openbao/db-ca
+          readOnly: true
+        - name: tmp
+          mountPath: /tmp
+      standalone:
+        enabled: true
+        config: |
+          ui            = false
+          disable_mlock = true
+          api_addr      = "https://openbao.openbao.svc:8200"
+
+          listener "tcp" {
+            address         = "[::]:8200"
+            cluster_address = "[::]:8201"
+            tls_cert_file   = "/openbao/tls/tls.crt"
+            tls_key_file    = "/openbao/tls/tls.key"
+            telemetry {
+              unauthenticated_metrics_access = true
+            }
+          }
+
+          # connection_url comes from BAO_PG_CONNECTION_URL. OpenBao makes
+          # its tables on first start.
+          storage "postgresql" {
+            ha_enabled = "false"
+          }
+
+          seal "static" {
+            current_key_id = "1"
+            current_key    = "file:///openbao/seal/key"
+          }
+
+          telemetry {
+            prometheus_retention_time = "24h"
+            disable_hostname          = true
+          }
+
+          # Every request, with values HMACed, to stdout and so to Loki.
+          # OpenBao 2.x only takes audit devices from the config file; the
+          # API refuses them.
+          audit "file" "stdout" {
+            options {
+              file_path = "stdout"
+            }
+          }
+
+          # Self-init: runs once, on empty storage. If a request fails,
+          # OpenBao stays uninitialized with its root token already revoked:
+          # the only way out is to empty the database and start again (see
+          # the README's Secrets section).
+          initialize "config-login" {
+            request "enable-kubernetes" {
+              operation = "update"
+              path      = "sys/auth/kubernetes"
+              data      = { type = "kubernetes" }
+            }
+            request "kubernetes-config" {
+              operation = "update"
+              path      = "auth/kubernetes/config"
+              data      = { kubernetes_host = "https://kubernetes.default.svc" }
+            }
+            request "config-policy" {
+              operation = "update"
+              path      = "sys/policies/acl/config"
+              data = {
+                policy = <<-EOT
+                  path "sys/policies/acl/*" { capabilities = ["create", "read", "update", "delete", "list"] }
+                  path "sys/auth"           { capabilities = ["read"] }
+                  path "sys/auth/*"         { capabilities = ["create", "read", "update", "delete", "sudo"] }
+                  path "auth/*"             { capabilities = ["create", "read", "update", "delete", "list"] }
+                  path "sys/mounts"         { capabilities = ["read"] }
+                  path "sys/mounts/*"       { capabilities = ["create", "read", "update"] }
+                EOT
+              }
+            }
+            request "config-role" {
+              operation = "update"
+              path      = "auth/kubernetes/role/config"
+              data = {
+                bound_service_account_names      = ["openbao-config"]
+                bound_service_account_namespaces = ["openbao"]
+                token_policies                   = ["config"]
+                token_ttl                        = "15m"
+              }
+            }
+          }

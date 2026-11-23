@@ -1,0 +1,38 @@
+# Where ESO's pods may connect: the API server, cluster DNS and OpenBao,
+# nothing else. ESO acts from this namespace for every SecretStore, so a
+# store pointed somewhere else (a provider other than OpenBao, a URL inside
+# the cluster or the cloud's metadata service) gets nowhere. Ingress is left
+# open: the API server calls the webhook from the managed control plane,
+# whose addresses aren't ours to list.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: egress
+  namespace: external-secrets
+spec:
+  endpointSelector: {}
+  egress:
+    - toEntities:
+        - kube-apiserver
+    - toEndpoints:
+        # UKS labels CoreDNS k8s-app=coredns; upstream (and kind) kube-dns.
+        - matchExpressions:
+            - key: k8s:io.kubernetes.pod.namespace
+              operator: In
+              values: [kube-system]
+            - key: k8s:k8s-app
+              operator: In
+              values: [coredns, kube-dns]
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: ANY
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: openbao
+            app.kubernetes.io/name: openbao
+            component: server
+      toPorts:
+        - ports:
+            - port: "8200"
+              protocol: TCP

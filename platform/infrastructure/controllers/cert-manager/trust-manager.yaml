@@ -1,0 +1,50 @@
+# trust-manager: copies a CA certificate into a ConfigMap in every namespace.
+# Here only for OpenBao's private CA (secrets-store/pki.yaml): each
+# namespace's SecretStore checks OpenBao's certificate against its own copy,
+# ConfigMap `openbao-ca`, because a namespaced SecretStore can't read a CA
+# from another namespace. Its trust namespace (where Bundle sources must
+# live) is cert-manager, the chart's default.
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: OCIRepository
+metadata:
+  name: trust-manager
+  namespace: cert-manager
+spec:
+  interval: 12h
+  url: oci://quay.io/jetstack/charts/trust-manager
+  ref:
+    tag: v0.26.0
+  layerSelector:
+    mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
+    operation: copy
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: trust-manager
+  namespace: cert-manager
+spec:
+  interval: 1h
+  serviceAccountName: flux-helm # infrastructure/controllers/flux-helm.yaml
+  # Its webhook's certificate is a cert-manager Certificate.
+  dependsOn:
+    - name: cert-manager
+  chartRef:
+    kind: OCIRepository
+    name: trust-manager
+  install:
+    remediation:
+      retries: 3
+  upgrade:
+    remediation:
+      retries: 3
+  values:
+    # No public CA bundle: only our own CA is distributed.
+    defaultPackage:
+      enabled: false
+    resources:
+      requests:
+        cpu: 10m
+        memory: 32Mi
+      limits:
+        memory: 128Mi
