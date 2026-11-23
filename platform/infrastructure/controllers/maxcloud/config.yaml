@@ -51,9 +51,11 @@ data:
   MAXCLOUD_ENVIRONMENTS_MAX: "3"
   MAXCLOUD_PREVIEWS_MAX: "6"
   MAXCLOUD_PREVIEW_QUOTA: 100m,512Mi,10,1Gi
-  # v0.14.0: keeps an entry's owners when it changes the entry (older
-  # mcloud drops them, which admission only stops for developers).
-  MAXCLOUD_MIN_MCLOUD_VERSION: v0.14.0
+  # v0.18.0: `mcloud secrets` writes through the apps API (OpenBao, below).
+  # Older mcloud edits the Secret app-secrets directly, and ESO puts the old
+  # value back on its next sync. (v0.14.0 was the first to keep an entry's
+  # owners when it changes the entry.)
+  MAXCLOUD_MIN_MCLOUD_VERSION: v0.18.0
   # Apps' logs, metrics and alerts for their owners (mcloud logs --since,
   # mcloud metrics, mcloud alerts): the controller asks Loki and Prometheus
   # on the caller's behalf, after checking the caller's token and rights in
@@ -65,3 +67,14 @@ data:
   # docs/kb/monitoring/apps-observability-api.md.
   MAXCLOUD_LOKI_URL: http://loki.monitoring.svc.cluster.local:3100
   MAXCLOUD_PROMETHEUS_URL: http://kube-prometheus-stack-prometheus.monitoring.svc.cluster.local:9090
+  # Apps' secrets in OpenBao (platform/secrets-store), at
+  # apps/<namespace>/app-secrets, instead of the Secret plus an age-encrypted
+  # copy in maxcloud-registry: `mcloud secrets` goes through the apps API,
+  # and the controller writes for the caller after a SubjectAccessReview.
+  # On start it copies every existing app-secrets into OpenBao (never over
+  # a value already there). Needs a controller release with OpenBao support
+  # and the ExternalSecret app-secrets from the registry
+  # (apps/maxcloud/resourceset.yaml); the CA is trust-manager's ConfigMap,
+  # mounted by the controller's Deployment.
+  MAXCLOUD_OPENBAO_ADDR: https://openbao.openbao.svc:8200
+  MAXCLOUD_OPENBAO_CACERT: /etc/openbao/ca.crt

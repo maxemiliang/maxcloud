@@ -199,6 +199,70 @@ spec:
                       operator: In
                       values: [traefik, knative-serving, monitoring, cnpg-system, keda]
 
+    # The app's secrets (`mcloud secrets`): kept in OpenBao at
+    # apps/<namespace>/app-secrets, written by the maxcloud controller for
+    # the app's owners, and turned into the Secret app-secrets (envFrom in
+    # every function) by External Secrets Operator. ESO logs in as
+    # eso-reader, and OpenBao lets that login read only this namespace's
+    # path (platform/secrets-store/config/ns-reader.hcl). The ESO kinds
+    # aren't part of `admin`, so the app can't change these or make its own
+    # (infrastructure/controllers/external-secrets/release.yaml).
+    # deletionPolicy Merge: when the last secret is unset, the Secret is
+    # emptied too (Retain would keep the old values). The controller writes
+    # an empty path for a new app, so a missing one is only a brief error.
+    - apiVersion: v1
+      kind: ServiceAccount
+      metadata:
+        name: eso-reader
+        namespace: << inputs.name >>
+      automountServiceAccountToken: false
+    - apiVersion: external-secrets.io/v1
+      kind: SecretStore
+      metadata:
+        name: openbao
+        namespace: << inputs.name >>
+      spec:
+        provider:
+          vault:
+            server: https://openbao.openbao.svc:8200
+            # trust-manager's copy of OpenBao's CA (secrets-store/pki.yaml).
+            caProvider:
+              type: ConfigMap
+              name: openbao-ca
+              key: ca.crt
+            path: apps
+            version: v2
+            auth:
+              kubernetes:
+                mountPath: kubernetes
+                role: reader
+                serviceAccountRef:
+                  name: eso-reader
+    - apiVersion: external-secrets.io/v1
+      kind: ExternalSecret
+      metadata:
+        name: app-secrets
+        namespace: << inputs.name >>
+      spec:
+        # Changes made through mcloud are synced at once (the controller sets
+        # the force-sync annotation); this only catches anything missed.
+        refreshInterval: 1h
+        secretStoreRef:
+          kind: SecretStore
+          name: openbao
+        target:
+          name: app-secrets
+          creationPolicy: Owner
+          deletionPolicy: Merge
+          template:
+            metadata:
+              labels:
+                # mcloud and the controller look for Secrets with this label.
+                app.kubernetes.io/managed-by: mcloud
+        dataFrom:
+          - extract:
+              key: << inputs.name >>/app-secrets
+
     # The app's manifests are applied as this ServiceAccount: the built-in
     # `admin` role in its namespace (plus infrastructure/configs/run/rbac.yaml
     # and what Knative and KEDA aggregate into it), nothing elsewhere. `admin`
@@ -359,11 +423,10 @@ spec:
         serviceAccountName: << inputs.name >>-reconciler
         prune: true
         wait: true
-        # No SOPS decryption: sops-age is the platform's own key, and
-        # kustomize-controller decrypts a secretGenerator's files whole, so
-        # an app repo holding a copy of any *.sops.yaml from this repo would
-        # get its plaintext as a Secret in the app's namespace. Apps keep
-        # secrets in the cluster instead (mcloud secrets, app-secrets).
+        # No SOPS decryption, ever: a platform key here would hand any app
+        # repo the plaintext of whatever it lists under secretGenerator
+        # (docs/kb/build-deploy/app-kustomizations-no-sops.md). Apps' secrets
+        # are in OpenBao (mcloud secrets, the ExternalSecret app-secrets).
 
     # The app's open pull requests labelled `preview`, for its previews
     # (the maxcloud controller reads status.exportedInputs and makes a
