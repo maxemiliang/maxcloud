@@ -3,6 +3,7 @@ package kube
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -133,6 +134,25 @@ func (c *Client) SecretData(ctx context.Context, ns, name string) (map[string]st
 		out[k] = string(v)
 	}
 	return out, nil
+}
+
+// SecretFromExternalSecret: Secret name exists and an ExternalSecret owns
+// it (External Secrets Operator makes it from OpenBao), so a change made
+// to it directly would be overwritten on the next sync.
+func (c *Client) SecretFromExternalSecret(ctx context.Context, ns, name string) (bool, error) {
+	s, err := c.Core.CoreV1().Secrets(ns).Get(ctx, name, metav1.GetOptions{})
+	if apierrors.IsNotFound(err) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	for _, o := range s.OwnerReferences {
+		if o.Kind == "ExternalSecret" && strings.HasPrefix(o.APIVersion, "external-secrets.io/") {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // Marks on the app's secrets Secret and env ConfigMap: mcloud owns them

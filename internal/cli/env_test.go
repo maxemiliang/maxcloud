@@ -13,6 +13,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/fake"
 
+	"github.com/maxemiliang/maxcloud/internal/appapi"
 	"github.com/maxemiliang/maxcloud/internal/functions"
 	"github.com/maxemiliang/maxcloud/internal/kube"
 )
@@ -71,6 +72,8 @@ env:
 type envTest struct {
 	t    *testing.T
 	kube *kube.Client
+	// api, if set, is the platform's apps API.
+	api *appapi.Client
 }
 
 func newEnvTest(t *testing.T, project string, objs ...corev1.ConfigMap) *envTest {
@@ -81,6 +84,7 @@ func newEnvTest(t *testing.T, project string, objs ...corev1.ConfigMap) *envTest
 	}
 	t.Chdir(repo)
 	t.Setenv("MCLOUD_APP", "")
+	t.Setenv("MCLOUD_PLATFORM_URL", "off")
 	cs := fake.NewClientset()
 	for i := range objs {
 		cs.CoreV1().ConfigMaps(objs[i].Namespace).Create(context.Background(), &objs[i], metav1.CreateOptions{})
@@ -91,7 +95,7 @@ func newEnvTest(t *testing.T, project string, objs ...corev1.ConfigMap) *envTest
 func (e *envTest) run(stdin string, args ...string) (string, error) {
 	e.t.Helper()
 	var out bytes.Buffer
-	g := &globals{in: strings.NewReader(stdin), out: &out, errOut: io.Discard, plain: true, testKube: e.kube}
+	g := &globals{in: strings.NewReader(stdin), out: &out, errOut: io.Discard, plain: true, testKube: e.kube, testAppAPI: e.api}
 	cmd := newRoot(g)
 	cmd.SetArgs(args)
 	cmd.SetOut(io.Discard)
