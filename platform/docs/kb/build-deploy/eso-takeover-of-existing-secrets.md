@@ -8,7 +8,6 @@ updated: 2026-11-26
 where:
   - secrets/
   - apps/maxcloud/resourceset.yaml
-  - scripts/sops-to-bao.sh
 ---
 
 # ESO taking over existing Secrets keeps Flux's labels, and Merge empties one whose path is missing
@@ -21,8 +20,8 @@ Found in kind with ESO 2.15.0, while planning the move from SOPS
   the data entirely (keys missing in OpenBao go) and sets itself as owner,
   but it keeps the other labels, `kustomize.toolkit.fluxcd.io/name`
   included. When the old Kustomization stops listing that Secret, Flux
-  prunes it, and ESO makes it again a moment later. Hence
-  `scripts/sops-to-bao.sh` marks each Secret
+  prunes it, and ESO makes it again a moment later. Hence the migration
+  script (`scripts/sops-to-bao.sh`, since deleted) marked each Secret
   `kustomize.toolkit.fluxcd.io/prune=disabled` before the switch.
 - **A path that doesn't exist: an error with `Retain`, an empty Secret
   with `Merge`.** Either way the ExternalSecret reports

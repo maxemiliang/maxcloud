@@ -11,6 +11,9 @@ unreadable without it.
 
 ## 1. Migrate from SOPS (once, 2026-11)
 
+Done on 2026-11-26 and kept as a record. `scripts/sops-to-bao.sh` was
+deleted afterwards; git history still has it.
+
 Before this, the platform's Secrets came from SOPS files in the private
 repo (Flux Kustomization `secrets`), and apps' from `app-secrets` plus the
 controller's age copies. The change ships as separate commits, deployed in

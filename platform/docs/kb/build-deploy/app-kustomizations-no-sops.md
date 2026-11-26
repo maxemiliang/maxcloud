@@ -4,7 +4,7 @@ kind: gotcha
 area: build-deploy
 tags: [flux, sops, age, maxcloud, secrets, security]
 learned: 2026-11-07
-updated: 2026-11-22
+updated: 2026-11-26
 where:
   - apps/maxcloud/resourceset.yaml
 ---
@@ -15,8 +15,9 @@ where:
 (`private/docs/research/flux-multitenant.md`).
 
 **Cause:** the registry's per-app Kustomization had
-`decryption: {provider: sops, secretRef: {name: sops-age}}`. `sops-age` is
-the only age key, and it opens every platform secret (`private/secrets/`).
+`decryption: {provider: sops, secretRef: {name: sops-age}}`. `sops-age` was
+the only age key, and it opened every platform secret (then SOPS files in
+the private repo).
 kustomize-controller (v1.10.1) decrypts a `secretGenerator`'s SOPS files
 whole before building. The file isn't changed, so its MAC still matches.
 An app repo with a copy of any homelab secret file under `secretGenerator`
