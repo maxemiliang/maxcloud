@@ -64,7 +64,7 @@ Procedures live in [`../runbooks/`](../runbooks/) and the README, not here.
 - [App Kustomizations must not decrypt with the platform's age key](build-deploy/app-kustomizations-no-sops.md): a secretGenerator in an app repo would hand it any homelab secret
 - [Every secret lives in OpenBao; External Secrets Operator makes the Secrets](build-deploy/openbao-secrets.md): why not SOPS, how each namespace sees only its own path, what tenants can't touch
 - [OpenBao self-init can't enable an audit device, and a failed self-init needs empty storage](build-deploy/openbao-self-init-and-audit.md): "invalid request", no root token, no recovery keys
-- [ESO taking over existing Secrets keeps Flux's labels, and Retain never empties a Secret](build-deploy/eso-takeover-of-existing-secrets.md): prune during the switch, missing paths, force-sync
+- [ESO taking over existing Secrets keeps Flux's labels, and Merge empties one whose path is missing](build-deploy/eso-takeover-of-existing-secrets.md): prune during the switch, the 2026-11-26 data loss, force-sync
 
 ## monitoring
 
