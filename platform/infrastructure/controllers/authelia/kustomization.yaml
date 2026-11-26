@@ -4,8 +4,8 @@ namespace: authelia
 resources:
   - namespace.yaml
   # Secrets authelia-secrets and authelia-users (both written by
-  # scripts/authelia-secrets.sh) come from the private repo:
-  # private/secrets/authelia/.
+  # scripts/authelia-secrets.sh) come from OpenBao:
+  # secrets/authelia.yaml.
   - deployment.yaml
 configMapGenerator:
   # The generated name has a hash of configuration.yml in it, and the

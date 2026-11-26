@@ -45,8 +45,7 @@ spec:
     # The platform lives in the public maxcloud repo, so the sync needs no
     # credentials. The Secret flux-system (GitHub App: githubAppID /
     # githubAppInstallationOwner / githubAppPrivateKey, created by
-    # infra/flux, never committed) is for private sources: the private repo
-    # with the platform's secrets (secrets.yaml) and app repos.
+    # infra/flux, never committed) is for private sources: app repos.
     url: "https://github.com/maxemiliang/maxcloud.git"
     ref: "refs/heads/main"
     path: "platform/clusters/personal"
