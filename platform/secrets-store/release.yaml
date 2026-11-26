@@ -37,9 +37,15 @@ spec:
       sourceRef:
         kind: HelmRepository
         name: openbao
+  # OpenBao exits until its database (database.yaml) accepts connections,
+  # which on a new cluster or a restore takes a minute or more. The default
+  # strategy counts each crash as a failed install and gives up after the
+  # retries (seen on the first rollout: Stalled, RetriesExceeded). Retrying
+  # without an uninstall in between waits the database out.
   install:
-    remediation:
-      retries: 3
+    strategy:
+      name: RetryOnFailure
+      retryInterval: 1m
   upgrade:
     remediation:
       retries: 3

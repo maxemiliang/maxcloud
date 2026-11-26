@@ -144,6 +144,10 @@ same backup into `openbao-db-restore` next to the running one.
   `kubectl -n openbao delete cluster openbao-db` (its PVC goes with it).
   Flux makes a new one, and the next start runs self-init on empty
   storage. With data in it, never do this; restore from backup instead.
+- **HelmRelease `openbao` Stalled (`RetriesExceeded`):** an install that
+  gave up while the database was starting. `RetryOnFailure` should prevent
+  it; to retry at once: `flux reconcile helmrelease openbao -n openbao
+  --reset`.
 - **Sealed (`OpenBaoSealed`):** the key in Secret `openbao-seal` doesn't
   match the one the data was sealed with. Put the right file back
   (`tofu -chdir=infra/flux apply -var openbao_seal_key_revision=<n+1>`) and
