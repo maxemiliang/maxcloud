@@ -1,0 +1,116 @@
+<!--
+  ClickHouse server settings for claude-history, on top of the image's
+  config.xml. Sized for a 1.5 GiB container on a node that must also hold
+  everything else during a drain (docs/kb/ops/drain-cpu-budget.md), and for
+  a dataset of a few GB: the defaults assume a dedicated 16+ GB machine.
+-->
+<clickhouse>
+    <logger>
+        <level>information</level>
+        <!-- To stdout, for Loki. No log files on the volume. -->
+        <console>1</console>
+        <log remove="1"/>
+        <errorlog remove="1"/>
+    </logger>
+
+    <!-- HTTP (8123) for Vector, the probes and the admin's port-forward; native (9000) only
+         for clickhouse-client inside the pod (the NetworkPolicy lets no one
+         else reach it). Nothing else listens. -->
+    <mysql_port remove="1"/>
+    <postgresql_port remove="1"/>
+    <interserver_http_port remove="1"/>
+
+    <prometheus>
+        <endpoint>/metrics</endpoint>
+        <port>9363</port>
+        <metrics>true</metrics>
+        <events>true</events>
+        <asynchronous_metrics>true</asynchronous_metrics>
+    </prometheus>
+
+    <!-- Memory: the container limit is 1.5 GiB. A fixed cap: by default
+         (memory_worker_dynamic_hard_limit) ClickHouse recomputes it from
+         the cgroup's free memory, which counts the page cache that writing
+         parts leaves behind, and refused inserts at ~470 MiB while it
+         tracked under 200 MiB. The kernel reclaims that cache before the
+         container's limit. -->
+    <max_server_memory_usage>1288490188</max_server_memory_usage>
+    <memory_worker_dynamic_hard_limit>0</memory_worker_dynamic_hard_limit>
+    <mark_cache_size>67108864</mark_cache_size>
+    <index_mark_cache_size>16777216</index_mark_cache_size>
+    <uncompressed_cache_size>0</uncompressed_cache_size>
+    <index_uncompressed_cache_size>0</index_uncompressed_cache_size>
+    <primary_index_cache_size>16777216</primary_index_cache_size>
+    <query_condition_cache_size>16777216</query_condition_cache_size>
+    <mmap_cache_size>256</mmap_cache_size>
+    <compiled_expression_cache_size>16777216</compiled_expression_cache_size>
+
+    <!-- Threads: two cores, shared with everything else. -->
+    <concurrent_threads_soft_limit_num>2</concurrent_threads_soft_limit_num>
+    <max_concurrent_queries>20</max_concurrent_queries>
+    <!-- Merge and mutation slots: pool size x ratio = 8. The merge_tree
+         thresholds below must stay under that, or the server won't start
+         (their defaults assume the default 16 x 2). -->
+    <background_pool_size>4</background_pool_size>
+    <background_merges_mutations_concurrency_ratio>2</background_merges_mutations_concurrency_ratio>
+    <merge_tree>
+        <number_of_free_entries_in_pool_to_execute_mutation>4</number_of_free_entries_in_pool_to_execute_mutation>
+        <number_of_free_entries_in_pool_to_lower_max_size_of_merge>4</number_of_free_entries_in_pool_to_lower_max_size_of_merge>
+        <number_of_free_entries_in_pool_to_execute_optimize_entire_partition>4</number_of_free_entries_in_pool_to_execute_optimize_entire_partition>
+    </merge_tree>
+    <background_common_pool_size>2</background_common_pool_size>
+    <background_schedule_pool_size>8</background_schedule_pool_size>
+    <background_buffer_flush_schedule_pool_size>1</background_buffer_flush_schedule_pool_size>
+    <background_move_pool_size>1</background_move_pool_size>
+    <background_fetches_pool_size>1</background_fetches_pool_size>
+    <background_distributed_schedule_pool_size>1</background_distributed_schedule_pool_size>
+    <background_message_broker_schedule_pool_size>1</background_message_broker_schedule_pool_size>
+    <asynchronous_metrics_update_period_s>60</asynchronous_metrics_update_period_s>
+
+    <!--
+      Access is only what users.xml (users.d/claude-history.xml) says, from
+      git: no users or grants created with SQL, so nothing about access lives
+      only on the volume.
+    -->
+    <user_directories>
+        <local_directory remove="1"/>
+    </user_directories>
+
+    <!--
+      System logs. Most of them write every few seconds, which costs more CPU
+      and disk here than the data itself. Kept: query_log (who ran what) and
+      session_log (every login, failed ones included), as an audit trail,
+      and crash_log.
+    -->
+    <query_log>
+        <ttl>event_date + INTERVAL 30 DAY DELETE</ttl>
+    </query_log>
+    <session_log>
+        <database>system</database>
+        <table>session_log</table>
+        <partition_by>toYYYYMM(event_date)</partition_by>
+        <ttl>event_date + INTERVAL 90 DAY DELETE</ttl>
+        <flush_interval_milliseconds>7500</flush_interval_milliseconds>
+    </session_log>
+    <trace_log remove="1"/>
+    <query_thread_log remove="1"/>
+    <query_views_log remove="1"/>
+    <part_log remove="1"/>
+    <background_schedule_pool_log remove="1"/>
+    <text_log remove="1"/>
+    <metric_log remove="1"/>
+    <error_log remove="1"/>
+    <instrumentation_trace_log remove="1"/>
+    <query_metric_log remove="1"/>
+    <asynchronous_metric_log remove="1"/>
+    <iceberg_metadata_log remove="1"/>
+    <delta_lake_metadata_log remove="1"/>
+    <opentelemetry_span_log remove="1"/>
+    <processors_profile_log remove="1"/>
+    <asynchronous_insert_log remove="1"/>
+    <backup_log remove="1"/>
+    <blob_storage_log remove="1"/>
+    <aggregated_zookeeper_log remove="1"/>
+    <zookeeper_log remove="1"/>
+    <zookeeper_connection_log remove="1"/>
+</clickhouse>

@@ -51,6 +51,8 @@ Procedures live in [`../runbooks/`](../runbooks/) and the README, not here.
 - [maxcloud apps have owners, and their data belongs to one registration](data/maxcloud-app-owners-and-registrations.md): per-app owner bindings, admission, registration IDs, adopting old data
 - [Block storage: MaxIOPS for databases, Standard for the rest](data/block-storage-tiers.md): which class for which PVC, and why the classes sit with the controllers
 - [A single-instance CNPG cluster's PDB blocks every node drain](data/cnpg-single-instance-pdb.md): `ALLOWED DISRUPTIONS 0`, and `enablePDB: false`
+- [Claude Code history is raw transcript lines in ClickHouse, sent by Vector, readable by admins only](data/claude-history.md): why raw lines, tokens per message, who can reach it, Vector 0.57's gotchas
+- [ClickHouse in a 1.5 GiB container needs a fixed memory cap, small insert blocks and fewer merge slots](data/clickhouse-small-server.md): `memory limit exceeded` at 470 MiB, and a server that won't start
 
 ## build-deploy
 

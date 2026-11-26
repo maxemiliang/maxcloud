@@ -21,3 +21,15 @@ variable "loki_bucket" {
   type        = string
   default     = "loki"
 }
+
+variable "claude_history_bucket" {
+  description = "Bucket for the raw copy of Claude Code's transcripts (claude-history)."
+  type        = string
+  default     = "claude-history"
+}
+
+variable "claude_history_reader_key" {
+  description = "Give claude-history-reader an access key, for a restore. Apply without it afterwards to delete the key."
+  type        = bool
+  default     = false
+}

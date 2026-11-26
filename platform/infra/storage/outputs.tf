@@ -37,3 +37,25 @@ output "openbao_backup_secret_access_key" {
   value     = upcloud_managed_object_storage_user_access_key.openbao_backups.secret_access_key
   sensitive = true
 }
+
+output "claude_history_bucket" {
+  value = upcloud_managed_object_storage_bucket.claude_history.name
+}
+
+output "claude_history_writer_access_key_id" {
+  value = upcloud_managed_object_storage_user_access_key.claude_history_writer.access_key_id
+}
+
+output "claude_history_writer_secret_access_key" {
+  value     = upcloud_managed_object_storage_user_access_key.claude_history_writer.secret_access_key
+  sensitive = true
+}
+
+output "claude_history_reader_access_key_id" {
+  value = one(upcloud_managed_object_storage_user_access_key.claude_history_reader[*].access_key_id)
+}
+
+output "claude_history_reader_secret_access_key" {
+  value     = one(upcloud_managed_object_storage_user_access_key.claude_history_reader[*].secret_access_key)
+  sensitive = true
+}

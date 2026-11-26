@@ -1,0 +1,21 @@
+# claude-history: Claude Code's transcripts in ClickHouse. README, "Claude
+# Code history".
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: claude-history
+resources:
+  - namespace.yaml
+  # Secret clickhouse-users (the ingest user's password hash) comes from
+  # OpenBao through ESO: secrets/claude-history.yaml.
+  - clickhouse.yaml
+  - route.yaml
+  - networkpolicy.yaml
+  - servicemonitor.yaml
+configMapGenerator:
+  # A new name for each change (the hash suffix), so the StatefulSet's pod
+  # restarts with it.
+  - name: clickhouse-config
+    files:
+      - config/server.xml
+      - config/users.xml
+      - config/schema.sql

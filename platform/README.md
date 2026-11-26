@@ -23,6 +23,7 @@ sandbox/
   controllers/  # gVisor on the sandbox nodes (an installer DaemonSet), the agent-sandbox controller
   sessions/     # a sandbox namespace per user (ResourceSet): session limit, network policy, the session template; who may have one
   image/        # the image a session runs (Node, git, Claude Code); built by the repo's sandbox-image workflow
+claude-history/ # ClickHouse with Claude Code's transcripts, sent from the laptops by Vector (its own Flux Kustomization)
 apps/
   <app>/        # in-repo apps (hello) and the platform's own apps' manifests (run-demo, console)
   maxcloud/     # app registry for the run platform: the ResourceSet, and entries kept in git (run-demo, console)
@@ -144,6 +145,7 @@ secret).
 | https://console.makiya.dev | the web console: a developer's apps, read-only (`apps/console`, from the repo's `console/`) | Authelia, through OpenID Connect; each visitor's own rights |
 | https://maxcloud-api.gronblom.dev | the API gateway: the cluster's API server from any network, for mcloud and kubectl | an Authelia ID token (`mcloud login`) |
 | https://registry.gronblom.dev | maxcloud's container registry (zot) | an Authelia ID token (`mcloud credential`); admins only for now |
+| https://claude-history.gronblom.dev | claude-history: only Vector's inserts into ClickHouse (see Claude Code history) | ClickHouse user `ingest` (insert only) |
 
 - `*.makiya.dev` is maxcloud apps' domain (`<service>--<app>.makiya.dev`,
   public buckets). `*.gronblom.dev` is the platform's own (registry,
@@ -188,6 +190,85 @@ secret).
     their own Claude token, and Claude Code sessions that reach the
     internet but nothing in the cluster ([the guide](../docs/sandbox.md),
     [the platform side](docs/runbooks/sandbox-sessions.md)).
+15. Claude Code history: ClickHouse with every transcript line from the
+    laptops, sent by Vector, with a raw copy in Object Storage (see Claude
+    Code history).
+
+## Claude Code history
+
+Every line of every Claude Code transcript, from each laptop, in ClickHouse
+(`claude-history/`), to search and count. Vector on the laptops
+([dotfiles](https://github.com/maxemiliang/dotfiles): `claude-history/`)
+reads `~/.claude/projects/**/*.jsonl` and sends each line to ClickHouse and,
+as the backup, to the `claude-history` bucket (`infra/storage`). Restoring:
+[claude-history-restore](docs/runbooks/claude-history-restore.md). Why it's
+built this way: [claude-history](docs/kb/data/claude-history.md).
+
+**Who can do what.** The transcripts hold whatever went through a
+session: code, tool output, now and then a credential (Vector redacts the
+ones with a recognizable format). So:
+
+- From the internet, only inserts: the HTTPRoute passes Vector's one
+  INSERT and nothing else, as the `ingest` user, which ClickHouse lets
+  insert into `claude.events` and nothing more (no reads), with a quota.
+  ClickHouse gets only its password's hash (OpenBao
+  `platform/claude-history/clickhouse-users`, through ESO); the password
+  itself is at `platform/claude-history/laptop`, which no ExternalSecret
+  reads, and on the laptops. DNS-only, so TLS ends at Traefik, not at
+  Cloudflare.
+- Reading is the admin's: the `default` user, from the pod's localhost
+  only, so `kubectl exec` or `kubectl port-forward` in `claude-history`,
+  which only cluster admins may do. Not in Grafana: every Authelia user,
+  maxcloud developers included, can view Grafana, and Grafana OSS can't
+  hide a datasource from them.
+- NetworkPolicies: in, Traefik (8123) and Prometheus (9363); out, DNS only.
+- Users and grants come only from `config/users.xml` (in git): SQL-made
+  users are turned off. `system.session_log` keeps every login, failed ones
+  included, for 90 days; `system.query_log` every query for 30.
+- The volume is encrypted (UpCloud's encrypted MaxIOPS class); the bucket's
+  S3 users can't delete (writer: put only; reader: no key unless a restore
+  asks for one).
+
+**Querying.** ClickHouse's SQL page, in the browser:
+
+```fish
+kubectl -n claude-history port-forward sts/clickhouse 8123 &
+xdg-open http://localhost:8123/play   # user default, no password
+```
+
+or `kubectl -n claude-history exec -it sts/clickhouse -- clickhouse-client`.
+`claude.events` is a row per transcript line (`raw`, plus columns read from
+it: `session_id`, `project`, `ts`, `type`, `model`, tokens, `tool_names`,
+`text` for search); `claude.sessions` a row per session, `claude.api_calls`
+a row per API response, with its tokens counted once.
+
+```sql
+-- Sessions this week
+SELECT started, project, title, prompts, models FROM claude.sessions
+WHERE started > now() - INTERVAL 7 DAY ORDER BY started DESC;
+
+-- Where a word came up (whole words; the text index makes this fast)
+SELECT ts, project, type, substring(text, 1, 200) FROM claude.events
+WHERE hasToken(text, 'ClickHouse') ORDER BY ts DESC LIMIT 20;
+
+-- Output tokens per model per day
+SELECT toDate(ts) AS day, model, sum(output_tokens) FROM claude.api_calls
+GROUP BY day, model ORDER BY day DESC;
+```
+
+The tables hold each line as sent: `FINAL` (`FROM claude.events FINAL`)
+drops lines that arrived twice and haven't been merged yet.
+
+**Changing the schema:** `config/schema.sql` runs on every start, so a
+change is an appended `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` (or `MODIFY
+COLUMN`, then `ALTER TABLE claude.events MATERIALIZE COLUMN <name>` once, by
+hand, to recompute it for old rows from `raw`).
+
+**Credentials:** `scripts/claude-history-secrets.sh` writes a new ingest
+password to OpenBao (`--s3`: only a new S3 key, after `tofu apply` in
+`infra/storage`). Then `kubectl -n claude-history rollout restart
+sts/clickhouse` (it reads the hash at start), and step 2 of the dotfiles'
+`claude-history/README.md` on each laptop.
 
 ## Run platform
 
@@ -505,6 +586,8 @@ applies its manifests itself.
 ## Procedures
 
 - [Restore a Postgres cluster from backup](docs/runbooks/postgres-restore.md).
+- [Restore claude-history](docs/runbooks/claude-history-restore.md): from
+  the laptops, or from its bucket.
 - [Move an app's database.yaml database to the registry's `db`](docs/runbooks/move-database-to-registry.md).
 - [Agent sessions in a sandbox](docs/runbooks/sandbox-sessions.md): what's
   behind `mcloud sandbox`, checking what a session can reach, a user's
@@ -781,10 +864,10 @@ applies its manifests itself.
 
 ## Costs and capacity
 
-About €51/month: 2× ~€18 nodes (STARTER-2xCPU-8GB), 2× €5 object storage
-(`homelab`, and `maxcloud-apps` for apps' buckets and backups), and ~€5
-for 21 GiB of MaxIOPS block storage (Prometheus 10, Loki 5, Postgres 2×2,
-Alertmanager 1, Authelia 1). The control plane (`dev-md`), NAT gateway and load
+About €53/month: 2× ~€18 nodes (STARTER-2xCPU-8GB), 2× €5 object storage
+(`homelab`, and `maxcloud-apps` for apps' buckets and backups), and ~€7
+for 31 GiB of MaxIOPS block storage (Prometheus 10, claude-history 10,
+Loki 5, Postgres 2×2, Alertmanager 1, Authelia 1). The control plane (`dev-md`), NAT gateway and load
 balancer (essentials) are free. The sandbox node (STARTER-2xCPU-4GB, ~€12 a
 month if left on; an estimate) is off unless turned on for agent sessions,
 and billed by the hour while it runs
@@ -805,6 +888,7 @@ allocatable. Measured 2026-11-04 with both nodes' pods counted on one node:
 | Platform before the run platform | 1.32 cores | 3.9 GiB |
 | Knative Serving and its operator, trimmed | ~0.17 cores | ~0.55 GiB |
 | KEDA, trimmed | 0.03 cores | ~0.14 GiB |
+| claude-history's ClickHouse (2026-11-22; ~200 MiB in use idle, 1.5 GiB limit) | 0.05 cores | 0.375 GiB |
 
 Knative and its operator use about 220 MiB of memory in practice, and KEDA
 about 100 MiB. That leaves

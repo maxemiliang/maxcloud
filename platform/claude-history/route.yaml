@@ -1,0 +1,45 @@
+# The only way in from outside the cluster: Vector's inserts, at
+# https://claude-history.gronblom.dev.
+#
+# DNS-only, not through Cloudflare's proxy: TLS ends at Traefik, so no one
+# in between sees the transcripts in clear text.
+#
+# Only the request Vector sends is routed: POST / with its parameterized
+# INSERT into claude.events (Vector 0.57: query=INSERT INTO
+# {database:Identifier}.{table:Identifier} FORMAT JSONEachRow, and the
+# names in param_database and param_table). Anything else (a SELECT, the
+# /play UI, other paths) gets Traefik's 404 and never reaches ClickHouse.
+# That's on top of the real limit, the ingest user's grants (users.xml):
+# a request that gets past this route still can't read anything.
+# If a Vector upgrade changes the query, inserts fail with 404: update the
+# match.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: clickhouse-ingest
+spec:
+  parentRefs:
+    - name: public
+      namespace: traefik
+      sectionName: https-public
+  hostnames:
+    - claude-history.gronblom.dev
+  rules:
+    - matches:
+        - method: POST
+          path:
+            type: Exact
+            value: /
+          queryParams:
+            - type: Exact
+              name: query
+              value: "INSERT INTO {database:Identifier}.{table:Identifier} FORMAT JSONEachRow"
+            - type: Exact
+              name: param_database
+              value: claude
+            - type: Exact
+              name: param_table
+              value: events
+      backendRefs:
+        - name: clickhouse
+          port: 8123

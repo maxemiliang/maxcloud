@@ -3,6 +3,7 @@
 #   flux-system -> infra-controllers -> infra-configs -> apps
 #                                    -> maxcloud-controller
 #               -> sandbox-controllers -> sandbox-sessions
+#               -> claude-history (after infra-configs)
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
@@ -13,3 +14,4 @@ resources:
   - secrets.yaml
   - secrets-store.yaml
   - sandbox.yaml
+  - claude-history.yaml
