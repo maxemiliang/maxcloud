@@ -208,8 +208,12 @@ spec:
     # aren't part of `admin`, so the app can't change these or make its own
     # (infrastructure/controllers/external-secrets/release.yaml).
     # deletionPolicy Merge: when the last secret is unset, the Secret is
-    # emptied too (Retain would keep the old values). The controller writes
-    # an empty path for a new app, so a missing one is only a brief error.
+    # emptied too (Retain would keep the old values). Merge also empties it
+    # while the path is missing in OpenBao, so the path must exist before
+    # this first syncs over a Secret that has values: on 2026-11-26 ESO beat
+    # the controller's import by 15s and emptied three apps' secrets
+    # (docs/kb/build-deploy/eso-takeover-of-existing-secrets.md). For a new
+    # app there's nothing to empty; the controller writes an empty path.
     - apiVersion: v1
       kind: ServiceAccount
       metadata:
